@@ -1,0 +1,154 @@
+"""Central logging configuration for the RAG application."""
+
+from __future__ import annotations
+
+import logging
+import sys
+from contextvars import ContextVar
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+DEFAULT_LOG_DIR = Path(__file__).resolve().parent / "run_logs"
+_CONFIGURED_ATTR = "_rag_logging_configured"
+
+_request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
+
+
+def set_request_id(request_id: str) -> None:
+    _request_id_var.set(request_id)
+
+
+def get_request_id() -> str:
+    return _request_id_var.get()
+
+
+class _RequestIdFilter(logging.Filter):
+    """Inject the current request_id into every log record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = _request_id_var.get()
+        return True
+
+
+class _DynamicStdoutHandler(logging.StreamHandler):
+    """Follow sys.stdout so batch-run tee streams still capture console logs."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.stream = sys.stdout
+        super().emit(record)
+
+
+class _TracingHandler(logging.Handler):
+    """Mirror log records onto the active LangSmith run and Phoenix/OTel span, if any.
+
+    No-ops when neither tracer has an active run/span, so this stays cheap and
+    harmless when tracing isn't running (e.g. LangSmith disabled, no batch job).
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record)
+        except Exception:
+            return
+
+        event = {
+            "name": record.levelname.lower(),
+            "time": datetime.now(timezone.utc).isoformat(),
+            "message": message,
+        }
+
+        run_tree = None
+        try:
+            from langsmith.run_helpers import get_current_run_tree
+
+            run_tree = get_current_run_tree()
+            if run_tree is not None:
+                run_tree.add_event(event)
+        except Exception:
+            pass
+
+        # Phoenix's LangChain integration (OpenInferenceTracer) tracks spans keyed by
+        # LangChain run_id in its own registry rather than via OTel's ambient current-span
+        # context, so get_current_span() never sees them. Look the span up by run_id instead,
+        # reusing the run_id LangSmith's run_tree already gave us above.
+        try:
+            if run_tree is not None:
+                from openinference.instrumentation.langchain import LangChainInstrumentor
+
+                tracer = LangChainInstrumentor()._tracer
+                span = tracer.get_span(run_tree.id) if tracer is not None else None
+                if span is not None and span.is_recording():
+                    span.add_event(
+                        message,
+                        attributes={
+                            "log.level": record.levelname,
+                            "log.logger": record.name,
+                            "log.request_id": getattr(record, "request_id", "-"),
+                        },
+                    )
+        except Exception:
+            pass
+
+
+def setup_logging(
+    log_dir: str | Path = DEFAULT_LOG_DIR,
+    app_name: str | None = None,
+    console_level: int = logging.INFO,
+) -> None:
+    """Configure application logging once for the current process."""
+    root_logger = logging.getLogger()
+    if getattr(root_logger, _CONFIGURED_ATTR, False):
+        return
+
+    resolved_log_dir = Path(log_dir)
+    resolved_log_dir.mkdir(parents=True, exist_ok=True)
+    resolved_app_name = app_name or Path(sys.argv[0]).stem or "app"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    request_id_filter = _RequestIdFilter()
+
+    console_formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | [%(request_id)s] | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    file_formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(name)s | [%(request_id)s] | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    console_handler = _DynamicStdoutHandler()
+    console_handler.setLevel(console_level)
+    console_handler.setFormatter(console_formatter)
+    console_handler.addFilter(request_id_filter)
+
+    debug_file = resolved_log_dir / f"{resolved_app_name}_{timestamp}.debug.log"
+    debug_handler = logging.FileHandler(debug_file, encoding="utf-8")
+
+    # Create the companion JSON timing file alongside the log file.
+    try:
+        import timing_tracker as _tt
+        _tt.initialize(resolved_log_dir / f"{resolved_app_name}_{timestamp}.debug.json")
+    except Exception:
+        pass
+    debug_handler.setLevel(logging.DEBUG)
+    debug_handler.setFormatter(file_formatter)
+    debug_handler.addFilter(request_id_filter)
+
+    tracing_handler = _TracingHandler()
+    tracing_handler.setLevel(logging.DEBUG)
+    tracing_handler.setFormatter(logging.Formatter("%(name)s | %(message)s"))
+    tracing_handler.addFilter(request_id_filter)
+
+    root_logger.setLevel(logging.DEBUG)
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(debug_handler)
+    root_logger.addHandler(tracing_handler)
+
+    # Diagnostic loggers propagate to root so their output reaches both console and debug file
+    for logger_name in ("llm_data_check", "llm_json_tries", "llm_io"):
+        diagnostic_logger = logging.getLogger(logger_name)
+        diagnostic_logger.setLevel(logging.DEBUG)
+        diagnostic_logger.propagate = True
+
+    setattr(root_logger, _CONFIGURED_ATTR, True)

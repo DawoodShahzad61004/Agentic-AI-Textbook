@@ -1,0 +1,2736 @@
+ChatGPT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+pipeline_flow.txt
+Document
+How to use it in my pipeline (attached)?
+
+Your pipeline is already VERY close to the kind of architecture where Guidance becomes extremely valuable. 
+
+
+Right now, your system depends heavily on:
+
+prompting,
+
+judge_llm validation,
+
+retries,
+
+JSON parsing,
+
+and “trusting” the LLM to follow instructions.
+
+Guidance can replace a large portion of that with:
+
+deterministic generation,
+
+guaranteed schemas,
+
+constrained tool calls,
+
+reliable compression outputs,
+
+and fewer retry loops.
+
+The biggest gains for your pipeline would be in:
+
+Retrieval tool calling
+
+Compression JSON outputs
+
+Merge validation
+
+Self-learning QA generation
+
+Judge outputs
+
+State-machine reliability
+
+Where Guidance Fits Best in YOUR Pipeline
+Your pipeline stages are:
+
+RETRIEVE
+→ COMPRESS
+→ DRAFT
+→ JUDGE
+
+
+Guidance is MOST useful in:
+
+RETRIEVE
+
+COMPRESS
+
+JUDGE
+
+SELF-LEARNING
+
+Less useful in:
+
+free-form DRAFT generation
+
+Biggest Problem in Your Current System
+Your current pipeline repeatedly does:
+
+LLM → JSON
+JSONDecodeError
+Retry
+Judge
+Retry
+Fallback
+You already mentioned errors like:
+
+JSONDecodeError
+
+malformed merges
+
+invalid outputs
+
+retry loops
+
+Guidance solves this by enforcing structure DURING generation.
+
+EXACT PLACES TO INTEGRATE GUIDANCE
+1. Tool Calling in RETRIEVE Phase
+Current:
+
+LLM decides:
+retrieve_documents(query, top_k)
+
+
+Problem:
+
+malformed arguments
+
+repeated queries
+
+invalid tool formats
+
+Replace With Structured Tool Schema
+Instead of:
+
+response = llm.invoke(messages)
+You can do:
+
+from guidance import gen
+Then force:
+
+tool_call = lm + gen(
+    name="tool_json",
+    regex=r'\{
+      "tool": "(retrieve_documents|compress_context)",
+      "query": ".*?",
+      "top_k": [0-9]+
+    \}'
+)
+Now the model CANNOT:
+
+invent tool names
+
+omit fields
+
+break JSON
+
+Better Architecture
+Your RETRIEVE phase becomes:
+
+User Query
+   ↓
+Guidance-constrained planner
+   ↓
+Guaranteed valid tool JSON
+   ↓
+Tool executor
+instead of:
+
+Prompt → hope → retry
+2. Merge Output in NAC + Dedup
+Your merge pipeline:
+
+merge_llm produces consolidated chunk (JSON)
+validate_merge()
+retry up to 3x
+
+
+This is a PERFECT Guidance use case.
+
+Current Problem
+Your merge_llm can:
+
+fabricate JSON
+
+omit fields
+
+hallucinate keys
+
+output explanations outside JSON
+
+Replace With Constrained Merge Output
+Example:
+
+merge_schema = r'''
+\{
+  "merged_content": ".*?",
+  "sources": \[.*?\],
+  "retained_claims": \[.*?\]
+\}
+'''
+Then:
+
+lm += gen(regex=merge_schema)
+Now:
+
+JSON ALWAYS parses
+
+schema ALWAYS valid
+
+This alone can remove MANY retries.
+
+3. Deduplication Compression (DC)
+Your DC stage currently uses:
+
+_DC_SCAN_PROMPT
+
+
+The LLM identifies redundant groups.
+
+PERFECT Guidance Upgrade
+Force exact structure:
+
+{
+  "redundant_groups": [
+    {
+      "keeper": 0,
+      "remove_from": [1,2],
+      "shared_fact": "..."
+    }
+  ]
+}
+Now your downstream code becomes MUCH simpler.
+
+4. LBC Compression
+Your current LBC returns:
+
+{
+  "compressed": "...",
+  "dropped_count": 5,
+  "reason": "..."
+}
+
+
+This is another perfect Guidance target.
+
+Major Improvement
+You can additionally constrain:
+
+gen(max_tokens=300)
+AND:
+
+regex=...
+This gives:
+
+guaranteed shorter chunks,
+
+predictable output sizes,
+
+better token budgeting.
+
+VERY useful for your:
+
+CTXSIZE optimization,
+
+semantic compression work.
+
+5. Judge Phase
+Current:
+
+Verdict:
+OK
+INSUFFICIENT — reason
+
+
+Problem:
+
+parsing text
+
+inconsistent formatting
+
+Replace With Enum Constraint
+Example:
+
+lm += gen(
+    name="verdict",
+    regex="OK|INSUFFICIENT"
+)
+Now your judge becomes deterministic.
+
+HUGE Improvement for Agentic Loops
+Your retry state machine becomes MUCH cleaner:
+
+if verdict == "OK":
+    finish()
+
+elif verdict == "INSUFFICIENT":
+    retry()
+No fuzzy parsing.
+
+6. Self-Learning Distillation
+Current:
+
+produce 1–3 semantically distinct rephrasings
+JSON array of QA pairs
+
+
+This is another ideal Guidance use case.
+
+Structured QA Output
+Force:
+
+[
+  {
+    "question": "...",
+    "answer": "..."
+  }
+]
+This prevents:
+
+malformed JSON
+
+hallucinated structures
+
+broken learning inserts
+
+7. Retrieval Query Planning
+This is where Guidance becomes REALLY powerful for your architecture.
+
+Your current system:
+
+lets the LLM invent queries freely
+
+blocks duplicates afterward
+
+Better Approach
+Use constrained planning:
+
+{
+  "retrieval_strategy": [
+    {
+      "angle": "definition",
+      "query": "..."
+    },
+    {
+      "angle": "implementation",
+      "query": "..."
+    }
+  ]
+}
+This creates:
+
+semantically diverse retrievals,
+
+fewer wasted calls,
+
+fewer retries.
+
+VERY important for:
+
+MAX_TOTAL_RETRIEVALS = 5
+
+
+BEST PRACTICAL INTEGRATION STRATEGY
+DO NOT rewrite your entire pipeline.
+
+Instead:
+
+Phase 1 — Add Guidance ONLY to JSON outputs
+Start with:
+
+merge_llm outputs,
+
+judge outputs,
+
+compression outputs.
+
+This gives maximum benefit quickly.
+
+Phase 2 — Add Tool Call Constraints
+Constrain:
+
+retrieve_documents
+
+compress_context
+
+This stabilizes agent orchestration.
+
+Phase 3 — Add Grammar-Based Planning
+Use Guidance for:
+
+retrieval strategies,
+
+multi-agent coordination,
+
+planner outputs.
+
+DO NOT Use Guidance For
+Your DRAFT phase:
+
+Answer ONLY from provided context
+
+
+This is free-form prose.
+
+Guidance adds less value there.
+
+Architecture You Should Aim For
+Your future architecture should become:
+
+USER QUERY
+    ↓
+Guidance-Constrained Planner
+    ↓
+Structured Retrieval Plan
+    ↓
+Retriever
+    ↓
+Guidance-Constrained Compression
+    ↓
+Structured Validation
+    ↓
+Draft Generator
+    ↓
+Guidance-Constrained Judge
+    ↓
+Self-Learning Distillation
+Another VERY Important Benefit
+You are building:
+
+Self-Learning Agentic RAG
+
+This means:
+
+autonomous loops,
+
+retries,
+
+memory,
+
+orchestration.
+
+As agents become autonomous:
+
+malformed outputs become catastrophic.
+
+Guidance reduces this dramatically.
+
+IMPORTANT COMPATIBILITY NOTE
+Since you use:
+
+Groq,
+
+Llama 3.1,
+
+local models,
+
+possible vLLM,
+
+possible Ollama,
+
+you should know:
+
+TRUE constrained decoding works BEST with:
+
+local models,
+
+vLLM,
+
+llama.cpp,
+
+transformers.
+
+Some hosted APIs only simulate structured outputs. 
+
+BEST STACK FOR YOU LATER
+For your future architecture:
+
+vLLM
++ Guidance
++ Llama 3.1
++ ChromaDB
++ your custom orchestration
+would be EXTREMELY strong.
+
+Most Valuable Immediate Upgrade for YOU
+If I had to prioritize only ONE thing:
+
+Use Guidance for:
+merge_llm
+compression JSON
+judge outputs
+because those are already:
+
+highly structured,
+
+retry-heavy,
+
+validation-heavy.
+
+You will immediately reduce:
+
+retries,
+
+parsing failures,
+
+hallucinated schemas,
+
+merge instability.
+
+Final Mental Model
+Your current system is:
+
+LLM → validate → retry
+Guidance changes it into:
+
+LLM → impossible to generate invalid structure
+That is the core architectural shift. 
+
+
+If i had to describe about this and explain its usecase, give me pointers for that
+
+Use these pointers:
+
+What Guidance Is
+Guidance is a framework for controlling how an LLM generates output. Instead of only telling the model “please follow this format,” Guidance can restrict the model so it produces output in a specific structure, such as JSON, regex, choices, or grammar-based formats.
+
+Main Purpose
+Its main purpose is to make LLM outputs more reliable, predictable, and production-safe. It is useful when the output must be parsed by code, passed to tools, stored in a database, or used inside an automated agent pipeline.
+
+Problem It Solves
+Normal LLMs often produce broken JSON, extra text, wrong fields, repeated tool calls, or inconsistent verdicts. In an agentic RAG pipeline, these mistakes can break retrieval, compression, judging, or self-learning. Guidance reduces this by enforcing structure during generation.
+
+Use Case in My Pipeline
+In my self-learning Agentic RAG pipeline, Guidance can be used in the structured parts of the system, especially where the LLM must return machine-readable output.
+
+It can help with:
+
+1. Retrieval planning
+   Force the LLM to generate valid retrieval queries and tool calls.
+
+2. Compression
+   Force chunk compression output into a fixed JSON format.
+
+3. Chunk merging
+   Ensure merge_llm returns valid merged_content, source info, and retained claims.
+
+4. Deduplication
+   Return duplicate groups in a predictable structure.
+
+5. Answer judging
+   Force verdicts like OK or INSUFFICIENT instead of messy natural language.
+
+6. Self-learning
+   Generate valid question-answer pairs for learned_qa storage.
+Simple Example Explanation
+Instead of this:
+
+LLM: "I think the answer is okay, maybe it needs more context..."
+Guidance can force this:
+
+{
+  "verdict": "INSUFFICIENT",
+  "reason": "The retrieved context does not explain the implementation."
+}
+This makes the pipeline easier to control through code.
+
+Why It Matters for Agentic RAG
+Agentic RAG depends on multiple steps: retrieve, compress, draft, judge, retry, and learn. If any LLM output is malformed, the whole loop can fail. Guidance makes those intermediate outputs structured and dependable.
+
+Best One-Line Description
+Guidance is useful in my pipeline because it turns the LLM from a free-text generator into a controlled component that can reliably produce valid tool calls, JSON outputs, compression results, judge verdicts, and self-learning data.
+
+
+
+agent_query.py
+Python
+
+llm_caller.py
+Python
+how to set it up in my project? Give modification for just one case for now
+
+Start with ONLY ONE integration point:
+
+Judge Phase Verdict Structuring
+This is the easiest, safest, and highest-impact first modification for your pipeline.
+
+Right now your judge phase returns free text like:
+
+OK
+or
+
+INSUFFICIENT — missing implementation details
+
+
+You then parse it manually:
+
+final_quality = "OK" if verdict.strip().upper().startswith("OK") else "INSUFFICIENT"
+
+
+This is EXACTLY the kind of fragile logic Guidance solves.
+
+Goal
+Replace this:
+
+LLM free text
+with:
+
+{
+  "verdict": "OK",
+  "reason": "..."
+}
+GUARANTEED.
+
+STEP 1 — Install Guidance
+Inside your venv:
+
+uv add guidance
+or:
+
+pip install guidance
+STEP 2 — Create a New File
+Create:
+
+guidance_judge.py
+STEP 3 — Add This Code
+import guidance
+from guidance import gen
+
+
+def structured_judge(lm, query: str, context: str, answer: str):
+    prompt = f"""
+You are evaluating an RAG answer.
+
+USER QUERY:
+{query}
+
+CONTEXT:
+{context}
+
+ANSWER:
+{answer}
+
+Determine whether the answer is:
+- OK
+- INSUFFICIENT
+
+Rules:
+- OK = fully answers the query using grounded context
+- INSUFFICIENT = missing information, weak grounding, or incomplete
+
+Return ONLY valid JSON.
+"""
+
+    result = lm + prompt
+
+    result += gen(
+        name="judge_output",
+        regex=r'''
+\{
+\s*"verdict"\s*:\s*"(OK|INSUFFICIENT)"\s*,
+\s*"reason"\s*:\s*".*?"
+\s*\}
+'''
+    )
+
+    return result["judge_output"]
+What This Does
+This line:
+
+gen(regex=...)
+forces the model to ONLY generate:
+
+{
+  "verdict": "...",
+  "reason": "..."
+}
+The model CANNOT:
+
+add explanations outside JSON
+
+invent fields
+
+return malformed structure
+
+return random prose
+
+STEP 4 — Modify Your Judge Phase
+In:
+
+agent_query.py
+
+
+find:
+
+verdict = check_answer_quality(
+Replace the whole section with:
+
+from guidance_judge import structured_judge
+import json
+Then:
+
+judge_raw = structured_judge(
+    judge_llm,
+    query=query,
+    context=full_context,
+    answer=draft_answer,
+)
+
+judge_data = json.loads(judge_raw)
+
+final_quality = judge_data["verdict"]
+reason = judge_data["reason"]
+Replace This Old Logic
+OLD:
+
+final_quality = "OK" if verdict.strip().upper().startswith("OK") else "INSUFFICIENT"
+REMOVE IT.
+
+Replace Retry Message Logic
+OLD:
+
+reason = verdict.removeprefix(...)
+Replace with:
+
+reason = judge_data["reason"]
+Result
+Now your JUDGE phase becomes deterministic.
+
+Instead of:
+
+"Probably insufficient because..."
+you ALWAYS get:
+
+{
+  "verdict": "INSUFFICIENT",
+  "reason": "Missing implementation details"
+}
+Why This Is the PERFECT First Integration
+Because your judge phase is:
+
+already structured,
+
+already parsed,
+
+already retry-based,
+
+already critical to orchestration.
+
+So Guidance gives immediate benefits:
+
+fewer parsing hacks,
+
+cleaner orchestration,
+
+reliable retries,
+
+stable agent loops.
+
+IMPORTANT NOTE
+Your current ChatOpenAI object may NOT fully support true constrained decoding through Guidance depending on backend.
+
+You are using:
+
+ChatOpenAI(
+    base_url=api_base,
+    model=model,
+)
+
+
+If your backend is:
+
+TGI,
+
+vLLM,
+
+llama.cpp,
+
+transformers,
+
+Guidance works MUCH better.
+
+If using:
+
+Groq hosted API,
+
+OpenAI hosted API,
+
+Guidance may behave more like “strong prompting” than true token masking.
+
+Still useful though.
+
+BEST LONG-TERM TARGET FOR YOU
+Eventually:
+
+vLLM + Guidance + Llama 3.1
+would fit your pipeline EXTREMELY well.
+
+Especially for:
+
+structured retrieval planning,
+
+compression JSON,
+
+deduplication outputs,
+
+tool calling,
+
+judge orchestration.
+
+What To Do AFTER This Works
+Next integrations should be:
+
+1. merge_llm JSON outputs
+2. LBC compression JSON
+3. Deduplication groups
+4. Tool calling planner
+5. Retrieval strategy planner
+in that order.
+
+
+
+uv add guidance
+
+does this add it into the requirements.txt as well?
+
+Yes — if you use:
+
+uv add guidance
+then it automatically updates your project dependency management files. 
+
+In a modern uv project, the main dependency file is usually:
+
+pyproject.toml
+and optionally:
+
+uv.lock
+NOT necessarily requirements.txt.
+
+In Your Project Specifically
+Since you are already using:
+
+uv venv
+uv add ...
+your project is already using the modern uv workflow.
+
+So:
+
+uv add guidance
+will:
+
+1. Install the package
+2. Add it to:
+pyproject.toml
+Example:
+
+dependencies = [
+    "guidance"
+]
+3. Update:
+uv.lock
+for reproducible environments.
+
+VERY Important
+It usually DOES NOT automatically update:
+
+requirements.txt
+because uv treats:
+
+pyproject.toml
+as the source of truth. 
+
+If You STILL Want requirements.txt
+You can generate one manually:
+
+uv pip freeze > requirements.txt
+or:
+
+uv export --format requirements-txt > requirements.txt
+Recommended for YOUR Pipeline
+Since your project is becoming:
+
+complex,
+
+multi-module,
+
+agentic,
+
+production-oriented,
+
+I strongly recommend:
+
+Use pyproject.toml + uv.lock
+instead of relying on requirements.txt.
+
+That is the newer and cleaner ecosystem direction for AI projects. 
+
+
+
+Pasted text.txt
+Document
+check
+
+Your Guidance integration is being detected correctly:
+
+[Guidance] ✓ constrained decoding active
+
+
+So installation/setup is working.
+
+BUT your actual Guidance call has a problem.
+
+The Real Error
+This is the important part:
+
+OpenAI models require an active role
+(e.g. use `with assistant(): ...`)
+
+
+This means:
+
+Guidance syntax is incorrect
+for OpenAI-compatible models.
+
+Why It Happened
+You probably did something like:
+
+lm + prompt
+or:
+
+gen(...)
+WITHOUT a role block.
+
+Guidance requires:
+
+with assistant():
+or:
+
+with user():
+contexts.
+
+FIX
+Your guidance_judge.py should instead look like this:
+
+Correct Version
+import guidance
+from guidance import gen, user, assistant
+import json
+
+
+def structured_judge(lm, query: str, context: str, answer: str):
+
+    with user():
+        lm += f"""
+You are evaluating an RAG answer.
+
+USER QUERY:
+{query}
+
+CONTEXT:
+{context}
+
+ANSWER:
+{answer}
+
+Determine whether the answer is:
+- OK
+- INSUFFICIENT
+
+Rules:
+- OK = fully answers the query using grounded context
+- INSUFFICIENT = missing information, weak grounding, or incomplete
+
+Return ONLY valid JSON.
+"""
+
+    with assistant():
+        lm += gen(
+            name="judge_output",
+            regex=r'''
+\{
+\s*"verdict"\s*:\s*"(OK|INSUFFICIENT)"\s*,
+\s*"reason"\s*:\s*".*?"
+\s*\}
+'''
+        )
+
+    return json.loads(lm["judge_output"])
+Then Modify agent_query.py
+Replace:
+
+judge_raw = structured_judge(...)
+judge_data = json.loads(judge_raw)
+with:
+
+judge_data = structured_judge(
+    judge_llm,
+    query=query,
+    context=full_context,
+    answer=draft_answer,
+)
+because now the function already returns parsed JSON.
+
+Another Important Issue
+You are currently using:
+
+ChatOpenAI
+
+
+Guidance works BEST with:
+
+transformers
+
+llama.cpp
+
+vLLM
+
+For OpenAI-compatible APIs:
+
+some features work,
+
+true constrained decoding may NOT fully work.
+
+Groq especially may not support full token masking.
+
+So for now:
+
+Guidance is acting more like a structured prompting wrapper.
+
+Still useful though.
+
+GOOD NEWS
+The important thing is:
+
+Your architecture integration logic is correct.
+The failure is ONLY:
+
+incorrect Guidance syntax
+not pipeline incompatibility.
+
+One More Improvement
+Your current regex:
+
+".*?"
+can sometimes fail on multiline text.
+
+Safer version:
+
+[\s\S]*?
+So use:
+
+regex=r'''
+\{
+\s*"verdict"\s*:\s*"(OK|INSUFFICIENT)"\s*,
+\s*"reason"\s*:\s*"[\s\S]*?"
+\s*\}
+'''
+Final Verdict
+Your setup status:
+
+✓ Guidance installed correctly
+✓ Guidance imported correctly
+✓ Pipeline integration point chosen correctly
+✓ Judge-phase architecture correct
+✗ Missing active role blocks
+✗ Regex can be improved
+
+
+ChatGPT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Explain all this:
+
+
+
+Guidance is installed and your startup check says constrained decoding is active:
+
+[Guidance] ✓ constrained decoding active (guidance==0.3.1)
+
+But several actual Guidance calls are failing during runtime with:
+
+OpenAI models require an active role (e.g. use with assistant(): ...)
+
+So the main agent still runs, retrieves docs, drafts an answer, and finishes, but your Guidance-powered JSON/validation/compression/judge steps are mostly failing and falling back. In plain terms: Guidance is detected, but your Guidance integration is broken for the OpenAI-compatible/Groq calls that generate structured outputs.
+
+
+
+
+
+5:37 PM
+suggest possible fixes for this
+5:40 PM
+
+The error points to a Guidance API usage issue, not a Groq/retrieval issue:
+
+OpenAI models require an active role (e.g. use with assistant(): ...)
+
+Possible fixes:
+
+Wrap Guidance generations in an assistant role
+Wherever you do structured Guidance calls like merge, validation, compression, or judge, change patterns like:
+
+lm += guidance.gen("answer")
+to something like:
+
+from guidance import assistant
+
+with assistant():
+    lm += guidance.gen("answer")
+Or, if you are building a prompt:
+
+with system():
+    lm += "You return valid JSON only."
+
+with user():
+    lm += prompt
+
+with assistant():
+    lm += gen("json")
+Audit every Guidance helper
+The failing stages are:
+
+NAC-MERGE
+VALIDATE-MERGE
+DC-SCAN
+LBC
+CAQ-JUDGE
+So the bug is probably in a shared helper that calls Guidance for JSON output. Fix that helper once if all these stages use it.
+
+Make JSON parsing tolerant
+One validator produced invalid JSON because of a trailing comma:
+
+{"index": 0, "relevant": false, "reason": "..."},
+Use one or more of:
+
+json_repair
+pydantic validation + retry
+Guidance constrained JSON/schema generation
+strip trailing commas before json.loads
+But the role error should be fixed first.
+
+Separate chat-model Guidance from plain completion assumptions
+OpenAI-compatible chat models need role blocks. If your code was written for older Guidance completion-style models, update all prompts to use:
+
+with system():
+with user():
+with assistant():
+Do not default failed quality checks to OK
+This line is risky:
+
+[CAQ-JUDGE] Guidance call failed ..., defaulting to OK
+Better fallback:
+
+defaulting to UNKNOWN
+or
+
+defaulting to NEEDS_RETRY
+Otherwise broken validation silently approves bad answers.
+
+Add a startup self-test that actually runs Guidance
+Your startup currently confirms Guidance is importable/active, but not that your call pattern works. Add a tiny test:
+
+with system():
+    lm += "Return JSON only."
+
+with user():
+    lm += "Return {'ok': true}"
+
+with assistant():
+    lm += gen("result")
+If that fails, print “Guidance installed but runtime integration failed.”
+
+Main fix: update your Guidance calls to use explicit chat roles, especially with assistant(): around gen(...).
+
+I’ll break this into: what the log means, why Guidance is failing only at runtime, what parts of your pipeline are affected, and the concrete code-level fixes.
+
+Thought for 13s
+This means Guidance is installed correctly, but your code is using it incorrectly for chat-style models like Groq/OpenAI-compatible APIs.
+
+Guidance docs show chat models should be written with explicit role blocks like system(), user(), and assistant(); generations using gen() should happen inside the assistant role. 
+
+What is happening
+Your startup check says:
+
+[Guidance] ✓ constrained decoding active
+That only proves:
+
+import guidance
+works, and maybe that basic constrained decoding is available.
+
+But later, during runtime, your pipeline calls Guidance like this:
+
+lm += gen("json")
+or:
+
+lm += guidance.gen("answer")
+For OpenAI/Groq chat models, Guidance does not know whether this generated text belongs to the system, user, or assistant message. So it throws:
+
+OpenAI models require an active role
+In simple words:
+
+Guidance is present, but your Guidance prompt format is wrong for chat models.
+Why the main agent still works
+Your normal agent probably uses LangChain/Groq directly:
+
+llm.invoke(messages)
+So retrieval, answer drafting, and final response still run.
+
+But your extra Guidance stages fail:
+
+NAC-MERGE
+VALIDATE-MERGE
+DC-SCAN
+LBC
+CAQ-JUDGE
+These are likely helper stages for:
+
+chunk merging
+JSON validation
+deduplication scan
+LLM-based compression
+answer quality judging
+When they fail, your code falls back to normal behavior.
+
+So your system becomes:
+
+RAG agent working
+Guidance safety/structure/compression layer mostly broken
+fallbacks active
+Main fix
+Wherever you call gen(), wrap it inside assistant().
+
+Use this pattern:
+
+from guidance import system, user, assistant, gen
+
+lm = guidance_model
+
+with system():
+    lm += "You return valid JSON only."
+
+with user():
+    lm += prompt
+
+with assistant():
+    lm += gen("json")
+Not this:
+
+lm += prompt
+lm += gen("json")
+Best shared helper fix
+Make one reusable Guidance JSON helper and route all stages through it:
+
+from guidance import system, user, assistant, gen
+
+def guidance_json_call(lm, system_prompt: str, user_prompt: str, name: str = "json"):
+    try:
+        with system():
+            lm += system_prompt
+
+        with user():
+            lm += user_prompt
+
+        with assistant():
+            lm += gen(name)
+
+        return lm[name]
+
+    except Exception as e:
+        print(f"[Guidance] call failed: {e}")
+        return None
+Then use it for:
+
+NAC-MERGE
+VALIDATE-MERGE
+DC-SCAN
+LBC
+CAQ-JUDGE
+Fix the dangerous fallback
+This is risky:
+
+[CAQ-JUDGE] Guidance call failed ..., defaulting to OK
+Change it to:
+
+return {
+    "status": "UNKNOWN",
+    "reason": "Guidance judge failed",
+    "needs_retry": True
+}
+Do not silently approve answers when the judge fails.
+
+Add a real startup test
+Your startup test should not only check installation. It should run an actual chat-role Guidance call:
+
+def test_guidance_runtime(lm):
+    from guidance import system, user, assistant, gen
+
+    try:
+        with system():
+            lm += "Return valid JSON only."
+
+        with user():
+            lm += "Return JSON with ok=true."
+
+        with assistant():
+            lm += gen("result")
+
+        print("[Guidance] ✓ runtime chat-role generation works")
+        return True
+
+    except Exception as e:
+        print(f"[Guidance] ✗ installed but runtime integration failed: {e}")
+        return False
+Final diagnosis
+Your issue is not retrieval, not Chroma, not Groq API, and probably not Guidance installation.
+
+It is this:
+
+Your Guidance code is written like a completion model,
+but your backend is a chat model.
+Fix:
+
+system() → user() → assistant() → gen()
+especially around every structured JSON Guidance call.
+
+
+ChatGPT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Explain the following in detail:
+
+This is the key finding from the Outlines source code itself:
+
+outlines.from_openai always sends response_format: json_schema when you pass a Pydantic model. It is hardcoded in outlines/models/openai.py. There is no way to use local logit masking (the "real" Outlines magic) with a remote API endpoint — that only works with local models loaded via Transformers/vLLM/etc.
+
+This means the entire premise needs to change. When using a remote API (Groq, OpenAI, etc.), Outlines is response_format:json_schema — that's all it can do. The true Outlines constrained decoding is local-model-only.
+
+I’ll explain the idea conceptually and also verify the current Outlines behavior from source/docs so the explanation is not based only on memory.
+
+Thought for 9s
+Yes — that finding means Outlines behaves differently depending on where the model is running.
+
+1. What people usually think Outlines does
+The “real” Outlines idea is:
+
+While the model is generating tokens, Outlines restricts the next possible tokens so the model can only produce output matching a schema, regex, enum, JSON structure, etc.
+
+That is constrained decoding / logit masking.
+
+Example: if JSON must start with {, Outlines can block every token except {. If the field must be "status": "pass" | "fail", it can block tokens outside those choices.
+
+This requires direct access to the model’s token probabilities/logits.
+
+2. Why this does not work with Groq/OpenAI remote APIs
+With Groq/OpenAI, your code does not control token generation step-by-step.
+
+You send:
+
+client.chat.completions.create(...)
+Then the remote server generates internally and sends back final text.
+
+Your app never sees:
+
+logits = model(...)
+allowed_tokens = ...
+masked_logits = ...
+So Outlines cannot apply local token masking. It cannot intercept each next-token decision.
+
+3. What outlines.from_openai actually does
+For OpenAI-compatible clients, Outlines converts your Pydantic model / JSON schema into OpenAI-style structured output parameters.
+
+In the current Outlines source, OpenAI JSON schema output is formatted as:
+
+{
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "default",
+      "strict": True,
+      "schema": schema,
+    },
+  }
+}
+Outlines also explicitly rejects regex and CFG output types for OpenAI and says to use an open-source model or dottxt instead. 
+
+So with:
+
+model = outlines.from_openai(client, "gpt-4o-mini")
+
+result = model(prompt, MyPydanticModel)
+Outlines is basically doing this:
+
+client.chat.completions.create(
+    model="...",
+    messages=[...],
+    response_format={
+        "type": "json_schema",
+        "json_schema": {
+            "name": "default",
+            "strict": True,
+            "schema": MyPydanticModel.model_json_schema()
+        }
+    }
+)
+OpenAI’s own docs describe this as Structured Outputs: the API receives a JSON Schema and tries to ensure the model response follows it. 
+
+4. So the key conclusion
+Your statement is correct:
+
+With remote APIs, Outlines is not giving you local constrained decoding. It is mostly a wrapper around the provider’s structured-output feature.
+
+So for your RAG pipeline:
+
+Outlines + OpenAI/Groq-compatible API
+= provider-native JSON schema mode
+≠ local Outlines logit masking
+5. Practical impact for your project
+This changes the architecture decision.
+
+Earlier assumption:
+
+Use Outlines with Groq/OpenAI to get true constrained decoding.
+Corrected assumption:
+
+Use Outlines with Groq/OpenAI only as a schema/response_format helper.
+Use local models if you want true Outlines constrained decoding.
+So for your current pipeline using Groq/OpenAI-style APIs, Outlines is useful for:
+
+JSON validation
+Pydantic schema conversion
+Cleaner structured-output calls
+Provider-native schema enforcement
+But it is not useful for:
+
+regex-constrained generation
+CFG-constrained generation
+local token masking
+guaranteed token-by-token grammar control
+6. Best way to think about it
+Use this mental model:
+
+Remote API:
+You ask the provider: “Please follow this schema.”
+
+Local model:
+You force the model: “You literally cannot generate tokens outside this schema.”
+That is the whole difference.
+
+For your Agentic RAG system, if you are staying with Groq/OpenAI, treat Outlines as a structured-output convenience layer, not as a full constrained-decoding engine.
+
+
+
+
+
+ChatGPT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def build_outlines_model(llm: ChatOpenAI):
+    if not _OUTLINES_AVAILABLE:
+        raise RuntimeError("outlines is not installed")
+
+    raw_client = getattr(llm, "root_client", None)
+    if raw_client is None:
+        raw_client = getattr(llm, "client", None)
+    if raw_client is None:
+        raise RuntimeError(
+            "Could not locate the underlying openai client on the ChatOpenAI "
+            "instance (neither .root_client nor .client is present). "
+            "Outlines cannot be used without it."
+        )
+    return outlines.from_openai(raw_client, MODEL)
+
+
+Correct me and expand on my knowledge. The "llm" here is a client/wrapper of type chatopenai. Then what is the above function doing? R we wrapping the wrapper with outlines?
+
+You’re asking the right thing: this function is not “turning ChatOpenAI into Outlines magic.” It is extracting the lower-level OpenAI-style client from LangChain’s wrapper, then creating an Outlines model wrapper around that client.
+
+Thought for 4s
+Yes — roughly, you are wrapping the wrapper’s underlying client with Outlines, but more precisely:
+
+def build_outlines_model(llm: ChatOpenAI):
+Here, llm is a LangChain ChatOpenAI wrapper.
+
+Inside it, LangChain usually stores an actual OpenAI-compatible client, something like:
+
+llm.root_client
+or sometimes:
+
+llm.client
+So this part:
+
+raw_client = getattr(llm, "root_client", None)
+if raw_client is None:
+    raw_client = getattr(llm, "client", None)
+means:
+
+“Take the real OpenAI client hidden inside the LangChain ChatOpenAI object.”
+
+Then this:
+
+return outlines.from_openai(raw_client, MODEL)
+means:
+
+“Create an Outlines model object using that raw OpenAI client and the model name.”
+
+So the flow is:
+
+ChatOpenAI wrapper
+        ↓ extract
+OpenAI-compatible raw client
+        ↓ pass into
+Outlines OpenAI wrapper
+        ↓ returns
+Outlines model interface
+So yes, conceptually:
+
+LangChain wrapper → raw OpenAI client → Outlines wrapper
+But an important correction:
+
+This does not mean Outlines gets local constrained decoding power.
+
+For remote APIs like OpenAI, Groq, OpenRouter, etc., outlines.from_openai(...) can only use the API’s structured output mechanism, usually by sending something like:
+
+response_format = {"type": "json_schema", ...}
+So with remote APIs, Outlines is mostly acting as a schema-formatting helper, not as a real token-by-token constrained decoder.
+
+Real Outlines constrained decoding works like this:
+
+Local model loaded in Python
+        ↓
+Outlines controls logits/token choices directly
+        ↓
+True constrained decoding
+Remote API case:
+
+OpenAI/Groq API
+        ↓
+Outlines sends schema/request format
+        ↓
+API provider handles generation
+So your function is better understood as:
+
+“Build an Outlines-compatible remote model interface from the raw OpenAI client inside LangChain’s ChatOpenAI wrapper.”
+A clearer name would be:
+
+def build_outlines_openai_model(llm: ChatOpenAI):
+or:
+
+def build_outlines_remote_model(llm: ChatOpenAI):
+Because it is not building a local constrained-decoding model.
+
+
+
+
+ChatGPT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+I m just so so confused with all the wrapper, client, llm, hugging face and all this. Please explain the complete flow AND structure. And probably i have missed many things in the list above. So add and write accordingly.
+
+I’ll frame this from your RAG project perspective: OpenAI/Groq remote APIs, LangChain wrappers, Outlines/Guidance, Hugging Face models, embeddings, vector DB, and where each object sits in the stack.
+
+Thought for a few seconds
+You are confused because people use the words model, LLM, client, wrapper, provider, endpoint, and framework loosely. In an Agentic RAG project, they are different layers.
+
+1. The Big Picture
+Think of your AI system like this:
+
+Your Python Code
+   ↓
+Framework Wrapper
+   ↓
+Provider Client
+   ↓
+API Endpoint / Local Server
+   ↓
+Actual Model
+   ↓
+Response
+Example:
+
+agent_query.py
+   ↓
+ChatOpenAI / ChatGroq / HuggingFacePipeline
+   ↓
+OpenAI client / Groq client / Transformers object
+   ↓
+api.openai.com / api.groq.com / local Ollama/vLLM server
+   ↓
+llama-3.1-8b-instant / gpt-4.1 / gemma2-9b-it
+   ↓
+Generated answer
+So when you write:
+
+llm = ChatOpenAI(...)
+llm is usually not the model itself.
+
+It is a wrapper object that knows how to talk to a model.
+
+2. Model vs LLM vs Client vs Wrapper
+Model
+The model is the actual AI brain.
+
+Examples:
+
+gpt-4.1
+llama-3.1-8b-instant
+gemma2-9b-it
+mistral-7b
+all-MiniLM-L6-v2
+A model is the thing that mathematically predicts tokens.
+
+You usually do not directly touch the model when using APIs like OpenAI or Groq.
+
+LLM
+In normal conversation, people say LLM to mean “the thing generating text.”
+
+But in code, llm often means:
+
+llm = ChatOpenAI(...)
+Here llm is not the raw neural network. It is a LangChain wrapper around a chat model API.
+
+So technically:
+
+LLM in theory = actual model
+LLM in your code = object/wrapper used to call the model
+Provider
+The provider is the company/platform hosting the model.
+
+Examples:
+
+OpenAI
+Groq
+Anthropic
+Google
+Hugging Face
+OpenRouter
+Together AI
+Ollama
+LM Studio
+vLLM
+A provider gives you access to a model.
+
+For example:
+
+Provider: Groq
+Model: llama-3.1-8b-instant
+Provider: OpenAI
+Model: gpt-4.1
+Endpoint
+The endpoint is the URL where requests are sent.
+
+Example:
+
+base_url="https://api.groq.com/openai/v1"
+or:
+
+base_url="http://localhost:11434/v1"
+This means:
+
+Your code sends HTTP request → endpoint → model server → response
+Client
+A client is the lower-level object that actually sends API requests.
+
+Example:
+
+from openai import OpenAI
+
+client = OpenAI(api_key="...")
+This client knows how to call:
+
+client.chat.completions.create(...)
+So:
+
+Client = API caller
+Model = brain
+Endpoint = address
+Provider = platform/company
+Wrapper
+A wrapper is a convenience layer around something else.
+
+LangChain’s ChatOpenAI is a wrapper.
+
+Example:
+
+from langchain_openai import ChatOpenAI
+
+llm = ChatOpenAI(
+    api_key="...",
+    base_url="...",
+    model="llama-3.1-8b-instant"
+)
+This wrapper internally uses an OpenAI-compatible client.
+
+So the structure is:
+
+ChatOpenAI wrapper
+   contains / uses
+OpenAI client
+   sends request to
+Groq/OpenAI/OpenRouter endpoint
+   runs
+actual model
+3. Your Specific Example
+You showed this function:
+
+def build_outlines_model(llm: ChatOpenAI):
+    raw_client = getattr(llm, "root_client", None)
+    if raw_client is None:
+        raw_client = getattr(llm, "client", None)
+
+    return outlines.from_openai(raw_client, MODEL)
+This means:
+
+llm = LangChain ChatOpenAI wrapper
+raw_client = underlying OpenAI client inside that wrapper
+outlines.from_openai(...) = another wrapper around the raw client
+So yes, conceptually:
+
+You are wrapping a wrapper’s internal client with Outlines.
+More accurately:
+
+ChatOpenAI wrapper
+   ↓ exposes internal OpenAI client
+OpenAI client
+   ↓ passed into
+Outlines wrapper
+   ↓ sends structured-output request
+Remote API model
+So the function is saying:
+
+“Give me the internal OpenAI-compatible client from LangChain’s ChatOpenAI object, then let Outlines use that client for structured generation.”
+
+4. Remote API Flow
+This is your Groq/OpenAI-style flow:
+
+User asks question
+   ↓
+Your agent receives query
+   ↓
+Retriever gets relevant chunks from vector DB
+   ↓
+You build prompt/context
+   ↓
+LangChain ChatOpenAI/ChatGroq wrapper is called
+   ↓
+Wrapper uses API client
+   ↓
+Client sends HTTP request to provider endpoint
+   ↓
+Provider runs model on its server
+   ↓
+Provider returns text/JSON/tool call
+   ↓
+Your agent parses result
+   ↓
+Final answer shown
+Example:
+
+llm = ChatOpenAI(
+    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1",
+    model="llama-3.1-8b-instant"
+)
+Even though the class is called ChatOpenAI, it can talk to Groq because Groq provides an OpenAI-compatible API.
+
+So this is not necessarily OpenAI’s model.
+
+It means:
+
+Use OpenAI-style request format to talk to Groq.
+5. Hugging Face Flow
+Hugging Face can mean two different things.
+
+A. Hugging Face as a model library
+Example:
+
+from transformers import AutoModelForCausalLM, AutoTokenizer
+Here, you download/load the model locally.
+
+Flow:
+
+Your code
+   ↓
+Transformers library
+   ↓
+Local model loaded in RAM/VRAM
+   ↓
+GPU/CPU generates tokens
+This is local inference.
+
+Example models:
+
+mistral-7b
+llama models
+bert models
+sentence-transformers
+B. Hugging Face as a hosted API
+Hugging Face can also host models for you.
+
+Flow:
+
+Your code
+   ↓
+Hugging Face API client
+   ↓
+Hugging Face server
+   ↓
+Hosted model
+   ↓
+Response
+So Hugging Face can be either:
+
+Library for local models
+or
+Cloud provider for hosted models
+6. Embedding Model vs Chat Model
+This is another major confusion point.
+
+In RAG, you usually use two types of models.
+
+Embedding model
+Example:
+
+sentence-transformers/all-MiniLM-L6-v2
+Its job is not to chat.
+
+Its job is to convert text into numbers.
+
+"Cache memory stores frequently used data"
+   ↓
+[0.12, -0.44, 0.78, ...]
+This vector is stored in Chroma/vector DB.
+
+Used for:
+
+similarity search
+retrieval
+semantic matching
+deduplication
+chunk comparison
+Chat/Generation model
+Example:
+
+llama-3.1-8b-instant
+gpt-4.1
+gemma2-9b-it
+Its job is to generate text.
+
+Used for:
+
+answer generation
+summarization
+reasoning
+tool calling
+structured output
+compression
+judging
+validation
+So:
+
+Embedding model = converts text to vectors
+Chat model = generates language
+7. Vector Database Flow
+In your RAG pipeline:
+
+Documents
+   ↓
+Split into chunks
+   ↓
+Embedding model converts chunks into vectors
+   ↓
+Vectors stored in Chroma / FAISS / Pinecone
+   ↓
+User query comes in
+   ↓
+Query is embedded
+   ↓
+Vector DB finds similar chunks
+   ↓
+Chunks are sent to chat model
+   ↓
+Chat model answers using retrieved context
+Simple version:
+
+Embedding model = search brain
+Chat model = answer brain
+Vector DB = memory storage
+8. LangChain’s Role
+LangChain is not the model.
+
+LangChain is a framework that gives wrappers and pipeline utilities.
+
+Examples:
+
+ChatOpenAI
+ChatGroq
+PromptTemplate
+RunnableSequence
+Retriever
+Tool
+AgentExecutor
+LangChain helps connect things:
+
+Prompt → LLM → Parser
+Retriever → Context → LLM
+Agent → Tools → LLM → Final answer
+So LangChain is glue.
+
+9. Guidance and Outlines
+These are structured generation / constrained output tools.
+
+They sit around the LLM call.
+
+Outlines
+With local models, Outlines can do real constrained decoding:
+
+Only allow tokens that match JSON schema / regex / grammar
+But with remote APIs like OpenAI/Groq, Outlines usually cannot control logits directly.
+
+So it often becomes:
+
+Outlines wrapper
+   ↓
+sends response_format=json_schema
+   ↓
+remote API handles structured output
+Meaning:
+
+Local model + Outlines = true constrained decoding
+Remote API + Outlines = structured API request
+Guidance
+Guidance helps you write controlled generation programs.
+
+It can guide how text is generated, enforce structure, or separate roles.
+
+But with OpenAI-compatible APIs, you must follow its chat format correctly, such as:
+
+with assistant():
+    lm += gen("answer")
+So Guidance is also a wrapper/control layer around generation.
+
+10. Full Structure of Your Agentic RAG System
+Your project likely looks like this:
+
+User Query
+   ↓
+Agent Controller / run_agent()
+   ↓
+Planning / decision logic
+   ↓
+Retriever
+   ↓
+Embedding model
+   ↓
+Vector database
+   ↓
+Top-k chunks
+   ↓
+Deduplication / compression / merging
+   ↓
+Prompt builder
+   ↓
+LLM wrapper: ChatOpenAI / ChatGroq
+   ↓
+Underlying API client
+   ↓
+Remote provider: Groq/OpenAI/etc.
+   ↓
+Actual generation model
+   ↓
+Response parser / validator
+   ↓
+Final answer
+With tools, it becomes:
+
+User Query
+   ↓
+Agent
+   ↓
+LLM decides tool call
+   ↓
+Tool executes
+   ↓
+Tool result returned to LLM
+   ↓
+LLM decides next step
+   ↓
+Final answer
+11. Important Mental Model
+Imagine you are ordering food.
+
+Actual chef = model
+Restaurant = provider
+Restaurant address = endpoint
+Waiter = client
+Food delivery app = wrapper
+Recipe/rules = prompt
+Kitchen instructions = system message
+Nutrition label format = structured output schema
+Your meal = response
+So when you call:
+
+llm.invoke("Explain cache memory")
+You are not directly talking to the model.
+
+You are doing:
+
+LangChain wrapper receives your prompt
+   ↓
+formats it into provider-compatible messages
+   ↓
+uses client to send HTTP request
+   ↓
+provider runs model
+   ↓
+response comes back
+   ↓
+wrapper converts it into LangChain message object
+12. Clean Definitions
+Term	Meaning
+Model	Actual neural network that generates/embeds
+LLM	Usually a text-generation model; in code often means wrapper object
+Provider	Company/platform hosting the model
+Endpoint	URL where requests are sent
+Client	Low-level API caller
+Wrapper	Higher-level convenience object around client/model
+Framework	Bigger system that provides wrappers, chains, agents
+Embedding model	Converts text into vectors
+Vector DB	Stores/searches vectors
+Retriever	Gets relevant chunks from vector DB
+Prompt	Instruction sent to model
+Parser	Converts model output into usable structure
+Tool	External function the agent can call
+Agent	LLM-driven controller that decides steps/tools
+Outlines/Guidance	Structured/constrained generation layers
+13. The Most Important Line
+When you write:
+
+llm = ChatOpenAI(...)
+You should mentally read it as:
+
+Create a LangChain chat-model wrapper that uses an OpenAI-compatible client to send requests to some provider endpoint where the actual model is hosted.
+Not:
+
+Load the model into my Python program.
+That only happens when you use local Hugging Face/Transformers models.
+
+14. Remote vs Local Difference
+Remote API
+You do not own/load the model.
+Provider runs it.
+You send requests.
+You get responses.
+Examples:
+
+OpenAI
+Groq
+OpenRouter
+Together AI
+Anthropic
+Local model
+You download/load the model.
+Your CPU/GPU runs it.
+You control decoding more deeply.
+Examples:
+
+Transformers
+Ollama
+LM Studio
+vLLM local server
+llama.cpp
+15. Final Simplified Flow
+For your current project, remember this:
+
+Documents → chunks → embeddings → vector DB
+User query → query embedding → retrieve chunks
+Chunks + query → prompt
+Prompt → LLM wrapper
+Wrapper → client
+Client → provider endpoint
+Endpoint → actual model
+Model → answer/tool-call/JSON
+Answer → parser/validator → final response
+That is the full structure.
+
+
+ChatGPT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+test1.py
+Python
+What does this error mean?
+
+
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\test1.py
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app\test1.py", line 139, in <module>
+    response = model(VERDICT_PROMPT, output_type1, max_tokens=2048)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\models\base.py", line 122, in __call__
+    return Generator(self, output_type, backend)(model_input, **inference_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\generator.py", line 67, in __call__
+    return self.model.generate(
+           ~~~~~~~~~~~~~~~~~~~^
+        prompt, self.output_type, **inference_kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\models\openai.py", line 264, in generate
+    response_format = self.type_adapter.format_output_type(output_type)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\models\openai.py", line 179, in format_output_type
+    raise TypeError(
+    ...<2 lines>...
+    )
+TypeError: The type └── Choice(<class '__main__.VerdictOutput'>)
+ is not available with OpenAI. Use an open source model or dottxt instead.
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> 
+
+
+
+
+
+
+
+
+
+The error means that outlines is rejecting this line:
+
+output_type1 = Choice(VerdictOutput)
+when used with:
+
+model = outlines.from_openai(...)
+because Choice(...) constrained generation is not supported for OpenAI-compatible remote APIs like Groq/OpenAI. 
+
+
+The important part of the error is:
+
+TypeError: The type `Choice(<class '__main__.VerdictOutput'>)` 
+is not available with OpenAI.
+Use an open source model or dottxt instead.
+What is happening internally
+You are using:
+
+model = outlines.from_openai(raw_client, MODEL)
+
+
+This creates an OpenAI-compatible backend inside Outlines.
+
+That backend only supports:
+
+JSON schema structured outputs
+
+response_format=json_schema style generation
+
+It does NOT support:
+
+token-level constrained decoding
+
+CFG masking
+
+regex masking
+
+Choice(...)
+
+finite-state-machine decoding
+
+Those advanced constrained decoding features only work with:
+
+local HuggingFace models
+
+vLLM
+
+llama.cpp
+
+transformers backend
+
+dottxt backend
+
+The exact issue
+This line:
+
+output_type1 = Choice(VerdictOutput)
+
+
+creates a special Outlines constrained type.
+
+But OpenAI/Groq APIs cannot enforce that kind of decoding remotely.
+
+So Outlines throws:
+
+TypeError
+instead of trying to fake it.
+
+What you SHOULD use instead
+Since you are using Groq/OpenAI remote inference, use a normal schema type instead of Choice.
+
+Replace this:
+
+from outlines.types import Choice
+
+output_type1 = Choice(VerdictOutput)
+with just:
+
+output_type1 = VerdictOutput
+Then your call becomes:
+
+response = model(
+    VERDICT_PROMPT,
+    output_type1,
+    max_tokens=2048
+)
+and Outlines will automatically convert the TypedDict into JSON schema.
+
+Why this works
+This:
+
+class VerdictOutput(TypedDict):
+    verdict: Literal["OK", "INSUFFICIENT"]
+    reason: str
+already contains constraints.
+
+Especially this part:
+
+Literal["OK", "INSUFFICIENT"]
+acts like an enum in JSON Schema.
+
+So OpenAI/Groq can still enforce:
+
+{
+  "verdict": "OK"
+}
+or
+
+{
+  "verdict": "INSUFFICIENT"
+}
+through structured output mode.
+
+You do NOT need Choice(...) here.
+
+Correct version
+Your corrected code should look like:
+
+class VerdictOutput(TypedDict):
+    verdict: Literal["OK", "INSUFFICIENT"]
+    reason: str
+
+output_type1 = VerdictOutput
+
+response = model(
+    VERDICT_PROMPT,
+    output_type1,
+    max_tokens=2048
+)
+Very important conceptual understanding
+You discovered a major architectural distinction:
+
+Local Outlines
+With local models:
+
+outlines.models.transformers(...)
+Outlines performs:
+
+token masking
+
+FSM decoding
+
+regex-constrained decoding
+
+guaranteed grammar enforcement
+
+This is the "real" constrained decoding magic.
+
+Remote OpenAI/Groq Outlines
+With:
+
+outlines.from_openai(...)
+Outlines becomes mostly:
+
+a JSON schema wrapper
+
+structured output helper
+
+response_format=json_schema abstraction
+
+NOT true constrained decoding.
+
+So your mental model should become
+ChatOpenAI
+    ↓
+underlying OpenAI client
+    ↓
+outlines.from_openai(...)
+    ↓
+JSON-schema structured outputs only
+NOT:
+
+Outlines local constrained decoding
+That only happens with local inference backends.
+
+
+ChatGPT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+test1.py
+Python
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\test1.py
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\exceptions.py", line 403, in normalize_provider_errors
+    yield
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\models\openai.py", line 270, in generate
+    result = self.client.chat.completions.create(
+        messages=messages,
+        **response_format,
+        **inference_kwargs,
+    )
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\openai\_utils\_utils.py", line 298, in wrapper
+    return func(*args, **kwargs)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\openai\resources\chat\completions\completions.py", line 1215, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<51 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\openai\_base_client.py", line 1332, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\openai\_base_client.py", line 1105, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.BadRequestError: Error code: 400 - {'error': {'message': 'This model does not support response format json_schema. See supported models at https://console.groq.com/docs/structured-outputs#supported-models', 'type': 'invalid_request_error', 'param': 'response_format'}}
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app\test1.py", line 139, in <module>
+    response = model(VERDICT_PROMPT, output_type1, max_tokens=2048)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\models\base.py", line 122, in __call__
+    return Generator(self, output_type, backend)(model_input, **inference_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\generator.py", line 67, in __call__
+    return self.model.generate(
+           ~~~~~~~~~~~~~~~~~~~^
+        prompt, self.output_type, **inference_kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\models\openai.py", line 269, in generate
+    with normalize_provider_errors(PROVIDER):
+         ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Program Files\Python314\Lib\contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\exceptions.py", line 407, in normalize_provider_errors
+    raise normalize_provider_exception(exc, provider) from exc
+outlines.exceptions.BadRequestError: API Error [openai]: Error code: 400 - {'error': {'message': 'This model does not support response format json_schema. See supported models at https://console.groq.com/docs/structured-outputs#supported-models', 'type': 'invalid_request_error', 'param': 'response_format'}}
+  → Check prompt length, schema, unsupported parameters, etc. If this is a provider schema support error, try a local model or dottxt.
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> 
+
+I’ll connect the traceback to your uploaded test1.py, then give you the exact reason and practical fixes for Groq + Outlines.
+
+Thought for 6s
+Your code is fine structurally. The model choice is the problem.
+
+In test1.py, you set:
+
+MODEL = getenv("MODEL_NAME", "llama-3.1-8b-instant")
+...
+response = model(VERDICT_PROMPT, output_type1, max_tokens=2048)
+Because you pass a TypedDict output type, Outlines sends response_format: json_schema to Groq. But Groq says your current model, likely llama-3.1-8b-instant, does not support json_schema structured output. That is exactly what the traceback says. Your file confirms this flow. 
+
+
+Groq’s structured-output docs say json_schema only works on supported models. 
+
+Use one of these fixes:
+
+Fix 1: Use a Groq model that supports structured outputs
+Change your .env:
+
+MODEL_NAME=llama-3.3-70b-versatile
+or check Groq’s supported structured-output model list and pick one from there.
+
+Fix 2: Do not use Outlines schema mode with this model
+Instead of:
+
+response = model(VERDICT_PROMPT, output_type1, max_tokens=2048)
+use normal LangChain call and parse JSON yourself:
+
+response = llm.invoke(
+    VERDICT_PROMPT + "\n\nReturn only valid JSON."
+)
+
+print(response.content)
+Fix 3: Use Groq JSON mode instead of JSON schema
+This is weaker than schema validation, but works with more models:
+
+response = raw_client.chat.completions.create(
+    model=MODEL,
+    messages=[
+        {"role": "user", "content": VERDICT_PROMPT + "\nReturn only valid JSON."}
+    ],
+    response_format={"type": "json_object"},
+    max_tokens=2048,
+)
+print(response.choices[0].message.content)
+Main point:
+
+Outlines + remote Groq + TypedDict/Pydantic = response_format: json_schema
+So if the Groq model does not support json_schema, Outlines fails before generation. Use a supported model, or switch to prompt-based JSON parsing.
+
+
+
+test1.py
+Python
+Check my file...how is it different from the standard criteria???\
+
+MY CURRENT OUTPUT:
+
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\test1.py
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\exceptions.py", line 403, in normalize_provider_errors
+    yield
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\models\openai.py", line 270, in generate
+    result = self.client.chat.completions.create(
+        messages=messages,
+        **response_format,
+        **inference_kwargs,
+    )
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\openai\_utils\_utils.py", line 298, in wrapper
+    return func(*args, **kwargs)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\openai\resources\chat\completions\completions.py", line 1215, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<51 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\openai\_base_client.py", line 1332, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\openai\_base_client.py", line 1105, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.BadRequestError: Error code: 400 - {'error': {'message': 'This model does not support response format json_schema. See supported models at https://console.groq.com/docs/structured-outputs#supported-models', 'type': 'invalid_request_error', 'param': 'response_format'}}
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app\test1.py", line 139, in <module>
+    response = model(prompt, output_type1, max_tokens=2048)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\models\base.py", line 122, in __call__
+    return Generator(self, output_type, backend)(model_input, **inference_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\generator.py", line 67, in __call__
+    return self.model.generate(
+           ~~~~~~~~~~~~~~~~~~~^
+        prompt, self.output_type, **inference_kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\models\openai.py", line 269, in generate
+    with normalize_provider_errors(PROVIDER):
+         ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Program Files\Python314\Lib\contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\outlines\exceptions.py", line 407, in normalize_provider_errors
+    raise normalize_provider_exception(exc, provider) from exc
+outlines.exceptions.BadRequestError: API Error [openai]: Error code: 400 - {'error': {'message': 'This model does not support response format json_schema. See supported models at https://console.groq.com/docs/structured-outputs#supported-models', 'type': 'invalid_request_error', 'param': 'response_format'}}
+  → Check prompt length, schema, unsupported parameters, etc. If this is a provider schema support error, try a local model or dottxt.
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> 
+
+
+
+STANDARD CRITERIA:
+
+from groq import Groq
+import json
+
+client = Groq(api_key="YOUR_GROQ_API_KEY")
+
+schema = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "age": {"type": "integer"},
+        "is_active": {"type": "boolean"}
+    },
+    "required": ["name", "age", "is_active"]
+}
+
+response = client.chat.completions.create(
+    messages=[
+        {
+            "role": "system",
+            "content": f"You are a helpful assistant. You must reply strictly in JSON matching this schema: {json.dumps(schema)}"
+        },
+        {
+            "role": "user",
+            "content": "Generate a profile for John Doe, who is 30 years old and active."
+        }
+    ],
+    model="llama-3.1-8b-instant",
+    response_format={"type": "json_object"},
+    temperature=0.1
+)
+
+print(response.choices[0].message.content)
+
+Thought for 6s
+Your file is different from the “standard criteria” in one major way:
+
+Your file uses json_schema
+Because of this line:
+
+response = model(prompt, output_type1, max_tokens=2048)
+Outlines sees output_type1 = VerdictOutput, so it automatically sends:
+
+response_format = {
+    "type": "json_schema",
+    ...
+}
+Your uploaded file confirms you are using TypedDict with Outlines here. 
+
+
+But your “standard criteria” uses:
+
+response_format={"type": "json_object"}
+That is JSON mode, not JSON schema mode.
+
+Groq’s API docs separate these two: json_schema means strict structured outputs and is only available on supported models, while json_object is older JSON mode and only guarantees valid JSON, not exact schema adherence. 
+
+So:
+
+Standard criteria:
+Groq client + response_format={"type": "json_object"} + schema inside prompt
+Works with llama-3.1-8b-instant
+
+Your file:
+Outlines + TypedDict + response_format={"type": "json_schema"}
+Fails with llama-3.1-8b-instant
+To make your file match the standard criteria
+Do not use Outlines for this test. Replace the final call with:
+
+schema = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["OK", "INSUFFICIENT"]},
+        "reason": {"type": "string"}
+    },
+    "required": ["verdict", "reason"]
+}
+
+response = raw_client.chat.completions.create(
+    model=MODEL,
+    messages=[
+        {
+            "role": "system",
+            "content": (
+                "You are a helpful assistant. "
+                f"You must reply strictly in JSON matching this schema: {json.dumps(schema)}"
+            )
+        },
+        {
+            "role": "user",
+            "content": VERDICT_PROMPT
+        }
+    ],
+    response_format={"type": "json_object"},
+    temperature=0.1,
+    max_tokens=2048,
+)
+
+print(response.choices[0].message.content)
+Final diagnosis
+Your file is not failing because of the prompt, Chat, TypedDict, or LangChain client extraction.
+
+It is failing because:
+
+Outlines converts TypedDict → json_schema
+Groq llama-3.1-8b-instant supports json_object, not json_schema
+So either use Groq JSON mode manually, or change to a Groq model that supports json_schema.
+
+
+
+
+
+ChatGPT
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+image.png
+i want to go back after "LLM request's content parsing" commit. Work after this commit, i dont want it
+
+You want to remove everything after the commit:
+
+LLM request's content parsing
+
+That means you want your branch (local_merged) to point back to that commit and discard these commits:
+
+guidance framework added
+
+bugs solved in guidance
+
+Guidance integrated but not used
+
+check guidance working in a test scenario
+
+Use this:
+
+git reset --hard HEAD~4
+OR safer/more explicit using the commit hash of the target commit:
+
+git reset --hard 43b010db29d04d200da39e394b277e3986c253e7
+From your screenshot, that commit is:
+
+43b010db29d04d200da39e394b277e3986c253e7
+After running:
+
+git log
+should show:
+
+LLM request's content parsing
+as the latest commit.
+
+If you already pushed the newer commits to remote (bitpix-soft/local_merged), then also force-push:
+
+git push --force
+or explicitly:
+
+git push --force bitpix-soft local_merged
+Important difference:
+
+git reset --hard → permanently discards commits locally
+
+git revert → creates new commits that undo changes (not what you want here)
+
+In your case, reset --hard is correct.
+
+
+

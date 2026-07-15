@@ -1,0 +1,2210 @@
+2605.09998v1.pdf
+PDF
+explain the paper...keep my very limited and low knowledge in the domain in mind
+
+Absolutely. Since you're just getting into Agentic AI, I'll explain this paper as if you've learned about LLMs, RAG, LangChain/LangGraph, and basic agents, but not reinforcement learning or advanced AI research.
+
+What problem is this paper trying to solve?
+
+Imagine you ask GPT:
+
+"Play Pokémon."
+
+It can see the screen and press buttons.
+
+You'd expect it to eventually figure the game out.
+
+But in reality...
+
+It gets lost.
+
+It walks in circles.
+
+It forgets what it was trying to do.
+
+It repeats mistakes.
+
+It can't remember discoveries made 2 hours ago.
+
+The paper says:
+
+The problem isn't only the model. The problem is everything around the model.
+
+That "everything around the model" is called the harness.
+
+This is the paper's biggest idea.
+
+First understand the difference between an LLM and an Agent
+
+Think of GPT as an employee.
+
+If you hire an employee and tell them
+
+"Build my website."
+
+they'll ask:
+
+Where are the files?
+What should I do first?
+Where should I save progress?
+What if I get stuck?
+How do I remember previous bugs?
+
+The employee needs an office.
+
+That office is what this paper calls the Harness.
+
+What exactly is a Harness?
+
+The paper defines a harness as everything surrounding the model that helps it work effectively. It consists of four major components: the system prompt, sub-agents, skills, and memory.
+
+Instead of just
+
+LLM
+
+you have
+
+           Memory
+
+Prompt -> LLM -> Skills
+
+       Sub-agents
+
+The paper divides it into four parts:
+
+1. Prompt
+
+The instructions.
+
+Instead of
+
+"Play Pokémon"
+
+you give
+
+"Your current goal is to leave Pallet Town. Explore carefully. Avoid revisiting places unnecessarily."
+
+2. Memory
+
+Things discovered earlier.
+
+Example:
+
+Pewter Gym
+Leader uses Rock Pokémon.
+
+Bulbasaur is effective.
+
+Bought 5 potions.
+
+Need Cut HM later.
+
+Without memory...
+
+the model literally forgets.
+
+3. Skills
+
+Reusable functions.
+
+Instead of repeatedly reasoning
+
+"How do I walk to that building?"
+
+the model creates a skill:
+
+walk_to(x,y)
+
+or
+
+navigate_to_pokemon_center()
+
+Now it simply calls the skill.
+
+4. Sub-agents
+
+Instead of one huge GPT handling everything...
+
+Split work.
+
+Navigation Agent
+
+Battle Agent
+
+Puzzle Agent
+
+Inventory Agent
+
+Exactly like dividing work among software modules.
+
+Existing agents
+
+Before this paper...
+
+People manually built these harnesses.
+
+A human engineer spent weeks creating
+
+navigation code
+battle code
+memories
+prompts
+planners
+
+This worked.
+
+But humans had to keep improving everything.
+
+Their first project
+
+They built something called
+
+Gemini Plays Pokémon (GPP).
+
+Human watches the AI.
+
+Human notices mistakes.
+
+Human edits prompt.
+
+Human adds memory.
+
+Human adds tools.
+
+Human improves battle strategy.
+
+Eventually...
+
+The AI beats Pokémon.
+
+This actually became the first AI to finish multiple Pokémon RPGs.
+
+The problem
+
+The human became the bottleneck.
+
+Every few hours...
+
+Human edits:
+
+Prompt
+
+Memory
+
+Skills
+
+Sub-agents
+
+Question:
+
+Can the AI do this itself?
+
+Their answer
+
+Yes.
+
+This is what they call
+
+Continual Harness
+
+Instead of
+
+AI plays
+
+↓
+
+Human improves harness
+
+↓
+
+AI plays better
+
+They make
+
+AI plays
+
+↓
+
+AI studies itself
+
+↓
+
+AI improves harness
+
+↓
+
+AI continues playing
+
+No human.
+
+Their biggest idea
+
+Notice something.
+
+Most AI systems work like this:
+
+Episode
+
+↓
+
+Stop
+
+↓
+
+Train
+
+↓
+
+Restart
+
+This paper says
+
+"No."
+
+Instead
+
+Play
+
+↓
+
+Learn
+
+↓
+
+Continue
+
+↓
+
+Learn
+
+↓
+
+Continue
+
+↓
+
+Learn
+
+↓
+
+Continue
+
+Never restart.
+
+They call this
+
+reset-free learning.
+
+The architecture
+
+Every few hundred game steps...
+
+Instead of only deciding
+
+"What button should I press?"
+
+another AI process asks
+
+What mistakes have I made recently?
+
+Examples:
+
+I got stuck.
+
+↓
+
+Need better navigation.
+Lost battle.
+
+↓
+
+Battle strategy needs updating.
+Repeated same mistake.
+
+↓
+
+Need memory entry.
+This reasoning keeps repeating.
+
+↓
+
+Turn it into a reusable skill.
+
+Then it edits the harness.
+
+So during gameplay...
+
+Harness evolves.
+
+Prompt V1
+
+↓
+
+Prompt V2
+
+↓
+
+Prompt V3
+
+↓
+
+Prompt V8
+
+↓
+
+Prompt V17
+
+Same for
+
+Skills
+
+Memory
+
+Sub-agents
+
+Everything keeps improving.
+
+Wait...
+
+Who edits everything?
+
+Another role called
+
+Refiner
+
+The paper introduces two roles:
+
+Agent
+
+Plays Pokémon
+
+Refiner
+
+Reads trajectory.
+
+Finds failures.
+
+Edits harness.
+
+The cool part:
+
+Both can actually be the same LLM, just invoked for different tasks.
+
+What does the Refiner actually change?
+
+It examines recent gameplay and asks questions like:
+
+Did I keep walking into walls?
+
+↓
+
+Need better navigation.
+Did I lose battles?
+
+↓
+
+Improve battle prompt.
+Did I solve something useful?
+
+↓
+
+Save as memory.
+Did I repeat reasoning?
+
+↓
+
+Turn into skill.
+
+Exactly the kind of self-improvement you'd like an autonomous coding agent to perform.
+
+Why is this important?
+
+Imagine your own RAG agent.
+
+Without this paper:
+
+User
+
+↓
+
+Prompt
+
+↓
+
+LLM
+
+↓
+
+Answer
+
+With ideas from this paper:
+
+User
+
+↓
+
+LLM
+
+↓
+
+Observe failures
+
+↓
+
+Improve prompt
+
+↓
+
+Create new tools
+
+↓
+
+Store better memories
+
+↓
+
+Rewrite planner
+
+↓
+
+Future users get better answers
+
+The agent improves its own architecture, not just its answers.
+
+What did they find?
+
+Compared with a minimal setup (almost no harness), Continual Harness:
+
+completed more milestones,
+reached them using fewer button presses,
+recovered much of the performance gap between a bare model and a carefully hand-engineered expert harness.
+
+One interesting observation was that stronger models benefited much more from the self-improving harness than weaker ones. The weakest model often couldn't make effective use of the improvements.
+
+The coolest observation (in my opinion)
+
+The AI started writing its own reusable code.
+
+Instead of repeatedly solving navigation...
+
+it created navigation functions.
+
+Instead of repeatedly solving battle logic...
+
+it created battle agents.
+
+Instead of repeatedly explaining strategies...
+
+it stored them in memory.
+
+That's moving from:
+
+Reason
+
+Reason
+
+Reason
+
+to
+
+Reason once
+
+↓
+
+Create reusable tool
+
+↓
+
+Reuse forever
+
+This is a major step toward autonomous software engineering.
+
+Why should you care?
+
+Looking at the agentic systems you've been studying (LangGraph, RAG, memory, multi-agent workflows, self-learning systems), this paper is valuable because it shifts the focus from making the model smarter to making the surrounding system smarter.
+
+Instead of thinking:
+
+"How do I write a better prompt?"
+
+it asks:
+
+"How can the agent continuously improve its prompt, tools, memories, and sub-agents while it is working?"
+
+That is a much broader view of agent design.
+
+One-sentence summary
+
+The paper's central contribution is Continual Harness: a framework where an AI agent doesn't just learn to perform a task—it continuously improves the system around itself (its prompts, memory, skills, and sub-agents) while working, allowing it to become progressively more capable without requiring a human to redesign its architecture after every failure.
+
+I think this paper would be especially useful for your learning path because many of the ideas map directly onto production agentic systems. We can go through it section by section and relate each concept to technologies like LangGraph, memory architectures, MCP, RAG, and multi-agent design, rather than treating it as a Pokémon paper.
+
+This is the most advanced part of the paper, because it combines agent improvement with model improvement.
+
+Let's build it step by step.
+
+First, what happened so far?
+
+Initially, they had:
+
+LLM
+
++
+
+Continual Harness
+
+The model played Pokémon.
+
+The harness kept improving itself.
+
+The model weights never changed.
+
+Only
+
+prompts
+memory
+skills
+sub-agents
+
+kept improving.
+
+This is harness refinement.
+
+But now they ask...
+
+"What if we also improve the model itself?"
+
+Instead of only changing
+
+Harness
+
+they also change
+
+LLM weights
+
+Now two things improve simultaneously.
+
+Before
+LLM
+│
+▼
+Harness improves
+After
+LLM improves
+│
+▼
+Harness improves
+
+Both are learning.
+
+This is why they call it
+
+Continual Model-Harness Co-learning.
+
+Let's decode the paragraph
+"We then transfer the refined harness to open-source models..."
+
+They first built a really good harness using Gemini.
+
+Now they ask:
+
+"Can we give this harness to a smaller open-source model like Gemma?"
+
+Instead of starting Gemma with nothing...
+
+they give it
+
+the refined prompt
+refined memory
+refined skills
+refined sub-agents
+
+Think of it as giving a junior developer a well-organized codebase instead of an empty folder.
+
+"...using an online co-learning loop..."
+
+Again
+
+online
+
+means
+
+Learning while still playing.
+
+Not
+
+Play
+
+Stop
+
+Train
+
+Restart
+
+Instead
+
+Play
+
+Learn
+
+Continue
+
+Learn
+
+Continue
+"...scores rollouts with a process reward model..."
+
+This introduces another new concept.
+
+Rollout
+
+A rollout simply means
+
+One sequence of actions taken by the agent.
+
+Example
+
+Walk north
+
+Talk to NPC
+
+Battle
+
+Buy potion
+
+Leave city
+
+That's a rollout.
+
+Process Reward Model (PRM)
+
+Normally RL gives
+
+Won game
+
+Reward = 100
+
+or
+
+Lost
+
+Reward = 0
+
+Very sparse.
+
+Instead...
+
+A PRM scores
+
+every small decision.
+
+Example
+
+Good navigation
+
++2
+
+Good battle
+
++3
+
+Bad inventory choice
+
+−1
+
+Repeated mistake
+
+−3
+
+So instead of only rewarding the final outcome...
+
+it rewards the process.
+
+"...relabeling low-reward windows via a frontier teacher..."
+
+Suppose Gemma plays like this
+
+Walk
+
+Walk
+
+Walk
+
+Walk
+
+Walk into wall
+
+Walk into wall
+
+Walk into wall
+
+The PRM says
+
+This section is poor.
+
+That bad section is called a
+
+low-reward window.
+
+Then they ask a much stronger model
+
+(Gemini Pro)
+
+How should this part have been played?
+
+Gemini produces a better trajectory.
+
+So
+
+Old
+
+UP
+
+LEFT
+
+LEFT
+
+LEFT
+
+becomes
+
+New
+
+UP
+
+RIGHT
+
+A
+
+DOWN
+
+This is called
+
+relabeling.
+
+They replace bad examples with good examples.
+
+"...updating the model via soft SFT"
+
+SFT means
+
+Supervised Fine-Tuning
+
+Normally
+
+Question
+
+↓
+
+Correct Answer
+
+↓
+
+Train
+
+Here
+
+Bad gameplay
+
+↓
+
+Gemini fixes it
+
+↓
+
+Train Gemma on corrected gameplay
+
+The paper calls it soft SFT because they're fine-tuning on these relabeled trajectories rather than treating them as absolute ground truth.
+
+So Gemma gradually learns.
+
+"...The online stage closes the loop..."
+
+Earlier
+
+Only this happened
+
+Trajectory
+
+↓
+
+Improve Harness
+
+Now
+
+Trajectory
+
+improves
+
+both
+
+Harness
+
+AND
+
+Model
+
+The loop is now complete.
+
+"...The refined harness shapes the model's trajectories..."
+
+Imagine giving two programmers
+
+the same programming skills.
+
+One works inside
+
+Good IDE
+
+Debugger
+
+Tests
+
+Documentation
+
+The other has Notepad.
+
+Even equally skilled programmers will produce different code.
+
+Same thing here.
+
+A better harness produces
+
+better gameplay.
+
+Better gameplay means
+
+better training data.
+
+"...and the model's gameplay surfaces new failure modes..."
+
+Now imagine
+
+Gemma starts improving.
+
+It reaches areas
+
+it never reached before.
+
+Suddenly
+
+new problems appear.
+
+Example
+
+Old model
+
+Never reached Gym 3.
+
+No new bugs discovered.
+
+Improved model
+
+Reaches Gym 3.
+
+Now loses to electric Pokémon.
+
+That's a new failure mode.
+
+The harness can now improve
+
+battle strategy.
+
+This creates a feedback loop
+Better Harness
+
+↓
+
+Better Gameplay
+
+↓
+
+Better Training Data
+
+↓
+
+Better Model
+
+↓
+
+Reaches Harder Problems
+
+↓
+
+Discover New Failures
+
+↓
+
+Improve Harness
+
+↓
+
+Repeat
+
+This is exactly what they mean by
+
+co-learning.
+
+Both are learning from each other.
+
+"...drives sustained milestone progress..."
+
+Suppose
+
+Iteration 1
+
+Reached Badge 1
+
+Iteration 2
+
+Reached Badge 2
+
+Iteration 3
+
+Reached Badge 3
+
+Iteration 4
+
+Reached Badge 4
+
+Instead of plateauing...
+
+the model keeps advancing.
+
+The paper shows this happening across multiple training iterations for Gemma-4.
+
+"...from both beginning and mid-game checkpoints."
+
+They tested
+
+Start from beginning
+
+Pallet Town
+
+and
+
+Start in the middle
+
+Already halfway through game
+
+The learning still worked.
+
+That's important because it shows
+
+the method isn't only learning
+
+"how to leave Pallet Town."
+
+It improves generally.
+
+"...Both loops operate on the same trajectory data."
+
+The gameplay trajectory
+
+Walk
+
+Fight
+
+Heal
+
+Talk
+
+Navigate
+
+is used twice.
+
+First
+
+Trajectory
+
+↓
+
+Improve Harness
+
+Second
+
+Same Trajectory
+
+↓
+
+Improve Model
+
+One dataset.
+
+Two improvements.
+
+Overall architecture
+                 Play Pokémon
+                      │
+                      ▼
+             Gameplay Trajectory
+                      │
+         ┌────────────┴────────────┐
+         ▼                         ▼
+Improve Harness             Score Trajectory (PRM)
+(Prompt, Skills,            │
+ Memory, Sub-agents)        ▼
+                       Low-reward sections
+                             │
+                             ▼
+                     Gemini Pro corrects them
+                             │
+                             ▼
+                  Fine-tune Gemma (Soft SFT)
+                             │
+                             ▼
+                  Better Model Next Iteration
+One-sentence summary
+
+Earlier in the paper, only the harness learned while the LLM stayed the same. In this section, the authors add a second learning loop where the LLM itself is also fine-tuned using corrected gameplay, so the harness and the model continuously improve together from the same gameplay data.
+
+Normally RL gives
+
+what does RL stand for?
+
+RL stands for Reinforcement Learning.
+
+It is one of the main ways to train an AI agent to make decisions.
+
+The basic idea
+
+Instead of telling the AI the correct answer (as in supervised learning), you let it try actions, and then reward or punish it based on the outcome.
+
+The agent learns:
+
+"Actions that lead to rewards should be repeated. Actions that lead to penalties should be avoided."
+
+Simple example
+
+Imagine teaching a robot to solve a maze.
+
+Robot moves left.
+❌ Hits a wall.
+Reward = -1
+
+Robot moves right.
+✅ Gets closer to the exit.
+Reward = +1
+
+Robot reaches the exit.
+🎉 Reward = +100
+
+After many attempts, the robot learns which actions maximize its total reward.
+
+Why I said "Normally RL gives..."
+
+Traditional RL often uses sparse rewards, meaning the agent gets feedback only occasionally.
+
+For Pokémon, it might look like:
+
+Start game
+↓
+...
+Thousands of actions
+...
+↓
+Beat Gym Leader
+Reward = +100
+
+Notice the problem:
+
+The agent made thousands of decisions, but only got one reward at the end. It doesn't know which individual actions were responsible for success.
+
+What this paper does differently
+
+Instead of only giving a reward at the end, they use a Process Reward Model (PRM).
+
+It evaluates the quality of each step or short sequence of steps.
+
+Example:
+
+Walked toward the objective
++2
+
+Talked to the correct NPC
++3
+
+Walked in circles
+-2
+
+Repeated the same mistake
+-5
+
+This provides much richer feedback than traditional sparse rewards, making it easier to identify exactly where the agent went wrong and improve it.
+
+RL vs. Supervised Learning (SFT)
+Supervised Learning (SFT)	Reinforcement Learning (RL)
+Learns from correct examples	Learns by trial and error
+Dataset contains the "right answer"	Environment provides rewards
+Goal: imitate correct behavior	Goal: maximize cumulative reward
+
+For example:
+
+SFT
+
+Input:
+"What is 2 + 2?"
+
+Correct answer:
+"4"
+
+The model learns to imitate the correct answer.
+
+RL
+
+Agent chooses action
+↓
+Environment gives reward
+↓
+Agent updates its policy
+↓
+Repeats
+
+The agent learns from the consequences of its actions rather than from labeled answers.
+
+Since you're learning Agentic AI, you'll frequently encounter RL terms like policy, reward, trajectory, rollout, episode, exploration, and exploitation. Understanding these basics will make papers like this much easier to follow.
+
+What we have DISCUSSED so far in this chat, write ALL of it, including (but not limited to) key points, definitions etc...
+Note: answer in bullet points format ready-to-copy-paste
+Continual Harness Paper Notes (Ready to Copy-Paste)
+PokeAgent Challenge
+A benchmark designed to evaluate AI agents on long-horizon, partially observable tasks using Pokémon games.
+Demonstrates that playing Pokémon requires much more than answering a single prompt.
+Tests:
+Long-term planning
+Memory
+Sequential decision making
+Tool use
+Strategy
+Partial observability
+Self-improvement
+The PokeAgent Challenge reported that without domain-specific scaffolding (harness), even frontier Vision-Language Models make almost no progress.
+Meaning of "without domain-specific scaffolding"
+Even very capable Vision-Language Models (GPT, Gemini, Claude, etc.) perform poorly when simply shown Pokémon screenshots and allowed to press buttons.
+They:
+Forget objectives
+Walk in circles
+Repeat mistakes
+Cannot plan far ahead
+The problem is not only the model, but also the lack of supporting infrastructure (the harness).
+Core Idea of the Paper
+
+The paper argues:
+
+Instead of only improving the LLM, improve the entire system around the LLM.
+
+That surrounding system is called the Harness.
+
+What is a Harness?
+
+A Harness is the infrastructure surrounding an LLM that helps it solve long-running tasks.
+
+Instead of:
+
+LLM
+
+It becomes:
+
+Memory
+
+Prompt → LLM → Skills
+
+Sub-agents
+
+The paper defines four major components.
+
+1. System Prompt
+Instructions given to the model.
+Guides overall behavior.
+Example:
+Explore carefully.
+Avoid revisiting places.
+Current objective: Leave Pallet Town.
+2. Memory
+
+Persistent knowledge accumulated during gameplay.
+
+Examples:
+
+Brock uses Rock Pokémon.
+Bulbasaur is strong against Rock.
+Bought 5 Potions.
+Need HM Cut later.
+
+Without memory:
+
+Model forgets previous discoveries.
+3. Skills
+
+Reusable functions.
+
+Instead of reasoning repeatedly:
+
+How do I reach this building?
+
+Create:
+
+navigate_to(x, y)
+
+or
+
+navigate_to_pokemon_center()
+
+Skills reduce repeated reasoning.
+
+4. Sub-agents
+
+Specialized agents dedicated to specific tasks.
+
+Examples:
+
+Navigation Agent
+Battle Agent
+Puzzle Agent
+Inventory Agent
+
+This follows divide-and-conquer.
+
+Minimal Harness
+
+Contains only:
+
+Screenshot
+Button inputs
+Generic prompt
+
+No:
+
+Memory
+Skills
+Sub-agents
+Expert Harness
+
+Human-engineered harness containing:
+
+Memory
+Navigation
+Battle strategy
+Skills
+Planning
+Domain knowledge
+Gemini Plays Pokémon (GPP)
+
+Researchers first built:
+
+Gemini Plays Pokémon (GPP)
+
+Workflow:
+
+AI plays
+
+↓
+
+Human watches
+
+↓
+
+Human edits prompt
+
+↓
+
+Human edits memory
+
+↓
+
+Human improves harness
+
+↓
+
+AI improves
+
+Using this process they became the first AI system to complete multiple Pokémon RPGs.
+
+Problem with GPP
+
+The human became the bottleneck.
+
+Every few hours humans manually updated:
+
+Prompt
+Skills
+Memory
+Sub-agents
+
+Question:
+
+Can the AI perform this refinement itself?
+
+Continual Harness
+
+Main contribution of the paper.
+
+Instead of:
+
+AI plays
+
+↓
+
+Human improves harness
+
+↓
+
+AI plays better
+
+It becomes:
+
+AI plays
+
+↓
+
+AI analyzes itself
+
+↓
+
+AI improves harness
+
+↓
+
+AI keeps playing
+
+No human intervention.
+
+Reset-Free Learning
+
+Traditional approach:
+
+Play
+
+↓
+
+Stop
+
+↓
+
+Train
+
+↓
+
+Restart
+
+Continual Harness:
+
+Play
+
+↓
+
+Learn
+
+↓
+
+Continue
+
+↓
+
+Learn
+
+↓
+
+Continue
+
+No episode restart is required.
+
+Online In-Context Learning over the Harness State
+Online
+
+Learning occurs while the task is still running.
+
+No restart required.
+
+In-context learning
+
+The model weights do NOT change.
+
+Instead the context changes.
+
+The context contains:
+
+Updated prompts
+Updated memories
+Updated skills
+Updated sub-agents
+
+Behavior improves because context improves.
+
+Harness State
+
+The Harness State consists of:
+
+Prompt
+
+Sub-agents
+
+Skills
+
+Memory
+
+The Refiner continuously updates these components.
+
+Refiner
+
+The Refiner is another role (can be the same LLM).
+
+Its responsibilities:
+
+Read recent trajectory
+Detect failures
+Update harness
+
+Questions it asks:
+
+Did navigation fail?
+Did battle fail?
+Is reasoning repetitive?
+Should this become a skill?
+Should this be remembered?
+Agent vs Refiner
+
+Agent:
+
+Plays Pokémon.
+
+Refiner:
+
+Reads trajectory.
+Improves harness.
+
+Same model can play both roles.
+
+Screenshot-and-Buttons Interface
+
+Simplest possible interface.
+
+Agent receives:
+
+Screenshot
+Controller buttons
+
+Buttons:
+
+Up
+Down
+Left
+Right
+A
+B
+Start
+Select
+
+No access to:
+
+Coordinates
+Hidden game state
+Inventory
+NPC intentions
+Internal memory
+
+Later, the paper slightly extends this by adding an ASCII text map of the visible area to help with spatial reasoning, but it still does not provide walkthroughs or hidden information.
+
+Why Continual Harness Works
+
+Instead of repeatedly reasoning:
+
+How do I solve this?
+
+The agent eventually:
+
+Creates reusable skills
+Stores useful memories
+Creates sub-agents
+Improves prompts
+
+Reason once.
+
+Reuse forever.
+
+Strong vs Weak Models
+
+A stronger model is not simply a larger model.
+
+A stronger model is better at:
+
+Reasoning
+Planning
+Tool use
+Memory utilization
+Long-context understanding
+Generalization
+Using prompts correctly
+Using skills correctly
+Using sub-agents correctly
+Capability Floor
+
+Some models are too weak to benefit from advanced harnesses.
+
+Example:
+
+Gemini Flash Lite.
+
+Even with:
+
+Better prompts
+Better memory
+Better skills
+
+It couldn't effectively use them.
+
+Therefore:
+
+More infrastructure did not improve performance.
+
+Harness Gain Scales with Model Capability
+
+The stronger the model:
+
+The larger the improvement from Continual Harness.
+
+Observed:
+
+Gemini Pro
+
+Huge improvement
+
+Gemini Flash
+
+Moderate but inconsistent improvement
+
+Gemini Flash Lite
+
+Almost no improvement
+Cost-vs-Completion Pareto Plane
+
+Each experiment is plotted using:
+
+X-axis:
+
+API cost
+
+Y-axis:
+
+Percentage of milestones completed
+
+Every run becomes a point.
+
+Example:
+
+$120
+
+90% completion
+Pareto Dominance
+
+Suppose:
+
+Old agent
+
+Cost = $200
+
+Completion = 80%
+
+New agent
+
+Cost = $120
+
+Completion = 90%
+
+The new agent:
+
+Costs less
+Performs better
+
+It Pareto-dominates the old one.
+
+High Variance
+
+Results fluctuate significantly between runs.
+
+Example:
+
+Run 1:
+
+80%
+
+Run 2:
+
+55%
+
+Run 3:
+
+78%
+
+Harness helps inconsistently.
+
+This is what happened with Gemini Flash.
+
+Meaning of the Statement
+
+"On the Emerald cost-vs-completion Pareto plane, the harness gain scales with model capability."
+
+Meaning:
+
+Gemini Pro:
+Continual Harness produced both higher completion and lower cost (strictly Pareto-dominant).
+Gemini Flash:
+Sometimes improved, sometimes not (high variance).
+Gemini Flash Lite:
+Too weak to effectively use the harness (below capability floor).
+Online Model-Harness Co-Learning
+
+Earlier:
+
+Only the harness improved.
+
+Trajectory
+
+↓
+
+Improve Harness
+
+Later:
+
+The model also improves.
+
+Trajectory
+
+↓
+
+Improve Harness
+
+AND
+
+Improve Model
+
+Both continuously improve together.
+
+Transferring the Harness
+
+Researchers first refined the harness using Gemini.
+
+Then they transferred that refined harness to open-source models (Gemma).
+
+Instead of giving Gemma:
+
+Nothing
+
+They gave it:
+
+Better prompt
+Better memory
+Better skills
+Better sub-agents
+Rollout
+
+A rollout is simply one sequence of actions taken by the agent.
+
+Example:
+
+Walk
+
+Talk
+
+Battle
+
+Heal
+
+Leave city
+Process Reward Model (PRM)
+
+Traditional RL:
+
+Only rewards the final outcome.
+
+Example:
+
+Beat Gym
+
++100
+
+Very sparse.
+
+PRM:
+
+Scores individual steps.
+
+Example:
+
+Correct navigation
+
++2
+
+Correct battle
+
++3
+
+Repeated mistake
+
+−3
+
+Inventory mistake
+
+−1
+
+Provides dense feedback throughout the trajectory.
+
+Low-Reward Windows
+
+The PRM identifies poor sections of gameplay.
+
+Example:
+
+Walk
+
+Walk
+
+Hit wall
+
+Hit wall
+
+Hit wall
+
+This becomes a low-reward window.
+
+Frontier Teacher
+
+A stronger model (Gemini Pro) reviews low-reward windows.
+
+It produces a better version of the gameplay.
+
+Example:
+
+Old:
+
+UP
+
+LEFT
+
+LEFT
+
+Improved:
+
+UP
+
+RIGHT
+
+A
+
+DOWN
+
+This process is called relabeling.
+
+Soft SFT
+
+SFT = Supervised Fine-Tuning.
+
+Instead of training on manually written examples:
+
+Researchers train Gemma using:
+
+Corrected gameplay produced by Gemini.
+
+Gemma gradually improves.
+
+Closing the Loop
+
+Before:
+
+Trajectory
+
+↓
+
+Improve Harness
+
+Now:
+
+Trajectory
+
+↓
+
+Improve Harness
+
+↓
+
+Improve Model
+
+The trajectory improves both.
+
+Feedback Loop
+Better Harness
+
+↓
+
+Better Gameplay
+
+↓
+
+Better Training Data
+
+↓
+
+Better Model
+
+↓
+
+Model reaches harder parts
+
+↓
+
+New failures discovered
+
+↓
+
+Harness improves
+
+↓
+
+Repeat
+
+Harness and model continuously improve each other.
+
+Sustained Milestone Progress
+
+Training iterations:
+
+Iteration 1
+
+Badge 1
+
+↓
+
+Iteration 2
+
+Badge 2
+
+↓
+
+Iteration 3
+
+Badge 3
+
+↓
+
+Iteration 4
+
+Badge 4
+
+The model continues making progress rather than plateauing.
+
+Beginning vs Mid-Game Checkpoints
+
+Researchers started training from:
+
+Beginning of the game
+Middle of the game
+
+Learning worked in both cases.
+
+This shows the method generalizes beyond the early game.
+
+Same Trajectory Used Twice
+
+One gameplay trajectory is used for:
+
+Improving the Harness
+Improving the Model
+
+Therefore:
+
+One dataset supports two learning loops.
+
+RL (Reinforcement Learning)
+
+RL = Reinforcement Learning.
+
+Instead of learning from labeled answers, the agent learns through:
+
+Actions
+Rewards
+Penalties
+
+Goal:
+
+Maximize cumulative reward.
+
+Traditional RL
+
+Usually provides sparse rewards.
+
+Example:
+
+Thousands of actions
+
+↓
+
+Beat Gym
+
+Reward = +100
+
+The agent receives little feedback during gameplay.
+
+Process Reward Model vs Traditional RL
+
+Traditional RL:
+
+Reward mainly at the end.
+
+PRM:
+
+Rewards individual decisions.
+
+This makes learning much easier because the agent knows exactly where it made good or bad decisions.
+
+Supervised Learning (SFT) vs Reinforcement Learning (RL)
+Supervised Learning
+Learns from correct examples.
+Uses labeled input-output pairs.
+Goal: imitate correct behavior.
+
+Example:
+
+Question
+
+↓
+
+Correct Answer
+
+↓
+
+Train
+Reinforcement Learning
+Learns by trial and error.
+Interacts with an environment.
+Receives rewards.
+Goal: maximize cumulative reward.
+
+Example:
+
+Action
+
+↓
+
+Reward
+
+↓
+
+Policy update
+
+↓
+
+Repeat
+Overall Main Takeaway of the Paper
+
+The paper shifts the focus from:
+
+Making the LLM smarter
+
+to
+
+Making the entire agent system smarter.
+
+The agent continuously improves:
+
+Prompt
+Memory
+Skills
+Sub-agents
+
+And eventually:
+
+The Harness improves.
+The Model improves.
+Both learn together from the same trajectory data.
+
+This is called Continual Model-Harness Co-Learning.
+
+
+
+Explain briefly
+briefly explain what a "seed" is
+
+An embodied agent is an AI agent that exists in and interacts with an environment by continuously:
+
+Perceiving the environment,
+Taking actions, and
+Receiving feedback from those actions.
+
+Unlike a chatbot that only answers text prompts, an embodied agent is situated in a world where its actions directly change its environment.
+
+Example: Pokémon Agent
+
+The Pokémon agent is embodied because it:
+
+Perceives: Screenshots and an ASCII text map.
+Acts: Presses controller buttons (Up, Down, Left, Right, A, B, Start, Select).
+Receives feedback: The game state changes, producing a new screenshot and text map.
+
+This creates a continuous interaction loop:
+
+Observe Environment
+        ↓
+Reason
+        ↓
+Take Action
+        ↓
+Environment Changes
+        ↓
+Observe Again
+Other examples of embodied agents
+🤖 A robot navigating a warehouse.
+🚗 A self-driving car using cameras and sensors.
+🎮 An AI playing a video game.
+🖱️ A computer-use agent that sees a screen and clicks buttons.
+In one sentence
+
+An embodied agent is an AI that is situated in an environment and learns or operates by continuously perceiving, acting, and receiving feedback from that environment.
+
+"scaffolding" means?
+
+Scaffolding means the supporting structure or infrastructure that helps an AI agent perform a task more effectively. It is everything built around the LLM, rather than the LLM itself.
+
+In the context of the paper:
+
+"Without domain-specific scaffolding" means the model is given only the basic interface (e.g., screenshots and buttons) and none of the supporting components needed to solve Pokémon efficiently.
+
+Examples of scaffolding include:
+
+System prompt (instructions)
+Memory (remembering facts and objectives)
+Skills/tools (e.g., navigation functions)
+Sub-agents (specialized agents for battles, puzzles, etc.)
+Planning mechanisms
+Simple analogy
+
+Imagine hiring someone to assemble furniture.
+
+Without scaffolding: Give them only the furniture pieces.
+With scaffolding: Give them the instruction manual, toolbox, labels on parts, and a checklist.
+
+The person's intelligence hasn't changed, but the supporting infrastructure helps them perform much better.
+
+In this paper
+
+The authors use scaffolding and harness almost interchangeably.
+
+So:
+
+Domain-specific scaffolding = domain-specific harness
+
+It refers to the Pokémon-specific prompts, memories, skills, and sub-agents that help the agent play the game successfully.
+
+how r skills different from tools?
+
+This is an important distinction, and the terminology varies somewhat across papers. In general:
+
+Tools are primitive capabilities the agent can invoke.
+Skills are higher-level procedures that often combine one or more tools with reasoning.
+
+Think of it like software engineering.
+
+Tools	Skills
+Individual functions/APIs	Workflows built from functions
+Low-level	High-level
+Execute one capability	Solve a recurring task
+Usually provided	Can be learned or created
+Example 1: Navigation
+
+Suppose the agent has these tools:
+
+move_up()
+move_down()
+move_left()
+move_right()
+
+These are tools.
+
+Now the agent notices it repeatedly needs to walk to the Pokémon Center.
+
+It creates a skill:
+
+navigate_to_pokemon_center()
+
+Internally, that skill may call:
+
+move_up()
+move_up()
+move_left()
+move_left()
+...
+
+The skill is an abstraction over multiple tool calls.
+
+Example 2: LLM Agent
+
+Tools:
+
+Web Search
+Calculator
+Python
+Database Query
+
+Skill:
+
+Research a topic
+    ↓
+Search web
+    ↓
+Read documents
+    ↓
+Summarize
+
+The skill orchestrates several tools to accomplish a larger objective.
+
+In the Continual Harness paper
+
+The terminology is slightly different because the environment is Pokémon.
+
+The "tools" are essentially the primitive actions or primitives the agent already has:
+
+press button
+press sequence
+autopress
+etc.
+
+The Refiner then creates skills, such as:
+
+Navigate to Pokémon Center
+Beat Brock
+Escape Viridian Forest
+Solve a recurring puzzle
+
+These are reusable procedures, not just single actions.
+
+Relationship
+LLM
+ │
+ ▼
+Skill
+ │
+ ├── Tool
+ ├── Tool
+ ├── Tool
+ └── Reasoning
+
+A skill usually:
+
+invokes one or more tools,
+includes some decision logic,
+and solves a complete subtask.
+One caveat
+
+In many modern agent frameworks (e.g., LangChain, LangGraph, OpenAI Agents SDK), skills and tools are often blurred. Developers may expose a complex workflow as a "tool."
+
+For example:
+
+@tool
+def summarize_repository():
+    ...
+
+Although it's registered as a tool, conceptually it's really a skill because it encapsulates an entire workflow.
+
+So the distinction is conceptual rather than strict:
+
+Tool: What the agent can do.
+Skill: How the agent repeatedly accomplishes a task using one or more capabilities (often including tools and reasoning).

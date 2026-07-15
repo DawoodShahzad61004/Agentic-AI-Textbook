@@ -1,0 +1,1584 @@
+
+RAG-based Student learning App
+/
+You said: Where is the cosine similarity check used in this agentic rag?
+Where is the cosine similarity check used in this agentic rag?
+
+1 May
+Claude responded: Short answer: there's no explicit cosine-similarity computation anywhere in your code.
+Short answer: there's no explicit cosine-similarity computation anywhere in your code. The similarity ranking happens implicitly inside ChromaDB, and you convert its distance to a similarity score in one place.
+
+Here's the actual flow:
+
+1. Embeddings are L2-normalized at creation time (embedding_manager.py):
+
+python
+return self.model.encode(
+    text,
+    ...
+    normalize_embeddings=True,   # <-- unit vectors
+    ...
+)
+Once vectors are unit-length, Euclidean distance and cosine distance are monotonically related, so ranking by either is equivalent.
+
+2. Chroma does the actual similarity search (retriever.py, _query_collection):
+
+python
+results = collection.query(
+    query_embeddings=[query_embedding.tolist()],
+    n_results=min(top_k, collection.count()),
+    include=["documents", "metadatas", "distances"],
+)
+Chroma uses HNSW under the hood with whatever distance metric the collection was configured with. You never specified one when creating the collections in vector_store.py and self_learner.py (no hnsw:space in metadata), so Chroma defaults to L2 (squared Euclidean) — not cosine. Because your embeddings are normalized, this still produces the correct cosine ranking, but the raw distance value Chroma returns is squared L2, not 1 − cos(θ).
+
+3. The only place you touch the score is right after that query, same file:
+
+python
+docs.append({
+    ...
+    "similarity_score": 1 - dist,
+    "distance": dist,
+})
+This 1 - dist is the score that then drives:
+
+the score_threshold filter inside retrieve() (default 0.2, raised to the same value in tools.retrieve_documents)
+the sort order of merged results from documents + learned_qa
+the confidence field in query.py's advanced_answer
+the score printed in source listings
+The subtle bug worth flagging: 1 - dist is only a valid cosine similarity if dist is cosine distance. With Chroma's default L2 space and normalized vectors, dist is actually ‖a − b‖² = 2 − 2·cos(θ), so 1 - dist = 2·cos(θ) − 1. Ranking is unaffected (it's monotonic), but absolute numbers are off — a "score" of 0.2 corresponds to cosine similarity 0.6, not 0.2. If you want the threshold and confidence numbers to mean what they look like, either:
+
+create the collections with metadata={"hnsw:space": "cosine"}, in which case dist = 1 − cos(θ) and 1 - dist becomes true cosine similarity, or
+compute similarity_score = 1 - dist/2 to convert squared-L2-on-unit-vectors into cosine similarity.
+So to directly answer your question: the cosine-similarity check lives in retriever.py::_query_collection, in the 1 - dist line and the downstream score_threshold filter — but it's currently a proxy score, not literal cosine, because the collections aren't configured for cosine space.
+
+You said: Just updated both files, check:
+
+excerpt_from_previous_claude_message.txt
+1 line
+
+txt
+
+Just updated both files, check:
+
+1 May
+Claude responded: Let me check both files to verify the update.
+Let me check both files to verify the update.
+
+
+Viewed 3 files
+Viewed 3 files
+Both files are updated correctly — "hnsw:space": "cosine" is set on both the documents collection (vector_store.py:33) and the learned_qa collection (self_learner.py:59).
+
+Two important caveats before you assume the fix is live:
+
+1. get_or_create_collection won't change an existing collection's distance metric. If your ../data/vector_store/ directory already contains collections created under the old L2 default, Chroma will load them with their original metric and silently ignore the new metadata. To actually pick up cosine, you need to either delete the persist directory and re-ingest, or recreate the collections explicitly. Quick way to check what metric your live collections are actually using:
+
+python
+import chromadb
+client = chromadb.PersistentClient(path="../data/vector_store")
+for c in client.list_collections():
+    print(c.name, c.metadata)
+If you see hnsw:space: l2 (or no space key) on either, that collection is still on the old metric.
+
+2. Once cosine is genuinely active, your 1 - dist math becomes correct. Under cosine space, Chroma returns dist = 1 - cos(θ), so similarity_score = 1 - dist is now true cosine similarity in [-1, 1] (in practice [0, 1] for these embeddings). The score_threshold = 0.2 filter in retriever.py and tools.retrieve_documents will now mean "cosine similarity ≥ 0.2" — which is a much looser bar than the same number meant under the old (incorrect) squared-L2 interpretation. You may want to bump that threshold up (0.4–0.5 is a more typical floor for all-MiniLM-L6-v2) now that the score actually means what it says.
+
+So: code change is right, but verify the on-disk collections were rebuilt, and reconsider whether 0.2 is still the threshold you want.
+
+You said: 1 Exactly same direction
+
+excerpt_from_previous_claude_message.txt
+1 line
+
+txt
+
+1    Exactly same direction
+0    Unrelated
+-1    Completely opposite
+
+Is this the case here?
+
+1 May
+Claude responded: Yes — once cosine space is actually active on the collection, that interpretation is exactly right for your similarity_score.
+Yes — once cosine space is actually active on the collection, that interpretation is exactly right for your similarity_score.
+
+The chain:
+
+Cosine similarity itself is defined as cos(θ) = (a · b) / (‖a‖·‖b‖), and it ranges over [-1, 1] with the meaning you described: 1 = same direction, 0 = orthogonal/unrelated, -1 = opposite.
+Chroma's cosine distance is dist = 1 - cos(θ), which ranges over [0, 2].
+Your code computes similarity_score = 1 - dist, which algebraically just gives you back cos(θ).
+So under cosine space, similarity_score carries exactly the [-1, 1] semantics you wrote.
+
+One practical wrinkle worth knowing: with all-MiniLM-L6-v2 (and most modern sentence-transformer models), you essentially never see negative cosine similarities between real text chunks and a real query. The embedding space isn't centered around zero — the model packs nearly all natural-language content into a fairly narrow cone, so empirical similarities for unrelated text usually land in the 0.0–0.2 range, not near -1. Truly opposite vectors (-1) basically don't occur with this family of models.
+
+So in theory your scale is [-1, 1] with the textbook meaning. In practice, for this model, you'll see something more like:
+
+~0.7–1.0 → strong topical match
+~0.4–0.7 → related, same domain
+~0.2–0.4 → loosely related / shared vocabulary only
+~0.0–0.2 → effectively unrelated
+below 0 → rare; usually a sign of weird input (very short text, code vs prose mismatch, etc.)
+This is also why your current score_threshold = 0.2 is quite permissive — it's letting through results that are barely above the "unrelated" floor for this model.
+
+You said: where is this?
+
+excerpt_from_previous_claude_message.txt
+1 line
+
+txt
+
+where is this? tools.py?
+
+1 May
+Claude responded: It's in two places — tools.
+It's in two places — tools.py and retriever.py. Here they are:
+
+
+Find score_threshold in tools.py
+Find score_threshold in tools.py
+That's the hardcoded one — tools.py:12, inside the agent's retrieve_documents tool. This is the threshold that matters for your agentic flow (agent_query.py), since every retrieval the LLM agent triggers goes through this function.
+
+The other one is a default parameter in retriever.py:
+
+
+Viewed a file, ran a command
+Viewed a file, ran a command
+So the full picture is:
+
+File	Line	Value	What it controls
+tools.py	12	0.2 (hardcoded)	Threshold for the agent's retrieval tool — the one that matters for agent_query.py
+retriever.py	38	0.0 (default)	Method default; only used if a caller doesn't pass score_threshold
+retriever.py	75	—	The actual filter: if doc["similarity_score"] < score_threshold: continue
+query.py	72	min_score arg	Passes through --min-score from the CLI (default 0.2 from DEFAULT_MIN_SCORE)
+If you're tuning the agentic pipeline specifically, change tools.py:12. If you also want the non-agent CLI (query.py) to use a stricter floor, bump DEFAULT_MIN_SCORE at the top of query.py too.
+
+One thing worth doing while you're in there: turn the magic number into a named constant at the top of tools.py (e.g. MIN_SIMILARITY = 0.4) and reference it on line 12. Right now there's no comment explaining why it's 0.2, and the next person reading the code (including future-you) won't know whether that number was chosen deliberately or just happens to be there.
+
+You said: I m adding an extra check that the retrieved chunks in the accumulated context are different from the each other to increase disparity.
+I m adding an extra check that the retrieved chunks in the accumulated context are different from the each other to increase disparity. Also, the similar chunks r merged. What similarity threshold would be right for this?
+
+1 May
+Claude responded: Good instinct — chunk-level deduplication is a real problem in your current setup, especially because you're merging results from documents and learned_qa, and…
+Good instinct — chunk-level deduplication is a real problem in your current setup, especially because you're merging results from documents and learned_qa, and the agent issues multiple reformulated queries that often retrieve overlapping chunks.
+
+Before picking a threshold, the right answer depends on what kind of duplication you're trying to catch, because there are three different things people mean by "similar chunks":
+
+1. Exact / near-exact duplicates (same chunk retrieved twice via different queries, or chunk-overlap artifacts from your CHUNK_OVERLAP=200 splitter)
+
+Threshold: 0.95+
+This is almost always safe to merge — same text, possibly different IDs because of the overlap window or because a learned_qa distillation echoed the source.
+2. Paraphrases / restatements of the same fact (a learned QA pair vs. its source chunk; two PDF passages saying the same thing in different words)
+
+Threshold: 0.80–0.90
+This is where it gets judgment-y. Merging here reduces redundancy in the LLM's context but risks dropping a chunk that has slightly different supporting detail.
+3. Same topic, different facts (two chunks both about "ASD symptoms" but one lists behavioral signs and one lists diagnostic criteria)
+
+Threshold: below ~0.75
+You almost never want to merge these — they're the diversity you're trying to preserve.
+For all-MiniLM-L6-v2 specifically, my recommendation:
+
+Use ~0.88 as the merge threshold. Reasoning:
+
+This model produces relatively high baseline similarities for any same-domain text (two random medical paragraphs might land at 0.5–0.7), so a threshold below ~0.80 will start collapsing genuinely distinct chunks.
+Empirically, with MiniLM, chunks that are true paraphrases or near-duplicates cluster around 0.90+, while chunks that are merely "about the same topic" sit in the 0.7–0.85 range.
+0.88 keeps you above the topical-overlap zone but catches paraphrases and the chunk-overlap artifacts your splitter creates.
+A couple of implementation notes that matter more than the exact threshold:
+
+Compare embeddings, not strings. Don't recompute — the chunks you've already retrieved have embeddings sitting in Chroma. But Chroma's query() doesn't return them by default. You have two options: (a) include "embeddings" in the include=[...] list in _query_collection, or (b) re-embed each chunk's text with embedding_manager.generate_embedding(). Option (a) is essentially free; option (b) costs a forward pass per chunk.
+
+Use chunk ID first, embedding similarity second. You're already deduplicating on doc["id"] in retriever.py. That handles the case where the same chunk is retrieved by two different queries — no embedding comparison needed. The embedding-similarity check only needs to run for chunks with different IDs but near-identical content (which mostly happens at the documents ↔ learned_qa boundary, and at chunk-overlap boundaries within a single source file).
+
+"Merging" is ambiguous — pick one. When two chunks are above threshold, you can either (a) keep the higher-scoring one and drop the other, or (b) concatenate them. (a) is almost always what you want; (b) just gives the LLM longer redundant context and inflates token counts. Your stated goal ("increase disparity") points squarely at (a).
+
+Make it tunable. Hardcode it once and you'll regret it the first time you swap models. Put it next to MIN_SIMILARITY as MERGE_SIMILARITY = 0.88 and log when chunks get dropped — that telemetry will tell you within a session whether 0.88 is too tight or too loose for your actual corpus, and you can adjust from there.
+
+If you want a starting heuristic to validate the threshold empirically: run 5–10 queries through your pipeline with full logging, eyeball the pairs that get flagged as duplicates at 0.88, and check whether you'd actually have wanted both kept. Adjust up if you're losing useful detail, down if obvious duplicates are slipping through.
+
+You said: Write a prompt that asks the llm to use the chunks and merge them in the following manner:
+Write a prompt that asks the llm to use the chunks and merge them in the following manner:
+ensure all the info present in the chunks is present,
+ensure all the different sources r present in the output/generated chunk
+ensure any similar/identical/repetetive info is written only once.
+
+Use the prompting techniques we have used so far
+
+1 May
+Claude responded: Here's the prompt, written in the same style as your existing system prompts in agent_query.
+Here's the prompt, written in the same style as your existing system prompts in agent_query.py (rules-first, explicit do/don't pairs, hard limits, output format spec):
+
+python
+_CHUNK_MERGE_PROMPT = """You are a chunk consolidation assistant. Your job is to merge a group of near-duplicate retrieved chunks into a single consolidated chunk — without losing information and without repeating it.
+
+HARD RULES (do not violate):
+- Use ONLY information present in the input chunks. Never add facts from memory.
+- Never drop a fact that appears in any input chunk, even if only one chunk mentions it.
+- Never write the same fact twice, even if multiple chunks state it.
+- Never paraphrase so loosely that a specific detail (number, name, date, term) is lost or generalized away.
+- Preserve every distinct source. Every input source filename must appear at least once in the output as an inline [Source: filename] citation.
+
+PROCESS (follow in this exact order):
+1. Read all input chunks. Identify the set of distinct facts across them.
+   GOOD: treat "ASD affects 1 in 36 children" and "1 in 36 kids have autism" as the SAME fact — write it once.
+   BAD:  treating them as two separate facts and writing both — forbidden.
+2. For each distinct fact, identify which source(s) support it. A fact may be supported by multiple sources.
+3. Write a single consolidated passage that:
+   - States each distinct fact exactly once
+   - Cites every supporting source inline as [Source: filename] immediately after the sentence it supports
+   - If a fact is supported by multiple sources, cite all of them: [Source: a.pdf] [Source: b.pdf]
+   - Preserves specific details verbatim where possible (numbers, proper nouns, technical terms)
+   - Reads as coherent prose, not a list of disconnected sentences
+4. Before returning, verify:
+   - Every input source filename appears at least once in your output
+   - No sentence in your output repeats a fact from an earlier sentence
+   - No fact from any input chunk is missing from your output
+
+OUTPUT FORMAT:
+- Plain prose paragraphs. No headings, no bullet lists, no markdown.
+- Citations appear ONLY inline as [Source: filename]. Never as a trailing list.
+- No preamble ("Here is the merged chunk:"), no postamble ("This consolidates..."), no commentary.
+- Return ONLY the consolidated passage.
+
+INPUT CHUNKS:
+{chunks}
+"""
+A few notes on how this maps to the techniques already in your codebase:
+
+Mirrors your existing _PROCESS_INSTRUCTIONS structure — role line, HARD RULES block, numbered PROCESS, OUTPUT FORMAT block. Same shape your agent is already conditioned on, which keeps the model's behavior more predictable across calls.
+
+Uses your GOOD/BAD pattern for the one place where the LLM most often gets it wrong (treating paraphrases as separate facts). You used this same pattern for query reformulation — it's effective because it disambiguates the rule with a concrete contrast rather than relying on the model to infer the boundary.
+
+Explicit verification step (step 4) — the same trick check_answer_quality plays. Asking the LLM to self-check against criteria before returning catches a lot of slop, especially the "missing source" failure mode which is otherwise common in merge tasks.
+
+The {chunks} placeholder expects you to format input as something like:
+
+[Source: neurology.pdf]
+ASD affects approximately 1 in 36 children...
+
+[Source: dsm5.pdf]
+Autism spectrum disorder is diagnosed when...
+…matching the format already produced by tools.retrieve_documents, so you can pass its output directly.
+
+Suggested call site: invoke this after your similarity-based merge step identifies a cluster of near-duplicates (similarity ≥ 0.88), and only when the cluster has 2+ chunks — single chunks don't need merging, and feeding them through this prompt just costs tokens and risks the LLM "improving" them.
+
+One thing worth watching in practice: LLMs at this size (llama-3.1-8b-instant) sometimes drop sources when the chunk count is high. If you see source-loss in your logs, either cap cluster size at ~4 chunks per merge call, or add a post-hoc check that compares the set of [Source: ...] tags in the output against the input set and re-runs if any are missing.
+
+You said: return a json object similar to the structure of all chunks passed
+
+excerpt_from_previous_claude_message.txt
+5 lines
+
+txt
+
+return a json object similar to the structure of all chunks passed
+
+1 May
+Claude responded: Got it — you want the merged output to look like a chunk itself, so it can flow back into the same accumulated-context pipeline without special-casing.
+Got it — you want the merged output to look like a chunk itself, so it can flow back into the same accumulated-context pipeline without special-casing. Here's the revised prompt:
+
+python
+_CHUNK_MERGE_PROMPT = """You are a chunk consolidation assistant. Your job is to merge a group of near-duplicate retrieved chunks into a single consolidated chunk — without losing information and without repeating it.
+
+HARD RULES (do not violate):
+- Use ONLY information present in the input chunks. Never add facts from memory.
+- Never drop a fact that appears in any input chunk, even if only one chunk mentions it.
+- Never write the same fact twice, even if multiple chunks state it.
+- Never paraphrase so loosely that a specific detail (number, name, date, term) is lost or generalized away.
+- Preserve every distinct source. Every input source filename must appear in the output's "sources" array.
+
+PROCESS (follow in this exact order):
+1. Read all input chunks. Identify the set of distinct facts across them.
+   GOOD: treat "ASD affects 1 in 36 children" and "1 in 36 kids have autism" as the SAME fact — write it once.
+   BAD:  treating them as two separate facts and writing both — forbidden.
+2. For each distinct fact, identify which source(s) support it. A fact may be supported by multiple sources.
+3. Write a single consolidated `content` passage that:
+   - States each distinct fact exactly once
+   - Cites every supporting source inline as [Source: filename] immediately after the sentence it supports
+   - If a fact is supported by multiple sources, cite all of them: [Source: a.pdf] [Source: b.pdf]
+   - Preserves specific details verbatim where possible (numbers, proper nouns, technical terms)
+   - Reads as coherent prose, not a list of disconnected sentences
+4. Before returning, verify:
+   - Every input source filename appears in the "sources" array
+   - Every input source filename appears at least once as an inline [Source: filename] citation in "content"
+   - No sentence in "content" repeats a fact from an earlier sentence
+   - No fact from any input chunk is missing from "content"
+
+OUTPUT FORMAT — return ONLY a JSON object with this exact shape, no markdown fences, no preamble, no commentary:
+{{
+  "content": "<consolidated prose with inline [Source: filename] citations>",
+  "sources": ["<filename1>", "<filename2>", ...],
+  "merged_from": <integer count of input chunks merged>
+}}
+
+Rules for the JSON:
+- "content" is plain prose. No headings, no bullet lists, no markdown inside the string.
+- "sources" is the deduplicated list of every source filename that appeared in the input chunks.
+- "merged_from" equals the number of input chunks you were given.
+- Return ONLY the JSON object. No ```json fences, no text before or after.
+
+INPUT CHUNKS:
+{chunks}
+"""
+Key things to know about this version:
+
+Doubled braces {{ }} — necessary because you're using .format(chunks=...) to inject input. Single braces in the example JSON would break Python's string formatter. If you switch to f-strings or another templating approach, change these accordingly.
+
+Schema matches your existing chunk shape, with one addition. Your retriever produces chunks shaped like {"content": str, "metadata": {"source": str, ...}, ...}. The merged output uses content (same key) and flattens sources into a top-level array since a merged chunk has multiple sources rather than one. merged_from is new and useful purely for telemetry — it lets you log "merged 3 chunks → 1" without recomputing.
+
+Parsing on the receiving side: the same pattern self_learner.py already uses works here:
+
+python
+raw = response.content.strip()
+cleaned = raw.replace("```json", "").replace("```", "").strip()
+merged_chunk = json.loads(cleaned)
+The .replace is defensive — the prompt forbids fences, but llama-3.1-8b-instant adds them anyway maybe 10% of the time. Same reason self_learner._generate_qa_pairs strips them.
+
+One downstream consideration: when you fold the merged chunk back into accumulated_context in agent_query.py, you'll want to format it the same way tools.retrieve_documents formats individual chunks (the [Source: ..., score: ...]\n{content} shape). Since a merged chunk has multiple sources and no single score, the cleanest format is something like:
+
+[Sources: a.pdf, b.pdf, c.pdf | merged from 3 chunks]
+<content>
+Otherwise the agent's later check_answer_quality overlap heuristic and your inline citation logic both stay consistent with what the rest of the pipeline expects.
+
+You said: My goal was:
+
+agent_query.py
+py
+
+My goal was:
+find all the similar chunks in the accumulated context after each iteration, and merge them using the llm. The output would replace the original first chunk and the similar ones will be discarded.
+Also, I have added the following in embedding manager:
+def cosine_similarity(self, vec_a: np.ndarray, vec_b: np.ndarray) -> float:
+        """Compute cosine similarity between two vectors."""
+        if vec_a.shape != vec_b.shape:
+            raise ValueError("Vectors must have the same shape.")
+        if np.linalg.norm(vec_a) == 0 or np.linalg.norm(vec_b) == 0:
+            return 0.0
+        return float(np.dot(vec_a, vec_b) / (np.linalg.norm(vec_a) * np.linalg.norm(vec_b)))
+
+check
+
+Show more
+1 May
+Claude responded: Let me look at your updated agent_query.
+Let me look at your updated agent_query.py to see how you've wired this in.
+
+
+Viewed 2 files
+Viewed 2 files
+Reviewed it carefully. The intent is right but there are several bugs that will break this at runtime, plus a structural mismatch you need to resolve. Going through them in order of severity:
+
+Bug 1: data-model mismatch — accumulated_context is list[str], you're treating it as list[object]
+This is the biggest one. Look at how accumulated_context is built (line 397):
+
+python
+accumulated_context.append(result)  # result is a str — pre-formatted text from retrieve_documents
+But then at line 411 you do:
+
+python
+accumulated_context[i].content, accumulated_context[i].source = _discard_redundant_chunks(...)
+Strings don't have .content or .source attributes — this will raise AttributeError the first time it executes. You're treating accumulated_context as if it held chunk objects, but it holds the formatted string blocks that retrieve_documents returns.
+
+The two lists are also out of sync: accumulated_context has one entry per retrieval call (each entry is a multi-chunk string), but accumulated_context_embeddings has one entry per chunk. So your indices i and j are walking the embeddings list while you index into the strings list — they don't correspond. Marking accumulated_context[j] = "" zeros out a retrieval batch, not a chunk.
+
+You need to pick one granularity and stick with it. The cleaner choice is per-chunk:
+
+python
+# Replace these two parallel lists with one list of chunk dicts
+accumulated_chunks: list[dict] = []  # each: {"content": str, "source": str, "embedding": np.ndarray}
+Then _format_context_for_llm(accumulated_chunks) rebuilds the string only when you need to feed it to check_answer_quality or for telemetry.
+
+Bug 2: O(n²) merging on every single retrieval, with destructive mutation mid-loop
+The nested loop at lines 402–414 runs every time a retrieval lands, re-checking all previously-seen embeddings against each other — even pairs you already compared on the previous iteration. And it mutates accumulated_context (sets [j] = "") while still iterating over indices that point into it.
+
+Two fixes:
+
+Only compare new chunks against existing ones, not the full cross-product. Newly added chunks are the only ones whose dedup status hasn't been checked yet.
+Don't mutate during iteration. Collect indices to drop in a set, apply at the end.
+python
+new_chunk_indices = range(len(accumulated_chunks) - num_new, len(accumulated_chunks))
+to_drop: set[int] = set()
+merge_groups: list[list[int]] = []
+
+for i in new_chunk_indices:
+    if i in to_drop:
+        continue
+    group = [i]
+    for j in range(len(accumulated_chunks)):
+        if j == i or j in to_drop:
+            continue
+        sim = embedding_manager.cosine_similarity(
+            accumulated_chunks[i]["embedding"],
+            accumulated_chunks[j]["embedding"],
+        )
+        if sim > MERGE_SIMILARITY_THRESHOLD:
+            group.append(j)
+            to_drop.add(j)
+    if len(group) > 1:
+        merge_groups.append(group)
+
+# Now do the merges, then drop in a single pass
+for group in merge_groups:
+    keeper_idx = group[0]
+    merged = _discard_redundant_chunks(
+        [accumulated_chunks[k] for k in group], llm
+    )
+    accumulated_chunks[keeper_idx] = merged
+
+accumulated_chunks = [c for k, c in enumerate(accumulated_chunks) if k not in to_drop]
+Bug 3: _discard_redundant_chunks is broken in three ways
+python
+def _discard_redundant_chunks(similar_chunks, llm) -> list:
+    prompt = f"{_CHUNK_MERGE_PROMPT}\n\nINPUT CHUNKS:\n{similar_chunks}\n\nCONSOLIDATED CHUNK:"
+    response = llm.invoke([{"role": "system", "content": prompt}])
+    ...
+    return response.content, response.sources if response.content else similar_chunks[0]
+You're passing raw embedding vectors as similar_chunks (line 408 appends other_emb, not the chunk text). The prompt receives a stringified np.ndarray, which is useless to the LLM. You need to pass the chunk content + source filename, formatted as text.
+response.sources doesn't exist. LangChain AIMessage doesn't have a .sources attribute. The sources come from inside the JSON you asked the LLM to produce — you have to json.loads(response.content) and read parsed["sources"] and parsed["content"] from there. You wrote the prompt for this exact JSON shape; you just didn't parse it on the receiving side.
+The return signature is incoherent. The annotation says -> list, but the return is (content, sources) if ... else similar_chunks[0] — a tuple in one branch, a single chunk in the other. The caller (line 411) tries to unpack it into two values, so the fallback branch will explode.
+A working version:
+
+python
+def _merge_similar_chunks(similar_chunks: list[dict], llm) -> dict:
+    """Merge near-duplicate chunks into one consolidated chunk via LLM."""
+    formatted_input = "\n\n".join(
+        f"[Source: {c['source']}]\n{c['content']}" for c in similar_chunks
+    )
+    prompt = f"{_CHUNK_MERGE_PROMPT}\n\nINPUT CHUNKS:\n{formatted_input}"
+
+    print(f"\n{_THIN}")
+    print(f"  [CHUNK MERGE] consolidating {len(similar_chunks)} chunks")
+    print(_THIN)
+
+    try:
+        response = llm.invoke([{"role": "system", "content": prompt}])
+        raw = response.content.strip()
+        cleaned = raw.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(cleaned)
+        return {
+            "content": parsed["content"],
+            "source": ", ".join(parsed.get("sources", [])),
+            "embedding": None,  # caller must re-embed if needed for future merges
+        }
+    except (json.JSONDecodeError, KeyError, AttributeError) as e:
+        print(f"  [CHUNK MERGE] failed ({e}), keeping first chunk")
+        return similar_chunks[0]
+Note the embedding subtlety: if a merged chunk might itself need to be merged again on a later retrieval, you have to re-embed parsed["content"]. Otherwise its embedding is stale (or None) and future cosine comparisons against it will silently misbehave.
+
+Bug 4: re-embedding chunks you already have embeddings for
+Line 401:
+
+python
+accumulated_context_embeddings.append(retriever.embedding_manager.generate_embedding(content))
+retriever.get_last_chunks() already contains the chunks Chroma returned — and Chroma can return their embeddings if you ask it to. Right now _query_collection doesn't include "embeddings" in the include=[...] list, so the embeddings aren't returned. Add "embeddings" there and propagate the embedding through, and you save a forward pass per chunk per retrieval. Not catastrophic on CPU/MiniLM, but it's wasted work.
+
+Bug 5: threshold is hardcoded at 0.85
+You and I just talked about ~0.88 and putting it next to MIN_SIMILARITY as a named constant. Line 407 has 0.85 baked in. Pull it out:
+
+python
+MERGE_SIMILARITY_THRESHOLD = 0.88  # cosine similarity above which chunks are merged
+Bug 6: minor — your debug log prints the prompt before the LLM call returns
+Lines 107–112 print after llm.invoke, which is fine, but you also print response.sources which doesn't exist (see Bug 3). Drop that line or replace with the parsed JSON.
+
+Summary of what to change
+Make accumulated_context a single list of chunk dicts {content, source, embedding} instead of two parallel lists at different granularities.
+Rewrite the dedup block to (a) only compare new chunks against existing ones, (b) collect drop-indices in a set instead of mutating mid-loop, (c) apply merges and drops in a single final pass.
+Fix _discard_redundant_chunks to receive chunk dicts (not raw embeddings), parse the JSON response, return a single dict, and re-embed the merged content if it'll be compared against future retrievals.
+Pull MERGE_SIMILARITY_THRESHOLD = 0.88 to module scope.
+Optional: include embeddings in the retriever's Chroma query so you don't re-embed.
+Want me to write out the corrected run_agent retrieval branch in full?
+
+You said: My goal was:
+
+agent_query.py
+py
+
+
+embedding_manager.py
+55 lines
+
+py
+
+
+tools.py
+117 lines
+
+py
+
+My goal was:
+find all the similar chunks in the accumulated context after each iteration, and merge them using the llm. The output would replace the original first chunk and the similar ones will be discarded.
+Also, I have added the following in embedding manager:
+def cosine_similarity(self, vec_a: np.ndarray, vec_b: np.ndarray) -> float:
+        """Compute cosine similarity between two vectors."""
+        if vec_a.shape != vec_b.shape:
+            raise ValueError("Vectors must have the same shape.")
+        if np.linalg.norm(vec_a) == 0 or np.linalg.norm(vec_b) == 0:
+            return 0.0
+        return float(np.dot(vec_a, vec_b) / (np.linalg.norm(vec_a) * np.linalg.norm(vec_b)))
+
+Fix
+
+Show more
+1 May
+Claude responded: Let me look at the current agent_query.
+Let me look at the current agent_query.py to confirm what we're working with, then fix everything.
+
+
+Check current agent_query.py to confirm structure
+Check current agent_query.py to confirm structure
+Before I write the fix, I want to flag a problem you introduced in tools.py that will break the agent loop entirely:
+
+python
+return result, docs   # line ~38 of tools.py
+retrieve_documents is registered as an LLM tool callable. The messages.append({"role": "tool", "content": result, ...}) in agent_query.py requires result to be a string, not a tuple. Returning a tuple here will either crash or get stringified into garbage like "('[Source: ...]\\n...', [{...}, {...}])" that goes into the LLM's context.
+
+You have two clean options:
+
+Option A (recommended): Keep retrieve_documents returning a string for the LLM, and fetch the chunk objects separately via retriever.get_last_chunks() — which is exactly what the existing code already does at line 387 of agent_query.py. So just revert tools.py to return only result.
+
+Option B: Change the tool signature, but then you need to also change every caller and the messages.append logic. More work, no benefit.
+
+I'll proceed with Option A. Here's the full fix.
+
+Fix for tools.py
+
+Revert tools.py to return only result string
+Revert tools.py to return only result string
+Fix for agent_query.py
+The strategy:
+
+Replace the parallel accumulated_context (strings) and accumulated_context_embeddings (vectors) with a single list of chunk dicts: accumulated_chunks: list[dict] where each dict has content, source, embedding.
+Rewrite _discard_redundant_chunks to receive chunk dicts, parse the JSON response, return one merged dict.
+Rewrite the dedup logic to compare only new chunks against existing, collect drops into a set, mutate at the end.
+Add a _format_context_for_llm() helper to rebuild the string when needed for check_answer_quality.
+Pull MERGE_SIMILARITY_THRESHOLD = 0.88 to module scope.
+I'll write only the changed regions and show you each one explicitly.
+
+Change 1 — module-scope constant (add near other constants at top)
+python
+MERGE_SIMILARITY_THRESHOLD = 0.88  # cosine sim above which chunks are merged into one
+Change 2 — replace _discard_redundant_chunks
+python
+def _merge_similar_chunks(similar_chunks: list[dict], llm, embedding_manager) -> dict:
+    """Merge near-duplicate chunks into one consolidated chunk via the LLM.
+
+    Each input chunk is a dict {"content": str, "source": str, "embedding": np.ndarray}.
+    Returns a single chunk dict in the same shape, with a freshly computed embedding
+    so the merged chunk can participate in future similarity checks.
+    """
+    formatted_input = "\n\n".join(
+        f"[Source: {c['source']}]\n{c['content']}" for c in similar_chunks
+    )
+    prompt = f"{_CHUNK_MERGE_PROMPT}\n\nINPUT CHUNKS:\n{formatted_input}"
+
+    print(f"\n{_THIN}")
+    print(f"  [CHUNK MERGE] consolidating {len(similar_chunks)} chunks "
+          f"from sources: {[c['source'] for c in similar_chunks]}")
+    print(_THIN)
+
+    try:
+        response = llm.invoke([{"role": "system", "content": prompt}])
+        raw = (response.content or "").strip()
+        cleaned = raw.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(cleaned)
+
+        merged_content = parsed["content"]
+        merged_sources = parsed.get("sources", [c["source"] for c in similar_chunks])
+
+        print(f"  [CHUNK MERGE] success — {len(merged_content)} chars, "
+              f"{len(merged_sources)} source(s)")
+        print(_THIN)
+
+        return {
+            "content": merged_content,
+            "source": ", ".join(merged_sources),
+            # Re-embed the merged content so future cosine comparisons are valid
+            "embedding": embedding_manager.generate_embedding(merged_content),
+        }
+    except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as e:
+        print(f"  [CHUNK MERGE] FAILED ({type(e).__name__}: {e}) — keeping first chunk only")
+        print(_THIN)
+        return similar_chunks[0]
+Change 3 — add a helper to rebuild the LLM-facing string from chunk dicts
+python
+def _format_context_for_llm(chunks: list[dict]) -> str:
+    """Rebuild the string format that retrieve_documents would have produced,
+    so check_answer_quality and any other consumer sees a consistent shape."""
+    if not chunks:
+        return ""
+    return "\n\n".join(
+        f"[Source: {c['source']}]\n{c['content']}" for c in chunks
+    )
+Change 4 — rewrite the retrieval branch inside run_agent
+Replace the current state variables:
+
+python
+accumulated_context: list[str] = []
+accumulated_context_embeddings: list[np.ndarray] = []
+with:
+
+python
+accumulated_chunks: list[dict] = []  # each: {"content": str, "source": str, "embedding": np.ndarray}
+Then replace the entire if name == "retrieve_documents": block (lines 358–421 in your upload) with this:
+
+python
+if name == "retrieve_documents":
+    if total_retrievals >= MAX_TOTAL_RETRIEVALS:
+        result = "Retrieval limit reached. Use what you have to answer."
+        print(f"  [SKIPPED] retrieval cap ({MAX_TOTAL_RETRIEVALS}) reached")
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "content": result,
+        })
+        continue
+
+    # Cross-iteration duplicate guard
+    q_normalized = args["query"].strip().lower()
+    if q_normalized in all_tried_queries:
+        print(f"  [DEDUP] Skipping already-tried query: \"{args['query']}\"")
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "content": "You already tried this exact query. Try a genuinely different angle.",
+        })
+        continue
+    all_tried_queries.add(q_normalized)
+
+    result = callables[name](**args)
+    total_retrievals += 1
+
+    # Capture the chunks this variant produced (for thumbdown persistence)
+    last_chunks = retriever.get_last_chunks()
+    variant_chunks = [
+        {
+            "content": c.get("content", ""),
+            "source": (c.get("metadata") or {}).get("source", "?"),
+        }
+        for c in last_chunks
+    ]
+    variants_with_chunks.append({
+        "query": args["query"],
+        "chunks": variant_chunks,
+    })
+
+    if result.startswith("No relevant"):
+        newly_failed.append(args["query"])
+        print(f"  [FAILED VARIANT] recorded: \"{args['query']}\"")
+    else:
+        # ── Add new chunks to accumulated_chunks (with embeddings) ──────
+        new_chunk_dicts: list[dict] = []
+        for c in last_chunks:
+            content = c.get("content", "")
+            if not content:
+                continue
+            new_chunk_dicts.append({
+                "content": content,
+                "source": (c.get("metadata") or {}).get("source", "?"),
+                # Re-use Chroma's embedding if you've enabled include=["embeddings"];
+                # otherwise re-embed here.
+                "embedding": retriever.embedding_manager.generate_embedding(content),
+            })
+
+        first_new_idx = len(accumulated_chunks)
+        accumulated_chunks.extend(new_chunk_dicts)
+
+        # ── Dedup: only compare NEW chunks against the full list ────────
+        # (existing chunks were already deduped against each other on prior iters)
+        to_drop: set[int] = set()
+        merge_groups: list[list[int]] = []  # list of [keeper_idx, dup_idx, dup_idx, ...]
+
+        for i in range(first_new_idx, len(accumulated_chunks)):
+            if i in to_drop:
+                continue
+            group = [i]
+            for j in range(len(accumulated_chunks)):
+                if j == i or j in to_drop:
+                    continue
+                sim = retriever.embedding_manager.cosine_similarity(
+                    accumulated_chunks[i]["embedding"],
+                    accumulated_chunks[j]["embedding"],
+                )
+                if sim >= MERGE_SIMILARITY_THRESHOLD:
+                    print(f"  [DEDUP] chunk {i} ~ chunk {j}  (cos={sim:.3f})  — will merge")
+                    group.append(j)
+                    to_drop.add(j)
+            if len(group) > 1:
+                merge_groups.append(group)
+
+        # ── Apply merges: replace keeper with merged chunk ──────────────
+        for group in merge_groups:
+            keeper_idx = group[0]
+            merged = _merge_similar_chunks(
+                [accumulated_chunks[k] for k in group],
+                llm,
+                retriever.embedding_manager,
+            )
+            accumulated_chunks[keeper_idx] = merged
+
+        # ── Drop redundants in a single pass ────────────────────────────
+        if to_drop:
+            print(f"  [DEDUP] dropping {len(to_drop)} redundant chunk(s) "
+                  f"after merging into {len(merge_groups)} group(s)")
+            accumulated_chunks = [
+                c for k, c in enumerate(accumulated_chunks) if k not in to_drop
+            ]
+
+    retrieved_sources.append({"query": args["query"], "preview": result[:200]})
+    print(f"\n  [AGENT STATE] total_retrievals={total_retrievals}/{MAX_TOTAL_RETRIEVALS} | "
+          f"accumulated_chunks={len(accumulated_chunks)}")
+Change 5 — check_answer_quality branch must use the helper
+The existing elif name == "check_answer_quality": block does:
+
+python
+full_context = "\n\n---\n\n".join(accumulated_context)
+That breaks now that accumulated_context no longer exists. Replace with:
+
+python
+elif name == "check_answer_quality":
+    full_context = _format_context_for_llm(accumulated_chunks)
+    call_args = {"answer": args["answer"], "context": full_context}
+    print(f"  [AGENT] injecting {len(full_context)} chars of accumulated context "
+          f"({len(accumulated_chunks)} chunk(s)) into check_answer_quality")
+    result = callables[name](**call_args)
+    final_quality = "OK" if result.strip().startswith("OK") else "INSUFFICIENT"
+    print(f"  [AGENT STATE] final_quality set to: {final_quality}")
+A few things I deliberately did not do
+Did not include embeddings in _query_collection. That's a retriever.py change and outside what you asked for. It would save a forward pass per chunk but isn't needed for correctness.
+Did not deduplicate against chunks already in accumulated_chunks by source/content equality. Right now if Chroma returns the exact same chunk twice across two retrieval calls (different IDs because of how the merged QA collection works, or just same chunk surfacing for two queries), the cosine check at threshold 0.88 will catch it and merge it — but you'll waste an LLM call merging an exact duplicate. If you want to short-circuit identical content, add if accumulated_chunks[i]["content"] == accumulated_chunks[j]["content"]: to_drop.add(j); continue before the cosine call.
+Did not change the threshold. Using 0.88 as we discussed. If your corpus produces too many false positives at 0.88 (e.g. distinct facts about the same topic getting collapsed), bump to 0.92.
+Want me to also write the corrected agent_query.py end-to-end into /home/claude/agent_query_fixed.py so you can drop it in as one file?
+
+You said: check
+
+agent_query.py
+py
+
+check
+
+1 May
+Claude responded: Let me view the truncated middle section — that's where the actual changes live.
+
+Check the latest agent_query.py upload
+Check the latest agent_query.py upload
+Let me view the truncated middle section — that's where the actual changes live.
+
+
+View the run_agent function
+View the run_agent function
+The integration is correct. Walking through it deliberately:
+
+State migration (line 270): accumulated_chunks: list[dict] replaces both old lists. ✓
+
+Helpers (lines 104–146): _format_context_for_llm and _merge_similar_chunks are right — JSON parsed with fence-stripping, exception types cover the realistic failure modes, fallback returns a valid chunk dict not a tuple, merged chunk gets re-embedded so it can participate in future cosine checks. ✓
+
+Retrieval branch (lines 389–491): new chunks get embedded and appended, dedup loop only iterates new indices (first_new_idx → end), inner loop scans full list, mutations deferred via to_drop/merge_groups, single-pass drop at the end. ✓
+
+Quality-check branch (lines 493–500): uses _format_context_for_llm(accumulated_chunks). ✓
+
+Threshold (line 24): MERGE_SIMILARITY_THRESHOLD = 0.88 at module scope. ✓
+
+A few smaller things worth knowing before you run it:
+
+1. You still need to verify tools.py returns only a string, not a tuple. I flagged this last time — your previous upload had return result, docs. If that's still there, the agent will crash at line 412 because result.startswith("No relevant") will be called on a tuple. Confirm tools.py returns just result.
+
+2. Within a single retrieval, two fresh chunks could pair-match each other but only one gets caught. Concrete example: retrieval N returns chunks A and B that are 0.91 similar to each other (and to nothing pre-existing). With first_new_idx = N, i=N walks the inner loop j = 0..len-1, finds j=N+1 (which is B), marks B for drop, A becomes keeper — merge group [N, N+1], fine. So actually this case does work because the inner j loop covers the full list including newer indices. ✓ I had to talk myself out of a false alarm there.
+
+3. Transitive groups merge correctly but greedily. If A~B (0.90) and B~C (0.90) but A~C (0.85, below threshold), your code picks A as keeper, finds B (drop), finds C... but C is compared against A's embedding only, not B's. So C wouldn't be added to the group even though B would have linked them. This is single-link-vs-greedy clustering, and your version is greedy/star-shaped: everything gets compared to the keeper. In practice with threshold 0.88 this rarely matters, but worth knowing — if you see "obvious clusters" that don't fully merge, this is why. Fix is union-find, but I wouldn't bother unless you see the symptom.
+
+4. Cost: every retrieval triggers top_k re-embeddings on the new chunks, plus an O(n²) scan, plus potentially an LLM call per merge group. With your defaults (top_k=5, MAX_TOTAL_RETRIEVALS=5), worst case is 25 chunks accumulated → 25² = 625 cosine comparisons (cheap, microseconds) and up to ~5 merge LLM calls per query. The merge LLM calls are the real cost driver — each one is a full Groq round-trip with the chunk-merge prompt. If latency matters, consider only running dedup when len(new_chunk_dicts) > 0 and len(accumulated_chunks) > N for some N, or skipping it on the first retrieval.
+
+5. Telemetry suggestion. You log when chunks are merged, but not the score distribution of non-merges. To tune the threshold empirically, add one line in the inner loop to log near-misses: e.g. if 0.80 <= sim < MERGE_SIMILARITY_THRESHOLD: print(f"  [DEDUP near-miss] {i}~{j} cos={sim:.3f}"). After a few real queries, eyeball the near-miss pairs — if they look like duplicates you'd want merged, lower the threshold; if they look like distinct facts about the same topic, the threshold is right.
+
+Looks good to run. The remaining risk is tools.py — if you reverted that to return a string, you should be clear; if not, fix it before testing.
+
+
+agent_query.py
+py
+
+
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\agent_query.py Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads. Loading weights: 100%|████████████████████████████████████████████████████████
+
+pasted
+
+1 May
+Claude responded: The pipeline ran end-to-end and the dedup logic clearly worked — chunks 1~4, 2~3, 7~0 (cosine 1.
+The pipeline ran end-to-end and the dedup logic clearly worked — chunks 1~4, 2~3, 7~0 (cosine 1.000, exact dup), 9~1+11 all got correctly identified and grouped. But the chunk merging is failing in a very specific pattern that's worth diagnosing carefully.
+
+The actual failure
+Look at the two merge attempts in iteration 1:
+
+First merge (chunks 1+4) — succeeded. The LLM returned a JSON object wrapped in markdown fences (```json ... ```), and your cleaned = raw.replace("```json", "").replace("```", "").strip() correctly stripped them. Parse worked.
+
+Second merge (chunks 2+3) — failed with JSONDecodeError: Expecting value: line 1 column 1 (char 0). And every subsequent merge failed the same way.
+
+That error message is specific: it means the string passed to json.loads() was empty (or whitespace-only). Not malformed JSON, not fenced JSON — empty.
+
+Notice the asymmetry in your logs. The first call printed:
+
+Response from LLM:
+```json
+{ ... }
+```
+[CHUNK MERGE] success — 624 chars
+But the failing calls printed nothing between consolidating N chunks and [CHUNK MERGE] FAILED. No "Response from LLM" line at all. That print sits inside _merge_similar_chunks between llm.invoke(...) and the JSON parsing — if it didn't appear, then response.content was empty.
+
+So the root cause is: Groq returned an empty content for the second and subsequent merge calls. Two plausible reasons:
+
+llama-3.1-8b-instant decided to issue a tool call instead of plain text. The agent's main llm instance has tools bound to it, and you're reusing that exact llm for the merge call. Even though your merge prompt doesn't mention tools, the tool schemas are still bound at the LangChain level, and the model — being instruction-tuned for tool use — sometimes responds with an empty content and a tool_calls array instead of obeying the "return JSON" instruction. The first call landed on plain text by luck; subsequent ones flipped.
+Rate limiting / streaming truncation at the Groq end, returning content=None or "". Less likely given it's deterministic across the run, but possible.
+Reason #1 is almost certainly it. Your _merge_similar_chunks reuses the same llm object as the agent loop, and llm.invoke([{"role": "system", "content": prompt}]) doesn't pass tools=[] to override the bound tools.
+
+Fix
+In _merge_similar_chunks, force a tool-free invocation. There's no clean "unbind tools" in langchain-groq, but you can do one of these:
+
+Option A (cleanest): create a separate LLM client just for merging, in main():
+
+python
+merge_llm = ChatGroq(
+    api_key=os.getenv("GROQ_API_KEY"),
+    model_name="llama-3.1-8b-instant",
+    temperature=0.0,
+    max_tokens=2048,
+)
+Pass merge_llm instead of llm into _merge_similar_chunks. This LLM never has tools bound to it, so it can only respond with text.
+
+Option B: use the underlying client directly inside _merge_similar_chunks. Bypass LangChain entirely for this one call:
+
+python
+import groq
+
+_groq_client = None  # module-level, lazy-init
+
+def _merge_similar_chunks(similar_chunks: list[dict], llm, embedding_manager) -> dict:
+    global _groq_client
+    if _groq_client is None:
+        _groq_client = groq.Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+    formatted_input = "\n\n".join(
+        f"[Source: {c['source']}]\n{c['content']}" for c in similar_chunks
+    )
+    prompt = f"{_CHUNK_MERGE_PROMPT}\n\nINPUT CHUNKS:\n{formatted_input}"
+
+    print(f"\n{_THIN}")
+    print(f"  [CHUNK MERGE] consolidating {len(similar_chunks)} chunks "
+          f"from sources: {[c['source'] for c in similar_chunks]}")
+    print(_THIN)
+
+    try:
+        response = _groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "system", "content": prompt}],
+            temperature=0.0,
+            max_tokens=2048,
+            response_format={"type": "json_object"},  # ← forces valid JSON
+        )
+        raw = (response.choices[0].message.content or "").strip()
+        print(f"  Response from LLM:\n{raw}")
+        # response_format=json_object means no fences possible, but defensive strip anyway
+        cleaned = raw.replace("```json", "").replace("```", "").strip()
+        if not cleaned:
+            raise json.JSONDecodeError("empty response", "", 0)
+        parsed = json.loads(cleaned)
+
+        merged_content = parsed["content"]
+        merged_sources = parsed.get("sources", [c["source"] for c in similar_chunks])
+        print(f"  [CHUNK MERGE] success — {len(merged_content)} chars, "
+              f"{len(merged_sources)} source(s)")
+        print(_THIN)
+
+        return {
+            "content": merged_content,
+            "source": ", ".join(merged_sources),
+            "embedding": embedding_manager.generate_embedding(merged_content),
+        }
+    except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as e:
+        print(f"  [CHUNK MERGE] FAILED ({type(e).__name__}: {e}) — keeping first chunk only")
+        print(_THIN)
+        return similar_chunks[0]
+Option B is what I'd actually recommend, for two reasons beyond the tool-binding issue:
+
+response_format={"type": "json_object"} is Groq's native JSON-mode flag. With it set, the model is constrained to emit valid JSON — no markdown fences, no preamble, no commentary. Your prompt rules become server-side guarantees rather than hopeful instructions.
+temperature=0.0 for a structural transformation task (merging) is correct. The agent loop uses 0.1 because creativity helps query reformulation. The merger doesn't benefit from any temperature.
+Two smaller things in the log worth flagging
+1. The agent skipped your _PROCESS_INSTRUCTIONS ordering. It issued all three retrieval queries in one batch on iteration 1, despite the prompt explicitly saying "do NOT batch tool calls". llama-3.1-8b-instant is small enough that this kind of instruction non-compliance is common. Not a code bug; a model-capability ceiling. If you want sequential retrieval enforced, do it server-side: keep MAX_TOOL_CALLS_PER_ITERATION = 1 for retrieve calls. Your current 5 lets the model batch.
+
+2. The dedup is doing real work but the final answer didn't benefit much. Look at the final answer: it's structured around the raw retrieval order, not the deduped accumulated_chunks. That's because accumulated_chunks is only used by check_answer_quality, not exposed to the LLM as the synthesis context — the LLM is still drafting from the original tool messages in the conversation history (which contain all 15 raw chunks, duplicates and all). So your dedup is currently only paying off in the quality-check step, not in the final synthesis.
+
+If you want dedup to actually shrink the context the synthesis LLM sees, you'd need to replace the raw tool message contents with the deduped versions — but that breaks the assistant/tool message pairing OpenAI/Groq require. The cleaner fix is to inject the deduped context as one final system or user message right before the synthesis turn, e.g. after check_answer_quality returns OK, append a message like "Use ONLY the following deduplicated context for your final answer:\n\n{_format_context_for_llm(accumulated_chunks)}". Worth thinking about as a follow-up — not urgent, but the dedup work isn't earning its keep yet.
+
+The merge failure is the real bug to fix now. Once Option B is in, you should see all merges succeed and the JSONDecodeError disappear.
+
+You said: I m studying this for the first time.
+
+excerpt_from_previous_claude_message.txt
+37 lines
+
+txt
+
+I m studying this for the first time. Explain the error. What was it firstly? Reasons for it? How did u notice it? And what can we do to solve it?
+
+1 May
+Claude responded: Good question — let me walk through this carefully, because the diagnostic chain matters as much as the conclusion.
+Good question — let me walk through this carefully, because the diagnostic chain matters as much as the conclusion.
+
+What the error actually was
+The error message in your logs:
+
+JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+This is Python's json library complaining that it tried to parse a JSON string but found nothing at the very first character (line 1, column 1, character 0). That specific error message — "Expecting value" at "char 0" — almost always means the input was an empty string "" or pure whitespace.
+
+It does not mean the JSON was malformed. Malformed JSON gives different errors, like:
+
+"Unterminated string" → quote was never closed
+"Expecting ',' delimiter" → missing comma between items
+"Expecting property name enclosed in double quotes" → bad key
+"Expecting value at char 0" specifically means: I started reading and there was nothing to read.
+
+So the question becomes: why was json.loads() being called on an empty string?
+
+How I noticed what the real cause was
+Two clues in your logs led me to it.
+
+Clue 1: the first merge succeeded, the rest failed. That asymmetry is important. If the bug were in the prompt, or in your parsing code, all merges would fail the same way. The fact that one worked told me the code is fundamentally correct — something is going wrong on a per-call basis.
+
+Clue 2: a missing print line. Your _merge_similar_chunks function has this structure:
+
+python
+response = llm.invoke([{"role": "system", "content": prompt}])
+print(f"Response from LLM:\n{response.content}")    # ← print A
+raw = (response.content or "").strip()
+cleaned = raw.replace("```json", "").replace("```", "").strip()
+parsed = json.loads(cleaned)                         # ← where the error fires
+In the successful first merge, the logs showed:
+
+[CHUNK MERGE] consolidating 2 chunks...
+Response from LLM:
+```json
+{ ... }
+```
+[CHUNK MERGE] success — 624 chars
+In the failing merges, the logs showed:
+
+[CHUNK MERGE] consolidating 2 chunks...
+[CHUNK MERGE] FAILED (JSONDecodeError: ...)
+Print A was missing. The "Response from LLM" line never appeared. Either response.content was an empty string (so the print produced just "Response from LLM:\n" and got lost in the noise), or print itself never ran because something between llm.invoke() and print was happening differently.
+
+The simplest explanation that fits both clues: response.content was empty for the failing calls. The print ran but printed almost nothing. Then (response.content or "").strip() produced "". Then cleaned was "". Then json.loads("") raised the error at char 0.
+
+So the failure isn't in the parsing — it's that the LLM is returning a response with no text content.
+
+Why the LLM returned empty content
+Here's where understanding tool-use semantics matters. Modern LLM APIs let a model respond in two ways to a single prompt:
+
+With text content — response.content = "some text", response.tool_calls = []
+With tool calls — response.content = "", response.tool_calls = [{"name": "...", "args": {...}}]
+When a model decides to invoke a tool, it puts nothing in content — the tool call is its response. This is by design.
+
+Now look at how your llm object was created in main():
+
+python
+llm = ChatGroq(...)
+tool_schemas, callables = make_tools(retriever)
+…and then later, the agent loop calls llm.invoke(messages, tools=tool_schemas). That tools=tool_schemas argument tells Groq's API: "this model has access to retrieve_documents and check_answer_quality — feel free to call them."
+
+But here's the thing. When you call _merge_similar_chunks and it does:
+
+python
+llm.invoke([{"role": "system", "content": prompt}])
+…you're using the same llm object. You didn't pass tools=[] to disable them. And LangChain's behavior in this case isn't perfectly clean — depending on internal state, the tool schemas may still be bound to the request.
+
+Even if they're not bound on this specific call, there's a second issue: llama-3.1-8b-instant is a small, instruction-tuned, tool-trained model. It has been heavily trained to issue tool calls when it sees patterns it associates with tool use (system prompts that look like task specs, structured output requests, etc.). Sometimes it produces an empty response with no tool call simply because it got confused about whether to call a tool or generate text — and ended up doing neither cleanly.
+
+The first call worked by luck. Subsequent calls — perhaps because the conversation context the underlying client tracks built up, or just because of small probabilistic differences in sampling — flipped to the "empty content" failure mode.
+
+This is a really common pitfall when reusing one LLM object across different purposes in an agentic system. The model is configured for one job (tool use) and you're asking it to do another (structured text generation), without reconfiguring it.
+
+How to fix it
+The two solutions I gave you address this from two different angles:
+
+Option A (separate LLM instance): Create a brand-new ChatGroq object that never had tool schemas attached. This isolates the merge job from the agent's tool-use configuration. Same model, different client, clean state.
+
+Option B (bypass LangChain, use Groq client directly with JSON mode): Skip the LangChain abstraction entirely for this specific call and use Groq's native API. Critically, this lets you pass response_format={"type": "json_object"}, which is a server-side guarantee — Groq's API will refuse to return anything that isn't valid JSON. The model literally cannot produce empty content under this mode; it's constrained at the inference level.
+
+Option B is stronger because it addresses both possible failure modes:
+
+If the model wanted to call a tool → no tools are bound, can't happen.
+If the model wanted to return prose → response_format forces JSON instead.
+If the model wanted to return empty → response_format requires structured output, so empty isn't allowed.
+You also get temperature=0.0 for free, which is correct for a deterministic merge task — you don't want the merger getting "creative" with the chunk content.
+
+The general lesson
+When debugging "the LLM returned weird output" issues, the diagnostic ladder is:
+
+Did the response object actually contain what I expected? Print response.content, response.tool_calls, response.response_metadata. Don't assume — verify.
+Is this happening every time or some of the time? Asymmetric failures point to state, not logic.
+What is the LLM's available action space at this moment? If tools are bound, it might call them. If response_format is set, it might be constrained. If the system prompt mentions tools, it might issue them even when none are bound.
+Am I reusing an object configured for another purpose? This is the most common mistake. LLM clients are usually purpose-built — query reformulation, classification, structured extraction, free-form generation are all different jobs and benefit from different configurations.
+The error you saw was JSONDecodeError, but the bug was tool-binding leakage between two different uses of the same LLM client. The decoder error was just the downstream symptom — the real diagnosis happened by noticing that one print line was missing from your logs.
+
+
+agent_query.py
+py
+
+
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\agent_query.py Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads. Loading weights: 100%|███████████████████████████████████████████████████████
+
+pasted
+
+1 May
+Claude responded: Looking at this run carefully — there's progress, but also a clear remaining problem.
+Looking at this run carefully — there's progress, but also a clear remaining problem.
+
+What improved
+After your fix, 6 of 8 merge attempts succeeded versus 1 of 5 in the previous run. You can see real merge work happening:
+
+Iteration 1, retrieval 2: chunk 6 ~ chunk 1 (cos=0.927) → merged successfully (567 chars)
+Iteration 1, retrieval 3: three merges all succeeded — including a 4-chunk merge group that consolidated correctly
+Cosine 1.000 exact duplicates from the same source surfacing across queries → caught and merged
+The dedup → merge → drop pipeline is structurally working now.
+
+What's still broken
+The first retrieval still failed both merges with the same JSONDecodeError: Expecting value: line 1 column 1 (char 0) — empty response from the LLM. Two attempts in a row, both empty, then it started working from retrieval 2 onwards.
+
+This is the same failure mode as before (empty content), but the pattern is different. Before: first call worked, then everything failed. Now: first two calls fail, then everything works. So the fix helped — but didn't fully eliminate it.
+
+The most likely cause is that you applied Option A (separate merge_llm instance) rather than Option B (Groq client direct + response_format={"type": "json_object"}). Option A removes tool binding, which was clearly part of the problem — that's why most calls now succeed. But Option A doesn't constrain the output. The model is still free to return empty content if it gets confused, and llama-3.1-8b-instant apparently still does this on the very first cold-start calls of a session, before warming up to the prompt pattern.
+
+Want me to verify by looking at your current agent_query.py? If you applied Option B with response_format, this shouldn't be happening, and I'd want to see why.
+
+Two ways to fix the remaining failures:
+
+Switch to Option B — uses Groq's native client with response_format={"type": "json_object"}. This is a server-side guarantee: the API will not return invalid or empty JSON. Whatever sampling instability is causing the first-two-calls-fail pattern, JSON mode prevents it from manifesting.
+
+Add a single retry — if you want to keep Option A for simplicity, just retry once on failure:
+
+python
+for attempt in range(2):
+    try:
+        response = merge_llm.invoke([{"role": "system", "content": prompt}])
+        raw = (response.content or "").strip()
+        if not raw:
+            if attempt == 0:
+                continue  # retry once
+            raise json.JSONDecodeError("empty response", "", 0)
+        cleaned = raw.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(cleaned)
+        # ... rest
+        break
+    except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as e:
+        if attempt == 0:
+            continue
+        # log failure, return fallback
+A retry is cheap (one extra Groq call only on the rare failure) and would have rescued both first-iteration failures in this log.
+
+Two other things I noticed worth mentioning
+1. The dedup is still not affecting the synthesis. Look at the final answer — it's 4,586 characters and includes essentially every retrieved chunk, including the redundant [Source: Adjustable Speed Drive.txt] repeated 21 times. The dedup compressed accumulated_chunks from 15 raw chunks down to 7 deduped, but the LLM synthesizing the final answer is still reading from the original tool messages in the conversation history (which contain all 15). Your dedup is paying off for check_answer_quality only, not for the final synthesis.
+
+If you want the dedup to actually shrink what the synthesis LLM works with, after check_answer_quality returns OK you'd inject a final user message like:
+
+Use ONLY the following deduplicated context for your final answer. Ignore prior tool results above:
+
+{_format_context_for_llm(accumulated_chunks)}
+Right before the iteration where you expect the final answer. This isn't a bug — it's a design gap I flagged previously.
+
+2. The merged chunks contain leftover [Source: ...] citations from the merge prompt. Look at the third successful merge:
+
+"content": "Adjustable Speed Drives provide precise control... [Source: ..\\data\\Adjustable Speed Drive.txt] [Source: ..\\data\\Adjustable Speed Drive.txt]"
+The merger LLM duplicated the source citation because both input chunks had the same source. Your merge prompt says cite each source once per fact, but for chunks where all input sources are identical, the merger doesn't always normalize this. Not a bug — just a quality issue in the merged output. Worth knowing if downstream consumers care. A small post-processing step could collapse adjacent identical [Source: ...] tags, or you could add a rule to the merge prompt: "if all input chunks share the same source, cite it once at the end of the relevant sentence, not multiple times."
+
+The pipeline is meaningfully better than last run. The remaining failure is a long-tail issue solvable with either Option B or a one-retry wrapper.
+
+
+excerpt_from_previous_claude_message.txt
+16 lines
+
+txt
+
+try:
+        
+        response = llm.invoke([{"role": "system", "content": prompt}])
+        raw = (response.content or "").strip()
+        cleaned = raw.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(cleaned)
+
+        merged_content = parsed["content"]
+        merged_sources = parsed.get("sources", [c["source"] for c in similar_chunks])
+
+        print(f"Response from LLM:\n{raw}")
+        print(f"  [CHUNK MERGE] success — {len(merged_content)} chars, "
+              f"{len(merged_sources)} source(s)")
+        print(_THIN)
+
+        return {
+            "content": merged_content,
+            "source": ", ".join(merged_sources),
+            # Re-embed the merged content so future cosine comparisons are valid
+            "embedding": embedding_manager.generate_embedding(merged_content),
+        }
+    except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as e:
+        print(f"  [CHUNK MERGE] FAILED ({type(e).__name__}: {e}) — keeping first chunk only")
+        print(_THIN)
+        return similar_chunks[0]
+Show more
+1 May
+Claude responded: Here's the same function with the retry wrapper added.
+Here's the same function with the retry wrapper added. Drop-in replacement for what you have:
+
+python
+try:
+    raw = ""
+    for attempt in range(2):
+        response = llm.invoke([{"role": "system", "content": prompt}])
+        raw = (response.content or "").strip()
+        if raw:
+            break
+        print(f"  [CHUNK MERGE] empty response on attempt {attempt + 1}, retrying...")
+
+    if not raw:
+        raise json.JSONDecodeError("empty response after retry", "", 0)
+
+    cleaned = raw.replace("```json", "").replace("```", "").strip()
+    parsed = json.loads(cleaned)
+
+    merged_content = parsed["content"]
+    merged_sources = parsed.get("sources", [c["source"] for c in similar_chunks])
+
+    print(f"Response from LLM:\n{raw}")
+    print(f"  [CHUNK MERGE] success — {len(merged_content)} chars, "
+          f"{len(merged_sources)} source(s)")
+    print(_THIN)
+
+    return {
+        "content": merged_content,
+        "source": ", ".join(merged_sources),
+        # Re-embed the merged content so future cosine comparisons are valid
+        "embedding": embedding_manager.generate_embedding(merged_content),
+    }
+except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as e:
+    print(f"  [CHUNK MERGE] FAILED ({type(e).__name__}: {e}) — keeping first chunk only")
+    print(_THIN)
+    return similar_chunks[0]
+Three things to know about how this behaves:
+
+It only retries the empty-response case. If the LLM returns something but that something is malformed JSON (truncated, fenced weirdly, has stray text), the first attempt's json.loads will throw inside the try block and the except catches it — no retry. That's intentional. Empty content is a sampling glitch worth retrying; malformed JSON usually means the model is consistently misunderstanding the prompt, and retrying gives you the same garbage twice.
+
+If you want to retry malformed JSON too, you'd need to move the parsing inside the loop:
+
+python
+for attempt in range(2):
+    response = llm.invoke([{"role": "system", "content": prompt}])
+    raw = (response.content or "").strip()
+    if not raw:
+        continue
+    try:
+        cleaned = raw.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(cleaned)
+        break  # success
+    except json.JSONDecodeError:
+        if attempt == 0:
+            continue
+        raise  # second failure — bail out
+else:
+    raise json.JSONDecodeError("no valid response after retry", "", 0)
+I wouldn't bother unless you actually see malformed-JSON failures in your logs. The empty-content variant is what bit you.
+
+Cost is minimal. From your last run, two of eight calls returned empty. With this retry, those two would each cost one extra Groq call — call it ~16 extra calls per 100 merges, well under 25% overhead. And those extra calls are cheap (the merge prompt is short relative to the agent's main loop).
+
+The retry doesn't address the root cause, just the symptom. If you start seeing [CHUNK MERGE] empty response on attempt 1, retrying... appearing frequently in logs, that's a signal the underlying issue is getting worse — model behavior change, prompt drift, whatever — and the retry is masking it. Worth keeping an eye on the frequency. If empty responses become the norm rather than the exception, switch to Option B (Groq client + response_format={"type": "json_object"}) — that's the actual fix.
+
+
+agent_query.py
+py
+
+
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\agent_query.py Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads. Loading weights: 100%|████████████████████████████████████████████████████████
+
+pasted
+
+1 May
+Claude responded: Let me check the file you uploaded to verify what you actually changed.
+Let me check the file you uploaded to verify what you actually changed.
+
+
+Look at the merge function in the uploaded agent_query.py
+Look at the merge function in the uploaded agent_query.py
+The retry code is in place — but here's what's interesting in the logs:
+
+The retry is silent. Compare the new logs to the old ones. Failed merge calls show:
+
+[CHUNK MERGE] consolidating 2 chunks...
+[CHUNK MERGE] FAILED (JSONDecodeError: ...)
+But [CHUNK MERGE] empty response on attempt 1, retrying... never appears anywhere. The retry print is inside the loop, only after a non-empty raw check fails. If we never see it but we do see the eventual JSONDecodeError, the retry must have happened (the loop ran twice, both empty), so the message should have been printed once.
+
+The fact that it never appears means one of two things:
+
+Output buffering — the print is being swallowed by Python's stdout buffer. Unlikely with print() in interactive mode, but possible.
+The loop isn't actually running twice — something is exiting early. But the only path out of the loop is if raw: break, and if raw were truthy, we wouldn't hit JSONDecodeError("empty response after retry").
+Wait — I missed something. Let me re-read line 132:
+
+python
+if not raw:
+    raise json.JSONDecodeError("empty response after retry", "", 0)
+The error message says "empty response after retry". But the actual error in your logs says:
+
+JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+That's not the message you'd raise. That's the default json.loads("") error. So your retry block is being bypassed entirely — the empty raw check at line 131 isn't firing.
+
+Which means raw is not empty but is also not valid JSON. It must contain something — whitespace, a single character, a control sequence, anything truthy that survives .strip() — but json.loads() on it produces "Expecting value at char 0".
+
+This is actually a different failure mode than I diagnosed previously. json.loads("   ") raises char 0. json.loads("\n\n") raises char 0. json.loads(some weird unicode whitespace) could raise char 0.
+
+Let me think about what would survive .strip() and still be invalid JSON. Standard .strip() removes ASCII whitespace and a few unicode whitespace chars but not all of them. If the LLM is returning something like a zero-width space, BOM marker, or weird unicode artifact, .strip() won't remove it, raw becomes truthy, but json.loads() still sees no parseable content at the start.
+
+There's another possibility: raw contains something like just the closing fence ``` with no JSON inside. After .replace("```json", "").replace("```", "").strip(), it's empty — but the replace happens after the truthy check on line 131. So:
+
+raw = "```" (truthy, passes line 131)
+cleaned = "" (empty after replace+strip)
+json.loads("") → Expecting value: line 1 column 1 (char 0) ✓ matches the error
+That fits exactly. The model is returning just markdown fences and nothing inside them.
+
+Fix. Add a second emptiness check after the cleanup, and make it part of the retry condition:
+
+python
+try:
+    parsed = None
+    for attempt in range(2):
+        response = llm.invoke([{"role": "system", "content": prompt}])
+        raw = (response.content or "").strip()
+        cleaned = raw.replace("```json", "").replace("```", "").strip()
+
+        if not cleaned:
+            print(f"  [CHUNK MERGE] empty/fences-only response on attempt {attempt + 1}, retrying...")
+            continue
+
+        try:
+            parsed = json.loads(cleaned)
+            break
+        except json.JSONDecodeError as je:
+            print(f"  [CHUNK MERGE] malformed JSON on attempt {attempt + 1}: {je} — retrying...")
+            continue
+
+    if parsed is None:
+        raise json.JSONDecodeError("no valid response after retry", "", 0)
+
+    merged_content = parsed["content"]
+    merged_sources = parsed.get("sources", [c["source"] for c in similar_chunks])
+
+    print(f"Response from LLM:\n{raw}")
+    print(f"  [CHUNK MERGE] success — {len(merged_content)} chars, "
+          f"{len(merged_sources)} source(s)")
+    print(_THIN)
+
+    return {
+        "content": merged_content,
+        "source": ", ".join(merged_sources),
+        "embedding": embedding_manager.generate_embedding(merged_content),
+    }
+except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as e:
+    print(f"  [CHUNK MERGE] FAILED ({type(e).__name__}: {e}) — keeping first chunk only")
+    print(_THIN)
+    return similar_chunks[0]
+Two changes:
+
+Check cleaned for emptiness, not raw. This catches the fences-only case.
+Move parsing inside the loop, so a JSON error on attempt 1 also triggers retry. Right now if attempt 1 returns malformed JSON, parsing happens outside the retry loop and there's no second chance.
+The print statements will now actually fire on retry, so next run you'll see empty/fences-only response on attempt 1, retrying... if that's what's happening, and you'll know.
+
+One other thing I want to flag from this log that wasn't in earlier ones:
+
+Line 113 of your file changed. You wrapped the merge-input chunks with json.dumps():
+
+python
+f"[Source: {json.dumps(c['source'])}]\n{json.dumps(c['content'])}"
+That probably wasn't intentional. It double-quotes and JSON-escapes the chunk text inside the prompt, so the LLM sees:
+
+[Source: "..\\data\\Adjustable Speed Drive.txt"]
+"Adjustable Speed Drives provide precise control..."
+Embedded quotes everywhere, escaped backslashes — this could be confusing the model and causing the empty-fence responses. Compare to a clean version:
+
+python
+f"[Source: {c['source']}]\n{c['content']}"
+I'd revert that line. It's not unrelated to the bug — feeding the model JSON-encoded prose as input makes it more likely to produce broken JSON on output.
+
+So: revert line 113 to plain string interpolation, and apply the cleaned-up retry block above. Re-run and the actual retry messages will show up in your logs, which will tell you definitively which failure mode (empty vs fences-only vs malformed) you're hitting.
+
+
+agent_query.py
+py
+
+
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\agent_query.py Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads. Loading weights: 100%|████████████████████████████████████████████████████████
+
+pasted
+
+1 May
+Claude responded: Now we can see exactly what's happening, and it's a completely different bug than I diagnosed.
+Now we can see exactly what's happening, and it's a completely different bug than I diagnosed. The new logs are extremely revealing.
+
+The actual failure mode
+Look at what the LLM is returning when merges fail:
+
+```python
+import json
+from collections import defaultdict
+
+def consolidate_chunks(chunks):
+    # 1. Read all input chunks. Identify the set of distinct facts across them.
+    facts = defaultdict(list)
+    for chunk in chunks:
+        for sentence in chunk['content'].split('. '):
+            ...
+```
+The model is writing Python code that would, if executed, produce the JSON. It's not returning the JSON itself. It's interpreted your prompt's process steps ("1. Read all input chunks. 2. For each distinct fact..." etc.) as a programming task and is generating an implementation.
+
+So my previous diagnosis was wrong on the cause but right on the symptom. The cleanup of fences works fine when the model returns JSON. But when the model returns ```python ... ```, your strip-fences logic only strips the literal \``jsonsubstring (not```python), then the trailing ```gets stripped, leavingpython\n import json\n .... That's not valid JSON, json.loadsfails at character 0 (thepofpython), and you correctly get Expecting value: line 1 column 1 (char 0)`.
+
+That's why my earlier theory about empty content / fences-only didn't match — the content wasn't empty, it was Python code.
+
+Why this is happening
+Three things in your prompt are pushing llama-3.1-8b-instant toward code generation:
+
+1. Numbered, imperative procedure steps. Your prompt reads exactly like a programming task spec:
+
+PROCESS (follow in this exact order):
+1. Read all input chunks. Identify the set of distinct facts across them.
+2. For each distinct fact, identify which source(s) support it.
+3. Write a single consolidated `content` passage that:
+   - States each distinct fact exactly once
+   ...
+4. Before returning, verify:
+"Read", "Identify", "For each", "Before returning, verify" — these are pseudocode verbs. To a small model trained on a lot of code, this looks like a function spec.
+
+2. Backtick-wrapped variable names. `content`, "sources" array, "merged_from" — these formatting cues read as symbol names, not English words. Combined with the numbered steps, it's a strong signal "this is a code task."
+
+3. The JSON output schema looks like a return type. When you write:
+
+{{
+  "content": "<consolidated prose...>",
+  "sources": ["<filename1>", ...],
+  "merged_from": <integer count>
+}}
+…with <placeholder> syntax, that reads like a TypeScript / type-hint annotation. The model interpreted it as "return a value matching this shape" and decided the most natural way is to write code that builds it.
+
+The 8b model is small enough that this kind of misinterpretation is a real failure mode. Larger models (70b+) are usually robust to this, but llama-3.1-8b-instant flips between text-generation and code-generation modes based on subtle prompt cues.
+
+The fix
+Restructure the merge prompt to demonstrate the output instead of describing how to produce it. Replace the procedural steps with a worked example. This is the technique you've already used elsewhere with GOOD/BAD examples — it works for the same reason: the model copies patterns more reliably than it follows abstract rules.
+
+Replace _CHUNK_MERGE_PROMPT with something like:
+
+python
+_CHUNK_MERGE_PROMPT = """You merge near-duplicate retrieved chunks into one consolidated chunk.
+
+Return ONLY a JSON object with this shape (no code, no markdown fences, no explanation):
+
+{{"content": "...", "sources": [...], "merged_from": <int>}}
+
+EXAMPLE INPUT:
+[Source: a.pdf]
+ASD affects 1 in 36 children. Early diagnosis improves outcomes.
+
+[Source: b.pdf]
+Approximately 1 in 36 kids have autism spectrum disorder. Children diagnosed early respond better to therapy.
+
+EXAMPLE OUTPUT:
+{{"content": "ASD affects approximately 1 in 36 children [Source: a.pdf] [Source: b.pdf]. Early diagnosis improves outcomes and response to therapy [Source: a.pdf] [Source: b.pdf].", "sources": ["a.pdf", "b.pdf"], "merged_from": 2}}
+
+RULES:
+- Preserve every fact across all input chunks. Never invent new facts.
+- Write each distinct fact only once, even if multiple chunks state it.
+- Cite every source inline as [Source: filename] after the sentence it supports.
+- If multiple sources support the same fact, list them all: [Source: a.pdf] [Source: b.pdf].
+- Do NOT write Python code. Do NOT explain your process. Output ONLY the JSON object.
+
+INPUT CHUNKS:
+"""
+The differences that matter:
+
+No numbered procedure. Eliminates the "this is a function spec" signal.
+Concrete worked example. Shows exactly what input → output looks like. The model copies this pattern.
+Explicit "Do NOT write Python code" — sometimes you have to spell it out for small models. This negative instruction is unusual but justified given what you're seeing.
+merged_from as <int> in the schema rather than <integer count of input chunks merged> — shorter, less likely to read as a type annotation.
+You should also defensively strip the python fence in the parser — even with a fixed prompt, the model will occasionally regress:
+
+python
+cleaned = (
+    raw
+    .replace("```json", "")
+    .replace("```python", "")
+    .replace("```", "")
+    .strip()
+)
+That at least lets the existing retry catch and recover when it does.
+
+What this run actually shows
+Stripping out the merge failures, the rest of the system worked correctly:
+
+Dedup detection: identified all the right pairs (cos 0.927, 0.962, 1.000, 0.909, 0.911, 0.962)
+Retry attempted: the new "attempt 1" log appeared each time, confirming the retry wrapper is active
+Both retries also failed because the same failure mode happened on retry (the model is consistently in code-mode for these prompts, not just unlucky once)
+Successful merges: 1 of 6 merges succeeded — the one where the model happened to output JSON
+Final answer: still grounded, still correct, the system is robust to merge failures
+The retry isn't helping here because both attempts hit the same code-generation issue. Once you fix the prompt, retries should rarely be needed.
+
+Two side observations
+Your strip logic shows the python fence content twice. Look at the one successful merge:
+
+[CHUNK MERGE] LLM response on attempt 1:
+```json
+{ ... }
+```
+Response from LLM:
+```json
+{ ... }
+```
+[CHUNK MERGE] success — 567 chars
+The "LLM response on attempt 1" line and the "Response from LLM" line print the same content. That's because you have a debug print added inside the loop and the original print after parsing. Probably fine, just noisy — you can drop one of them.
+
+The merge work still doesn't reach the synthesis LLM. Even when merges succeed, the final answer still pulls from the original tool messages in the conversation. The dedup is a pure quality-check optimization right now, not a context-shrinking one. I flagged this two runs ago — it's still the case, and the answer length (3,044 chars across many [Source: Adjustable Speed Drive.txt] repetitions) shows it. Worth addressing once the merge prompt is solid.
+
+Bottom line: fix the prompt to show-don't-tell the JSON output, and add \``python` to the fence stripper as a defensive measure. The merge failures should drop to near-zero.
+
+
+agent_query.py
+py
+
+
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\agent_query.py Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads. Loading weights: 100%|████████████████████████████████████████████████████████
+
+pasted
+
+1 May
+Claude responded: Big improvement.
+Big improvement. Let me walk through what changed and what's still worth fixing.
+
+What worked
+The merge prompt fix landed. Every merge attempt this run succeeded on attempt 1 — no Python code, no fences, clean JSON. The worked-example pattern flipped the model out of code-generation mode. Compare:
+
+Previous run: 1 of 6 merges succeeded
+This run: 3 of 3 merges succeeded
+The retry wrapper isn't even firing because it doesn't need to.
+
+The third retrieval correctly skipped dedup. Look at the "variable frequency drive" retrieval — it returned 5 chunks about VFDs, AC drives, operating principles, harmonic distortion, future capabilities. None of them were near-duplicates of anything already in accumulated_chunks. The dedup loop ran, found no pairs above 0.88, and did nothing. That's exactly the correct behavior — it shows the threshold is well-calibrated. You don't want it merging "VFDs are popular in pumps" with "harmonic distortion affects power quality" just because they share the same source file.
+
+What's still happening (and is actually a separate, real problem)
+Look at accumulated_chunks count progression:
+
+After retrieval 1: 3 chunks (was 5, merged 2 pairs, dropped 2)
+After retrieval 2: 7 chunks (added 5, merged 1 pair, dropped 1) ✓
+After retrieval 3: 12 chunks (added 5, no merges)
+12 deduped chunks containing 5,984 chars of context. That's a lot. The dedup is doing its job within the agent's quality-check loop, but the 12 deduped chunks are still not what the synthesis LLM sees.
+
+Look at iteration 3's final answer — it includes verbatim sentences like "VFDs are especially popular in pumps, fans, conveyors, and HVAC systems" and "Adjustable Speed Drives can introduce harmonic distortion..." These are pulled from the original tool messages in the conversation history (role=tool blocks [3], [4], [5]), not from your deduped accumulated_chunks. The synthesis LLM is reading 15 raw chunks, including the original duplicates that your dedup correctly identified and merged out.
+
+This is the design gap I've flagged twice now. Your dedup work is paying off in check_answer_quality (it sees 5,984 chars of clean context) but is invisible to the model writing the final answer (which still sees 15 raw chunks via the conversation history).
+
+A quieter problem that just appeared
+Look closely at the merge outputs:
+
+"content": "The future of Adjustable Speed Drives is closely connected with... [Source: ..\\data\\Adjustable Speed Drive.txt]. Ultimately, Adjustable Speed Drives are not merely devices for controlling motor speed... [Source: ..\\data\\Adjustable Speed Drive.txt]. As industries seek more efficient... [Source: ..\\data\\Adjustable Speed Drive.txt]."
+The merge LLM is scrambling sentence order while merging. Look at the second chunk it merged ("The future of...") — the original chunk had:
+
+"The future of Adjustable Speed Drives is closely connected... As industries seek more efficient and environmentally friendly solutions, Adjustable Speed Drives will continue to play a critical role..."
+
+Notice "As industries seek more efficient..." was originally the second sentence of one chunk. In the merged output it ends up as the third sentence with an "Ultimately..." sentence (from a different chunk) wedged in between. The result is grammatically valid but logically slightly worse — the discourse flow gets broken.
+
+This is a tradeoff inherent to the "merge into prose" instruction. The model treats sentences as facts to deduplicate and re-order, losing the original discourse coherence. Probably acceptable for a RAG pipeline where the synthesis LLM rewrites everything anyway, but worth knowing.
+
+What I'd do next
+In rough priority order:
+
+1. Make dedup affect synthesis. Right now it's wasted work for the final answer. The cleanest fix: after check_answer_quality returns OK, append a new user message before the synthesis call:
+
+python
+elif name == "check_answer_quality":
+    full_context = _format_context_for_llm(accumulated_chunks)
+    call_args = {"answer": args["answer"], "context": full_context}
+    result = callables[name](**call_args)
+    final_quality = "OK" if result.strip().startswith("OK") else "INSUFFICIENT"
+    
+    # If quality is OK, inject deduped context before the synthesis turn
+    if final_quality == "OK":
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "content": result,
+        })
+        # Override the conversation context with deduped chunks for synthesis
+        messages.append({
+            "role": "user",
+            "content": (
+                "Use ONLY the following deduplicated context for your final answer. "
+                "Ignore the raw tool results above — they may contain redundant chunks "
+                "that have been consolidated below.\n\n"
+                + full_context
+            ),
+        })
+        continue  # skip the duplicate append at bottom of loop
+You'd see the prompt token count drop and the answer quality improve (less redundancy to weave around).
+
+2. Drop one of the duplicate "Response from LLM" prints in _merge_similar_chunks. You're printing the merge output twice — once from the in-loop debug print and once from the post-parse print. Just noise. Pick one.
+
+3. Consider lowering merge threshold to 0.85. Look at the cos=0.904 pair on retrieval 2 — "chunk 6 ~ chunk 1 (cos=0.904)". That was right at the edge. With your current threshold of 0.88 it caught it. But if you'd had threshold 0.92, you would have missed a clear duplicate. Now look at the third retrieval — no near-misses logged, but I bet there were pairs at 0.80–0.87 that the threshold currently lets through. If you instrumented those (the "near-miss" logging I suggested a few turns back), you could tune empirically. For this run, 0.88 worked, but it's close to the edge.
+
+4. The model is still batching all retrievals on iteration 1, ignoring your "do NOT batch tool calls" rule. That's a model-capability issue with llama-3.1-8b-instant, not a code bug — the small model just doesn't comply reliably with sequential-tool-call instructions. If you want it enforced, set MAX_TOOL_CALLS_PER_ITERATION = 1 for retrievals specifically and let the agent issue them across iterations.
+
+The merge pipeline itself is solid now. The remaining work is about making the dedup actually shrink the synthesis context, which is the bigger lever for both quality and token cost.
+
+
+You said: Now consider that i m gonna add another layer/function that verifies whether the produced answer is relevant to the original query or not.
+Now consider that i m gonna add another layer/function that verifies whether the produced answer is relevant to the original query or not. Should I use LLM or would it be right to use a similarity search? Should I search semantically or with keywords for relevance?
+
+1 May
+Claude responded: Good question — and the right answer depends on what kind of failure you're trying to catch.
+Good question — and the right answer depends on what kind of failure you're trying to catch. Let me break this down because "is the answer relevant to the query?" is actually three distinct checks, and each one wants a different tool.
+
+What can go wrong between query and answer
+Topic drift — user asked about ASD symptoms, answer is about ASD diagnosis criteria. Both are on-topic-ish, but the answer doesn't address the question.
+Question-type mismatch — user asked "how" or "why," answer gives a "what." Definitional answer to a causal question.
+Hallucination / ungroundedness — answer is fluent and topical but invents facts not in the chunks. (You already partially handle this in check_answer_quality.)
+Relevance-to-query is mostly #1 and #2. Groundedness is #3 — separate concern, don't conflate them.
+
+Why pure similarity search is the wrong tool here
+Cosine similarity between the query embedding and the answer embedding will tell you they're in the same topic neighborhood. That's necessary but nowhere near sufficient. Two failure modes it misses badly:
+
+High similarity, wrong answer. Query: "What are the side effects of drug X?" Answer: "Drug X is a beta-blocker used for hypertension, developed in 1985…" Embedding similarity will be very high (same entity, same domain), but the answer doesn't address side effects at all.
+Low similarity, correct answer. Query: "Is it safe during pregnancy?" Answer: "Category C — animal studies showed teratogenic effects; avoid in first trimester." Lexically and semantically distant from "safe" and "pregnancy," but a perfect answer.
+Sentence-transformer embeddings (you're using all-MiniLM-L6-v2) are trained for paraphrase/topical similarity, not for question-answer entailment. They'll give you a topical sanity check at best. Useful as a cheap pre-filter, useless as a verdict.
+
+Keyword overlap is even worse — it's what check_answer_quality already does for groundedness, and you can see how brittle it is (the stop-word list, the magic threshold of 15). Don't repeat that pattern for relevance.
+
+What an LLM judge actually buys you
+An LLM call with a focused rubric can evaluate:
+
+Does the answer address the specific thing asked (symptoms vs. causes vs. treatment)?
+Does it match the question type (yes/no, list, explanation, comparison)?
+Does it dodge or refuse implicitly?
+This is exactly the kind of judgment LLMs-as-judges do well, and there's solid empirical literature showing they correlate well with human relevance ratings when the rubric is tight. The cost is one extra call per query — given your pipeline already does 3–6 LLM iterations per question, one more is marginal.
+
+My recommendation: a two-stage gate
+Use similarity as a cheap signal, LLM as the verdict. This is roughly how production RAG eval stacks (Ragas, TruLens, etc.) handle it.
+
+Stage 1 — embedding similarity as a smoke test. Embed the query, embed the answer, take cosine. If it's catastrophically low (say, below 0.25–0.3 with your normalized MiniLM vectors), the answer is almost certainly off-topic — flag immediately, skip stage 2. This catches the egregious drift cases for free since you already have EmbeddingManager loaded.
+
+Stage 2 — LLM judge for the actual relevance call. For everything that passes stage 1, run a small focused prompt. Something like:
+
+Question: {query}
+Answer: {answer}
+
+Does the answer directly address what the question asks?
+Reply with one of:
+- RELEVANT: answer addresses the specific thing asked
+- PARTIAL: answer is on-topic but doesn't address the specific ask
+- IRRELEVANT: answer is off-topic or evasive
+Then one sentence of justification.
+Force a structured output (label + reason). Log the reason — it's gold for debugging and for your user_thumbdowns.json learning loop.
+
+A few implementation notes specific to your codebase
+You already have check_answer_quality doing groundedness checks. Keep that — it answers a different question ("is the answer supported by the chunks?"). Add check_answer_relevance(query, answer) as a separate tool, and have the agent call both before finalizing. They're orthogonal: an answer can be grounded but irrelevant (correct facts about the wrong thing), or relevant but ungrounded (right topic, hallucinated specifics).
+
+Don't make the agent self-judge in the same call that produces the answer — there's well-documented bias where models rate their own output more favorably. Use a fresh LLM call with only the query and answer in context, no chunks, no history. That isolates the relevance question from the generation context.
+
+For the threshold tuning, don't pick numbers from intuition. Pull 30–50 samples from your existing interactions.jsonl (you have the OK and USER_THUMBSDOWN labels already), compute cosine similarity for each, and look at the distribution. You'll see where the natural cutoff sits for your domain.
+
+One last thing: if relevance fails, what should the agent do? You probably want it to retry with a reformulated query rather than just refusing — otherwise you're throwing away work. But cap the retries (you already have MAX_ITERATIONS = 6), and if the second attempt also fails relevance, return the standard "knowledge base does not contain information about [topic]" rather than a wrong answer dressed up as a right one.
+
+So: LLM for the verdict, similarity as a cheap pre-filter, and keep relevance separate from groundedness.

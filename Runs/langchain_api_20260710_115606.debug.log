@@ -1,0 +1,3 @@
+2026-07-10 11:56:08 | INFO     | torch._subclasses.fake_tensor | [-] | FakeTensor cache stats:
+2026-07-10 11:56:08 | INFO     | torch._subclasses.fake_tensor | [-] |   cache_hits: 0
+2026-07-10 11:56:08 | INFO     | torch._subclasses.fake_tensor | [-] |   cache_misses: 0

@@ -1,0 +1,264 @@
+When a confusing query is given, an undesired answer forms, which is expected. This answer is marked bad by the 
+
+feedback_store.mark_last_bad()
+This should also do the following:
+
+take feedback from the user and 1. if not feedback.strip() == "" and len(feedback.strip() >= 10): 1. create/append a json file (name it user_thumbdowns.json) that stores the originally asked query, its previously generated variants by the LLM in all the iterations, and their corresponding chunks retrieved from the vector database - all into this user_thumbdowns.json
+Whenever a new query arises, the run_agent() first must check if the asked query has already been asked before and the user marked its response as bad from the user_thumbdowns.json. If there is any there, then append that with a prompt into the base system prompt
+
+Show more
+00:24
+Claude responded: I'll analyze the requirements and implement the changes.
+I'll analyze the requirements and implement the changes. Let me first understand what's needed:
+
+When mark_last_bad() is called: Prompt user for feedback. If feedback is non-empty and ≥10 chars, save the original query, all LLM-generated query variants from iterations, and their retrieved chunks to user_thumbdowns.json.
+When a new query arrives in run_agent(): Check user_thumbdowns.json for matching prior bad queries. If found, inject context into the system prompt warning the LLM about previously bad responses.
+Let me look at the current structure more carefully before editing.
+
+
+Review current feedback_store to understand mark_last_bad and log structure
+Review current feedback_store to understand mark_last_bad and log structure
+Now I have a clear picture. Let me think through the design:
+
+Key observations:
+
+The run_agent() currently records retrieved_sources (list of {query, preview}) — these are the LLM-generated query variants. Good — we already capture variants.
+However, the actual chunks are only stored for the last retrieval (retriever.get_last_chunks()). To capture chunks for every variant, I need to track them per-variant in run_agent().
+mark_last_bad() is currently called from agent_query.py when user types "bad". I'll need to prompt for feedback there and pass it through.
+The matching logic for new queries — should be a normalized exact match plus optionally semantic similarity. The user said "if the asked query has already been asked before" — I'll use normalized exact match (lowercase + strip), consistent with the existing _normalize_query pattern in agent_query.py.
+Let me make the changes. I'll work in /home/claude since the project files are read-only.
+
+
+Set up working directory with project files
+Set up working directory with project files
+Now let me update feedback_store.py first. I'll modify mark_last_bad() to accept feedback and the variant/chunk data, and add a method to look up prior thumbdowns by query.
+
+
+Edited 2 files
+Edited 2 files
+Now I'll rewrite mark_last_bad() to accept feedback, variants, and per-variant chunks; and add helpers for the user thumbdowns store.
+
+
+Replace mark_last_bad with version that accepts feedback and persists to user_thumbdowns.json; add helpers
+Replace mark_last_bad with version that accepts feedback and persists to user_thumbdowns.json; add helpers
+Now let me verify the updated feedback_store.py:
+
+
+Verify feedback_store.py
+Verify feedback_store.py
+Now I need to update agent_query.py to:
+
+Track per-variant chunks in run_agent() — capture chunks immediately after each retrieve_documents call.
+Return variant data from run_agent() so it's available when the user later types bad.
+Inject thumbdown context into the system prompt when a matching prior bad query is found.
+Prompt user for feedback when they type bad, and pass feedback + variants to mark_last_bad().
+Let me start with the system-prompt injection. I'll extend _build_system_prompt to take both blocked variants AND prior thumbdowns.
+
+
+Update _build_system_prompt to also inject prior user thumbdown context
+Update _build_system_prompt to also inject prior user thumbdown context
+Now let me update run_agent() to:
+
+Accept a prior_thumbdowns argument and pass it to _build_system_prompt.
+Track every variant + its retrieved chunks (so the data is available if the user later flags this run as bad).
+Return that variant tracking data.
+
+Viewed 2 files
+Viewed 2 files
+Now I'll update run_agent:
+
+Accept prior_thumbdowns argument.
+Track variants_with_chunks — for each retrieve_documents call, capture the variant query plus the chunks the retriever just returned (via retriever.get_last_chunks()).
+Include variants_with_chunks in every return path.
+
+Update run_agent signature and init to accept prior_thumbdowns and track per-variant chunks
+Update run_agent signature and init to accept prior_thumbdowns and track per-variant chunks
+Now update the retrieve_documents handler to capture chunks per variant, and update all three return paths to include variants in the returned dict.
+
+
+Capture chunks per variant during retrieve_documents
+Capture chunks per variant during retrieve_documents
+Now update the three return paths to include variants:
+
+
+Edited 3 files
+Edited 3 files
+Now I need to update main() to:
+
+Look up prior thumbdowns for each new query and pass them into run_agent().
+When user types bad, prompt for feedback and pass feedback + variants to mark_last_bad().
+
+Look at the main loop's bad/stats/learn handling and the run_agent invocation
+Look at the main loop's bad/stats/learn handling and the run_agent invocation
+Now update the bad command handler to prompt for feedback and pass variants from last_result:
+
+
+Update bad command to prompt for feedback and pass variants to mark_last_bad
+Update bad command to prompt for feedback and pass variants to mark_last_bad
+Now I need to import MIN_FEEDBACK_LEN and look up prior thumbdowns when running the agent:
+
+
+Import MIN_FEEDBACK_LEN from feedback_store
+Import MIN_FEEDBACK_LEN from feedback_store
+Now look up prior thumbdowns and pass them into run_agent:
+
+
+Inject prior thumbdowns lookup before run_agent call
+Inject prior thumbdowns lookup before run_agent call
+Let me verify the changes compile and look right:
+
+
+Syntax-check both modified files
+Syntax-check both modified files
+Now let me write a small standalone test to verify the FeedbackStore thumbdown logic works correctly end-to-end:
+
+
+Run unit-test-style checks on the new FeedbackStore behaviour
+Run unit-test-style checks on the new FeedbackStore behaviour
+Note: I hit the tool-use limit before I could do a full end-to-end test of the system-prompt injection in agent_query.py. The FeedbackStore changes are verified, but you should manually smoke-test agent_query.py's bad-command flow and the prior-thumbdown injection on next query.
+
+Summary of changes
+feedback_store.py
+New module-level constants: USER_THUMBDOWNS_PATH = Path("../data/feedback/user_thumbdowns.json") and MIN_FEEDBACK_LEN = 10.
+__init__ now also accepts thumbdowns_path and creates its parent dir.
+mark_last_bad(feedback="", variants=None) — same JSONL flip as before. Additionally, when feedback.strip() is non-empty and len(feedback.strip()) >= 10, it appends a structured entry to user_thumbdowns.json containing original_query, normalized_query, bad_answer, user_feedback, and the full list of variants (each with its own chunks).
+New helpers: _load_thumbdowns, _save_thumbdowns, _append_thumbdown, and find_thumbdowns_for_query(query) (case-insensitive normalized-exact match, returns all matching prior entries).
+agent_query.py
+Imports MIN_FEEDBACK_LEN from feedback_store.
+_build_system_prompt(blocked_variants, prior_thumbdowns=None) — gained a second section appended to the base prompt when prior thumbdowns exist. It includes the original query, the user's free-text feedback, the bad answer snippet, every reformulation that was tried, and a preview of the chunks each reformulation retrieved, with explicit instructions to avoid re-using them.
+run_agent(...) — gained a prior_thumbdowns parameter. Now also tracks variants_with_chunks: list[dict] — for every retrieve_documents call it captures {"query": <variant>, "chunks": [{"content": ..., "source": ...}, ...]} from retriever.get_last_chunks(). All three return paths now include "variants": variants_with_chunks.
+main() — before each run_agent call, looks up feedback_store.find_thumbdowns_for_query(raw) and passes them through. The bad command now prompts the user for free-text feedback, then calls mark_last_bad(feedback=..., variants=last_result.get("variants", [])), with appropriate console messages for the empty / too-short / persisted cases. Also handles the edge case of bad typed in a fresh session before any query (no in-memory last_result) by still flipping the JSONL but skipping enrichment.
+Verified
+The FeedbackStore changes pass a full set of behavioural checks: empty feedback / too-short feedback do not write the file; meaningful feedback writes a correctly-shaped entry; entries accumulate across calls; lookup is case-insensitive and returns all matches.
+
+Not verified (out of tool budget)
+That agent_query.py's new wiring runs end-to-end. The file parses cleanly, but I didn't get to import-check it (it pulls in langchain_groq, chromadb, etc., so it would have needed a separate sanity script). Worth running python -c "import agent_query" from your env before relying on it.
+The full interactive flow (typing bad, providing feedback, asking the same query again, seeing the injected prompt). I'd suggest one manual run to confirm the prompt injection looks right in your terminal output.
+The modified files are in /home/claude/rag/agent_query.py and /home/claude/rag/feedback_store.py. Let me know if you'd like me to present them as downloads, or continue with any tweaks (e.g. fuzzy matching instead of exact normalized matching for find_thumbdowns_for_query).
+
+You said: Continue
+Continue
+
+00:29
+Claude responded: I'll present the two modified files so you can drop them into your project.
+I'll present the two modified files so you can drop them into your project.
+
+
+Copy modified files to outputs directory
+Copy modified files to outputs directory
+Now let me also do the import-check I flagged as missing, by stubbing out the third-party imports in a separate sanity script (so we don't actually need langchain_groq / chromadb installed):
+
+
+Smoke-test agent_query.py with third-party deps stubbed
+Smoke-test agent_query.py with third-party deps stubbed
+All checks pass. Let me preview what the injected system prompt looks like in practice — useful for verifying the LLM will receive a clear instruction:
+
+
+Render a realistic example system prompt with both blocked variants and a prior thumbdown
+Render a realistic example system prompt with both blocked variants and a prior thumbdown
+The injected prompt looks clean and gives the LLM everything it needs to course-correct: the user's specific complaint, the bad answer, every reformulation that was tried, and which chunks each retrieved (so the model can see why it went wrong — the retriever was pulling ADHD content for an ASD question).
+
+Now let me present the files:
+
+
+Presented 2 files
+Presented 2 files
+Both files are now ready to drop in. A quick recap of what's verified end-to-end:
+
+FeedbackStore behavioural tests all pass: empty / too-short feedback skips the file write, meaningful feedback persists a correctly-shaped entry, multiple thumbdowns for the same query accumulate, and find_thumbdowns_for_query is case-insensitive.
+agent_query.py imports cleanly with deps stubbed; run_agent and _build_system_prompt both expose the prior_thumbdowns parameter; the rendered prompt correctly combines blocked variants and prior-failure context.
+A couple of notes for when you wire this up in your real environment:
+
+Matching is normalized-exact (lowercase + strip), mirroring the existing failed_variants lookup. If you'd rather match semantically (e.g. embed the query and find prior thumbdowns within a similarity threshold), that's a small extension — let me know.
+The bad command now prompts interactively for feedback. If you ever drive this from a non-TTY context (script, web UI), you'll want to expose mark_last_bad(feedback=..., variants=...) directly rather than going through the CLI.
+No data migration needed — user_thumbdowns.json is created lazily on first qualifying thumbdown, and find_thumbdowns_for_query returns [] if the file doesn't exist.
+
+Feedback store
+PY 
+
+Agent query
+PY 
+You said: To check its working, i need a confusing query and a feedback.
+
+Adjustable Speed Drive.txt
+txt
+
+
+autism_spectrum_disorder_dataset.json
+json
+
+Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf
+pdf
+
+
+ASD_Patient_Management_Handbook.docx
+docx
+
+
+autism_spectrum_disorder_dataset.csv
+csv
+
+
+asd_disparities_gender_race_essay.html
+191 lines
+
+html
+
+
+asd_information.json
+58 lines
+
+json
+
+To check its working, i need a confusing query and a feedback. It should be confusing in the sense that ASD refers to both Autism Spectrum Disorder and Adjustable Speed Drive. However, in "Adjustable Speed Drive.txt" its not mentioned as ASD anywhere
+
+00:36
+Claude responded: You want to engineer a query that's genuinely ambiguous between Autism Spectrum Disorder and Adjustable Speed Drive — but where the text file deliberately does…
+You want to engineer a query that's genuinely ambiguous between Autism Spectrum Disorder and Adjustable Speed Drive — but where the text file deliberately doesn't use the "ASD" abbreviation, so the retriever has to disambiguate purely from semantic content. Let me first read the Adjustable Speed Drive file to see what vocabulary the LLM/retriever could plausibly latch onto.
+
+
+Read the Adjustable Speed Drive text file to see what content it has
+Read the Adjustable Speed Drive text file to see what content it has
+Now I have a clear picture. Here's the design:
+
+The collision: The acronym ASD is overloaded. The PDF and JSON files use it for Autism Spectrum Disorder and use that abbreviation extensively. The Adjustable Speed Drive file uses only the long form — never "ASD". So if someone asks "What is ASD?" the retriever will only find autism content, even though Adjustable Speed Drive is a perfectly valid expansion. That's the trap.
+
+The trick is to find a query phrasing that:
+
+Looks ambiguous to a human reader (could mean either)
+But embeds semantically close to the ASD/autism content (so the retriever pulls only autism chunks)
+Which produces an answer that's confidently wrong relative to what the user actually wanted
+A bare "What is ASD?" is too obviously medical-leaning once retrieval kicks in. We want something that, given the corpus, will retrieve autism content even though the user meant the engineering one.
+
+Recommended confusing query
+"What are the main components and working principles of ASD?"
+
+Why this works as a test case:
+
+"Components and working principles" is engineering phrasing — it's how the Adjustable Speed Drive document is literally structured (it has sections titled "Components of an Adjustable Speed Drive" and "Working Principle of Adjustable Speed Drives"). A user asking this almost certainly means the engineering ASD.
+But the embedding model has no idea "ASD" maps to "Adjustable Speed Drive" because that mapping appears nowhere in the corpus. It will embed "ASD" with strong autism-context priors from the medical documents.
+The retriever will pull autism chunks (where "ASD" appears literally and frequently). The LLM will then answer about social communication deficits, repetitive behaviors, DSM-5, etc. — which is wrong for the asked intent.
+The user can flag it as bad with feedback that's clearly informative for the next attempt.
+Recommended feedback for the bad command
+Make sure it's ≥ 10 characters (your MIN_FEEDBACK_LEN threshold) and gives the LLM something useful to course-correct on next time:
+
+"By ASD I meant Adjustable Speed Drive, the motor speed control device, not Autism Spectrum Disorder. The retrieved chunks were all about autism but I wanted the electrical engineering meaning."
+
+This feedback is gold for the next run because:
+
+It explicitly disambiguates the acronym.
+It names the long-form term (Adjustable Speed Drive), which is present in the corpus, so when the prompt is re-injected on the next run the LLM will likely reformulate its retrieval queries using "Adjustable Speed Drive", "motor speed control", "VFD", etc. — and actually find the right document.
+It tells the LLM exactly why the previous chunks were wrong, not just that they were.
+Suggested test sequence
+Make sure the corpus is ingested — drop all uploaded files into your ../data/ subfolders and run python ingest.py. The Adjustable Speed Drive .txt should land in ../data/textfiles/, the PDF in ../data/pdfs/, the JSON files in ../data/json/, the HTML in ../data/html/, the DOCX in ../data/word/, the CSV in ../data/csv/.
+First run: ask What are the main components and working principles of ASD? — expect an autism-flavored answer.
+Flag it: type bad, then paste the feedback above when prompted. You should see the console print "Last answer flagged as bad and persisted to user_thumbdowns.json (N variant(s) captured)." and a new ../data/feedback/user_thumbdowns.json should appear.
+Inspect the file to confirm shape: cat ../data/feedback/user_thumbdowns.json — you should see one entry with the original query, the LLM's reformulations (e.g. "ASD components", "autism spectrum disorder structure", whatever it tried), the chunks each retrieved, and your feedback string.
+Second run: ask the same query again — What are the main components and working principles of ASD?. You should see the console print "[USER THUMBDOWN HISTORY] 1 prior bad-answer record(s) found for this query — injecting context...", and inside the FULL MESSAGE SENT TO LLM dump for iteration 1, the system prompt should now contain a USER-FLAGGED PRIOR FAILURE block with your feedback and the prior bad reformulations listed.
+Verify the course-correction: the LLM, now seeing your feedback, should issue retrieval queries containing terms like "Adjustable Speed Drive", "variable frequency drive", "motor speed control" — and produce an engineering-flavored answer this time.
+A few alternative confusing queries (in case you want to try variations)
+"Explain the typical applications of ASD in industrial settings" — strongly engineering-leaning intent, but the retriever will still pull autism chunks because "ASD" embeds toward autism. Slightly easier for the system because "industrial" might rescue it. Useful as a comparison.
+"What are the main types of ASD?" — most ambiguous of all. The autism PDF talks about "subtypes" (Asperger's, PDD-NOS, etc.) and the engineering doc has a "Types of Adjustable Speed Drives" section. The answer will skew autism, and the user wanting types of drives (DC, AC, VFD, vector control, servo) will be disappointed. Cleanly demonstrates the same disambiguation problem.
+"How does ASD reduce energy consumption?" — almost forces the right answer through content, since autism chunks have nothing about energy. This is a weaker test — the retriever might actually return zero useful autism chunks, which would trip your existing failed_variants blocklist rather than your new thumbdown flow. Avoid this one for testing the new feature; it's a different failure mode.
+The first one ("components and working principles") is the cleanest test because the autism corpus does have plausible-looking content about those concepts (DSM-5 criteria, screening tools, evaluation principles), so the LLM will produce a confidently wrong answer rather than failing retrieval — which is exactly the failure mode user_thumbdowns.json is designed to catch.
+

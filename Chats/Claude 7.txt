@@ -1,0 +1,703 @@
+I m trying to restructure my message that goes to the LLM. Tell me some practical ways to implement to improve what the LLM recieved, based on the LLM i m currently using "llama-3.1-8b-instant". Also, tell me how to check them.
+
+The message is:
+
+```python
+_BASE_SYSTEM_PROMPT = """## ROLE
+You are a precise research assistant. Your only knowledge source is the 
+knowledge base — you never answer from memory or assumptions.
+
+## WHAT YOU HAVE ACCESS TO
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+
+## PROCESS — follow this exactly
+STEP 1: Call retrieve_documents with 2-3 SHORT, DIVERSE queries.
+         Each query MUST use different vocabulary and a different angle.
+         ✓ GOOD: "greenhouse gas emissions", "global temperature data", "CO2 concentration"
+         ✗ BAD:  "causes of X", "what causes X", "X causes"  ← all same angle, DO NOT DO THIS
+STEP 2: If results are clearly insufficient → ONE more rephrased query, then stop.
+STEP 3: Draft answer using ONLY retrieved chunks. Cite [Source: X] inline.
+STEP 4: Call check_answer_quality(answer=<your draft>).
+STEP 5: Return final answer.
+
+## HARD CONSTRAINTS
+- retrieve_documents: MAX 5 calls total. Stop after 3 if results are poor.
+- NEVER generate two queries with the same words in the same call.
+- NEVER repeat a query already tried.
+- NEVER fabricate facts not present in retrieved chunks.
+- If knowledge base lacks the answer after 3 tries → say exactly:
+  "The knowledge base does not contain information about [topic]."
+"""
+
+```
+
+Then the blocked variants and the thumbdowns (with original query, user feedback, bad answer, variants of query that were tried, and the chunks retrieved through them):
+
+```python
+def _build_system_prompt(
+    blocked_variants: list[str],
+    prior_thumbdowns: list[dict] | None = None,
+) -> str:
+    prompt = _BASE_SYSTEM_PROMPT
+
+    if blocked_variants:
+        lines = "\n".join(f'  - "{v}"' for v in blocked_variants)
+        prompt += (
+            f"\n\nBLOCKED QUERY VARIANTS — These exact phrasings retrieved 0 useful chunks"
+            f" the last time this question was asked. Do NOT reuse them under any"
+            f" circumstances. Generate different, semantically distinct reformulations:\n{lines}"
+        )
+
+    if prior_thumbdowns:
+        prompt += (
+            "\n\nUSER-FLAGGED PRIOR FAILURE — This same question (or a near-identical one)"
+            " was asked before and the user explicitly marked the answer as bad. Below is"
+            " what went wrong last time, including the exact query reformulations that were"
+            " tried and the chunks they retrieved. Use this to:\n"
+            "  1. AVOID re-using the same query reformulations — they led to a bad answer.\n"
+            "  2. AVOID grounding your answer in the same chunks unless you can clearly"
+            " interpret them differently.\n"
+            "  3. Try genuinely different angles, vocabulary, and sub-topics.\n"
+        )
+        for i, td in enumerate(prior_thumbdowns, start=1):
+            prompt += f"\n--- Prior failure #{i} ---\n"
+            prompt += f"Original query : {td.get('original_query', '')}\n"
+            ufb = td.get("user_feedback", "")
+            if ufb:
+                prompt += f"User feedback  : {ufb}\n"
+            bad_ans = td.get("bad_answer", "")
+            if bad_ans:
+                snippet = bad_ans[:300] + ("..." if len(bad_ans) > 300 else "")
+                prompt += f"Bad answer was : {snippet}\n"
+            variants = td.get("variants", []) or []
+            if variants:
+                prompt += "Reformulations that were tried (DO NOT REUSE):\n"
+                for v in variants:
+                    prompt += f"  - \"{v.get('query', '')}\"\n"
+                    chunks = v.get("chunks", []) or []
+                    if chunks:
+                        for c in chunks[:2]:
+                            content = (c.get("content") or "").replace("\n", " ")
+                            preview = content[:200] + ("..." if len(content) > 200 else "")
+                            prompt += f"      retrieved [{c.get('source', '?')}]: {preview}\n"
+
+    return prompt
+```
+
+Also, the tool schema also goes to the LLM:
+
+```python
+response = llm.invoke(messages, tools=tool_schemas)
+```
+
+After 1st iteration, the LLM may request one or more tool_calls. So, the LLM's exact response and the called tools' responses (with their retrieved chunks) are appended to the message:
+
+```python
+for tool_call in tool_calls:
+            name = tool_call["name"]
+            args = tool_call["args"]
+
+            print(f"\n{_THIN}")
+            print(f"  AGENT ACTION — calling tool: {name}")
+            print(_THIN)
+            print(f"  args: {json.dumps(args, indent=4)}")
+            print(_THIN)
+
+            if name == "retrieve_documents":
+                if total_retrievals >= MAX_TOTAL_RETRIEVALS:
+                    result = "Retrieval limit reached. Use what you have to answer."
+                    print(f"  [SKIPPED] retrieval cap ({MAX_TOTAL_RETRIEVALS}) reached")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": result,
+                    })
+                    continue
+                # ── NEW: cross-iteration duplicate guard ──────────────────────
+                q_normalized = args["query"].strip().lower()
+                if q_normalized in all_tried_queries:
+                    print(f"  [DEDUP] Skipping already-tried query: \"{args['query']}\"")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": "You already tried this exact query. Try a genuinely different angle.",
+                    })
+                    continue
+                all_tried_queries.add(q_normalized)
+                result = callables[name](**args)
+                total_retrievals += 1
+                # Capture the chunks produced by THIS specific variant query so we
+                # can persist them later if the user flags this run as bad.
+                variant_chunks = [
+                    {
+                        "content": c.get("content", ""),
+                        "source": (c.get("metadata") or {}).get("source", "?"),
+                    }
+                    for c in retriever.get_last_chunks()
+                ]
+                variants_with_chunks.append({
+                    "query": args["query"],
+                    "chunks": variant_chunks,
+                })
+                if result.startswith("No relevant"):
+                    newly_failed.append(args["query"])
+                    print(f"  [FAILED VARIANT] recorded: \"{args['query']}\"")
+                else:
+                    accumulated_context.append(result)
+                retrieved_sources.append({"query": args["query"], "preview": result[:200]})
+                total_chunks = sum(r.count("[Source:") for r in accumulated_context)
+                print(f"\n  [AGENT STATE] total_retrievals={total_retrievals}/{MAX_TOTAL_RETRIEVALS} | "
+                      f"accumulated_context={total_chunks} chunk(s) across {len(accumulated_context)} retrieval(s)")
+
+            elif name == "check_answer_quality":
+                full_context = "\n\n---\n\n".join(accumulated_context)
+                args["context"] = full_context
+                print(f"  [AGENT] injecting {len(full_context)} chars of accumulated context into check_answer_quality")
+                result = callables[name](**args)
+                final_quality = "OK" if result.strip().startswith("OK") else "INSUFFICIENT"
+                print(f"  [AGENT STATE] final_quality set to: {final_quality}")
+
+            else:
+                result = callables[name](**args)
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": result,
+            })
+
+```
+
+This iteration can be repeated many times, until either retrieve_documents has been called 5 times or the LLM has enough info to generate a response. After a query ends and a new one is asked, the memory (chat) is cleaned and a new message is started.
+
+
+
+
+Let me read your code carefully before giving advice.Good, I have the full picture. Here's a practical breakdown of what to improve and how to verify each one, specifically tuned to `llama-3.1-8b-instant`'s characteristics (small context window, weaker instruction-following than 70b, prone to tool-call formatting errors).
+
+---
+
+## The core problem with 8b models and agentic prompts
+
+The 8b model has two key weaknesses relevant to your setup: it struggles with **long, multi-section system prompts** (it front-loads attention and loses the tail) and it's **more likely to hallucinate tool call syntax** when the schema description is wordy. Every improvement below targets one of these two failure modes.
+
+---
+
+## 1. Trim the system prompt — put rules last, not first
+
+The model reads your system prompt top-to-bottom, but attention in smaller models degrades toward the end. Your current new prompt has ROLE → ACCESS → PROCESS → HARD CONSTRAINTS. The constraints are the most important part and they're last. Flip it.
+
+```python
+_BASE_SYSTEM_PROMPT = """You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS:
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+
+PROCESS:
+1. Call retrieve_documents 2–3 times with SHORT, semantically different queries.
+   GOOD: "greenhouse gas emissions" / "global temperature rise" / "CO2 measurements"
+   BAD:  "causes of X" / "what causes X" / "X causes"  — same angle, forbidden
+2. If results are insufficient → one more rephrased query, then stop.
+3. Draft answer from retrieved chunks only. Cite [Source: X] inline.
+4. Call check_answer_quality(answer=<your draft>).
+5. Return final answer.
+"""
+```
+
+**How to check:** Run the same query 5 times. Count how often the model violates the "no repeated query" rule. Compare before and after the reorder. If violations drop, the reorder helped.
+
+---
+
+## 2. Compress the blocked variants section — 8b drowns in long injections
+
+Your current blocked variants block is verbose. The 8b model needs it short and imperative:
+
+```python
+def _build_system_prompt(
+    blocked_variants: list[str],
+    prior_thumbdowns: list[dict] | None = None,
+) -> str:
+    prompt = _BASE_SYSTEM_PROMPT
+
+    if blocked_variants:
+        blocked_lines = "\n".join(f'  "{v}"' for v in blocked_variants[:5])  # cap at 5
+        prompt += f"\n\nFORBIDDEN QUERIES — produced 0 results, do not reuse:\n{blocked_lines}\n"
+
+    if prior_thumbdowns:
+        prompt += "\n\nPRIOR FAILURES — user marked these answers bad:\n"
+        for i, td in enumerate(prior_thumbdowns[:2], 1):  # cap at 2
+            prompt += f"\nFailure #{i}:\n"
+            bad_snippet = (td.get("bad_answer") or "")[:150]
+            if bad_snippet:
+                prompt += f"  Bad answer: {bad_snippet}...\n"
+            tried = [v.get("query", "") for v in (td.get("variants") or [])[:3]]
+            if tried:
+                prompt += "  Tried queries (forbidden):\n"
+                for q in tried:
+                    prompt += f'    "{q}"\n'
+
+    return prompt
+```
+
+Key changes: removed the paragraph of explanation before each section, capped blocked variants at 5 (the model doesn't reliably track more than that), capped prior failures at 2, stripped chunk previews from the thumbdown section entirely (the model rarely uses them, and they add hundreds of tokens).
+
+**How to check:** Log `len(system_prompt)` for a query with known blocked variants. Before vs after this change, the prompt should be ~30–40% shorter. Then test whether the model still avoids the forbidden queries — if it does, the shorter version is strictly better.
+
+---
+
+## 3. Inject a retrieval state reminder into the tool result, not the system prompt
+
+Instead of relying on the model to count its own calls (it's bad at this on 8b), inject the current state as a prefix in every tool result message:
+
+```python
+if name == "retrieve_documents":
+    # ... existing cap and dedup checks ...
+    result = callables[name](**args)
+    total_retrievals += 1
+    
+    # Prepend state to the tool result so the model sees it fresh each iteration
+    state_prefix = (
+        f"[Retrieval {total_retrievals}/{MAX_TOTAL_RETRIEVALS}] "
+        f"Queries tried so far: {list(all_tried_queries)}\n\n"
+    )
+    result_with_state = state_prefix + result
+    
+    messages.append({
+        "role": "tool",
+        "tool_call_id": tool_call["id"],
+        "content": result_with_state,
+    })
+```
+
+This means every time the model reads a tool result, it sees exactly how many calls remain and what it already tried — without having to remember from earlier turns. This is the single highest-impact change for 8b models.
+
+**How to check:** Enable your existing `_serialize_messages` debug output. Look at the tool result messages in the printed log. You should now see the state prefix at the top. Then deliberately ask a question that requires 3+ retrievals and check if the model stops generating repeat queries mid-conversation.
+
+---
+
+## 4. Shorten the tool schema descriptions
+
+The 8b model spends tokens parsing schemas. Verbose descriptions cost you output quality. Cut them to the minimum:
+
+```python
+tool_schemas = [
+    {
+        "type": "function",
+        "function": {
+            "name": "retrieve_documents",
+            "description": "Search the knowledge base. Call with a SHORT, specific query.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query (5–10 words max)."},
+                    "top_k": {"type": "integer", "description": "Results to return. Default 5.", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_answer_quality",
+            "description": "Validate your drafted answer. Pass the full answer text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "answer": {"type": "string", "description": "Your drafted answer."},
+                },
+                "required": ["answer"],
+            },
+        },
+    },
+]
+```
+
+**How to check:** Look at how many `tool_use_failed` BadRequestErrors you get over 20 queries. This error almost always means the model garbled the tool call JSON — shorter schemas reduce this.
+
+---
+
+## 5. Add a `queries_tried` reminder in the user turn for later iterations
+
+When the agent is in iteration 2+, append a short reminder directly in a new user-role message before invoking the LLM. This exploits the fact that 8b models pay more attention to recent turns:
+
+```python
+# At the start of each iteration after the first:
+if iterations > 1 and all_tried_queries:
+    tried_summary = ", ".join(f'"{q}"' for q in list(all_tried_queries)[-4:])
+    reminder = {
+        "role": "user",
+        "content": (
+            f"[System note] Retrievals used: {total_retrievals}/{MAX_TOTAL_RETRIEVALS}. "
+            f"Already tried: {tried_summary}. "
+            f"Generate DIFFERENT queries or provide your final answer now."
+        ),
+    }
+    messages_this_call = messages + [reminder]
+else:
+    messages_this_call = messages
+
+response = llm.invoke(messages_this_call, tools=tool_schemas)
+```
+
+Note: don't append this reminder permanently to `messages`, just pass it as a temporary addition for that invoke call. Permanently appending it causes the conversation history to grow with injected user turns, which confuses multi-turn state.
+
+**How to check:** Print `messages_this_call` vs `messages` in the debug log. They should differ in later iterations. Then check if `newly_failed` shrinks — fewer repeat queries means the reminder is working.
+
+---
+
+## Summary table
+
+| Change | What it fixes | How to measure |
+|--------|--------------|----------------|
+| Reorder system prompt (constraints first) | Model ignores rules at bottom | Count rule violations per 20 queries |
+| Compress blocked variants + thumbdowns | Prompt bloat loses 8b attention | Compare `len(system_prompt)`, then retest avoidance |
+| State prefix in tool results | Model forgets retrieval count | Check `_serialize_messages` output for state line |
+| Shorter tool schemas | `tool_use_failed` 400 errors | Count BadRequestErrors over 20 queries |
+| Per-iteration reminder in user turn | Repeat queries across iterations | Count entries in `newly_failed` per session |
+
+The state-prefix-in-tool-results (#3) and the per-iteration reminder (#5) will give you the most immediate improvement with the 8b model because they work with how transformer attention actually behaves — putting critical state close to the generation point — rather than relying on the model to remember instructions from the system prompt many tokens ago.
+
+
+
+Looking at your log, the pipeline is working well. Let me point out what's good and what still needs attention.
+
+---
+
+## What's working well
+
+**Tool call behavior is correct.** Iteration 1: 3 diverse, non-overlapping queries. Iteration 2: immediately called `check_answer_quality` instead of retrieving more. Iteration 3: returned the final answer. That's exactly the 3-iteration pattern you want — no wasted calls.
+
+**Query diversity is good.** "adjustable speed drive" / "motor speed control" / "variable frequency drive" — three genuinely different angles, different vocabulary. The 8b-level instruction following on this is solid.
+
+**Token counts are reasonable.** 710 → 1753 → 2883 prompt tokens across iterations. Growing as expected, nothing alarming.
+
+---
+
+## One real problem: the context blob in message [6]
+
+Look at this in Iteration 3's message log:
+
+```
+[6] role=assistant
+    args={"answer": "...", "context": "[Source: ...5189 chars..."}
+```
+
+Your `check_answer_quality` context injection is leaking the full context string into the `assistant` message that gets stored in history. That means by Iteration 3, the LLM is seeing the entire accumulated retrieval context **twice** — once in the tool results (messages 3–5) and again embedded inside the assistant's tool call args in message 6. This is why prompt tokens jump from 1753 to 2883 between iterations 2 and 3 (+1130 tokens just for one `check_answer_quality` call).
+
+This happens because of this line in your agent loop:
+
+```python
+args["context"] = full_context   # you mutate args in-place
+messages.append(response)        # response already captured args by reference
+```
+
+By the time the response is appended, `args` has been mutated, so the stored assistant message includes `context`. Fix it by copying args before mutation:
+
+```python
+elif name == "check_answer_quality":
+    full_context = "\n\n---\n\n".join(accumulated_context)
+    call_args = {**args, "context": full_context}   # copy, don't mutate
+    result = callables[name](**call_args)
+    # args (and therefore the stored assistant message) stays clean
+```
+
+This alone will save you ~1000 tokens per query that reaches `check_answer_quality`.
+
+---
+
+## One minor issue: the final answer is just the draft verbatim
+
+The model's Iteration 2 draft and Iteration 3 final answer are character-for-character identical. The `check_answer_quality → OK` signal isn't prompting the model to enrich or cite the answer — it's just regurgitating the draft. This is fine for correctness, but you retrieved 11 chunks and the answer only uses 2–3 of them.
+
+You can nudge this by changing the `check_answer_quality` tool result from just `"OK"` to something like:
+
+```python
+# In tools.py
+verdict = "OK — now write your final answer. Expand it using all retrieved chunks. Cite each source inline as [Source: filename]."
+```
+
+This costs nothing extra (it's a tool result, not a retrieval) and gives the model a concrete instruction at the moment it's most likely to act on it.
+
+---
+
+## Summary
+
+| | Status |
+|---|---|
+| Query diversity | ✅ Good |
+| Retrieval count discipline | ✅ Good |
+| Iteration count | ✅ Good (3/6) |
+| Context double-embedding in message [6] | ⚠️ Fix the `args` mutation |
+| Final answer richness | ⚠️ Minor — tweak the OK verdict string |
+
+The core pipeline is working. The `args` mutation fix is the only real code bug here.
+
+
+```python
+elif name == "check_answer_quality":
+                full_context = "\n\n---\n\n".join(accumulated_context)
+                args["context"] = full_context
+                print(f"  [AGENT] injecting {len(full_context)} chars of accumulated context into check_answer_quality")
+                result = callables[name](**args)
+                final_quality = "OK" if result.strip().startswith("OK") else "INSUFFICIENT"
+                print(f"  [AGENT STATE] final_quality set to: {final_quality}")
+```
+
+What is happening currently and what do u want me to do and what will it do?
+
+## What's happening currently
+
+When the LLM decides to call `check_answer_quality`, it sends this in its response:
+
+```
+tool_call → check_answer_quality  args={"answer": "...the drafted answer..."}
+```
+
+That response object (with `args` pointing to `{"answer": "..."}`) gets appended to `messages` here:
+
+```python
+messages.append(response)   # happens BEFORE the tool loop
+```
+
+Then inside the loop, your code does:
+
+```python
+args["context"] = full_context  # mutates the dict IN PLACE
+```
+
+Because `args` is the **same dict object** that's already stored inside `response` (which is already in `messages`), you've now silently modified the message that was already appended. So message [6] in history ends up looking like:
+
+```
+args={"answer": "...", "context": "...5000 chars of all retrieved chunks..."}
+```
+
+The LLM never sent `context` — your code injected it after the fact into the stored history. So in Iteration 3, the LLM reads that bloated message [6] and sees all the context **a second time**, on top of already seeing it in the tool result messages [3], [4], [5]. That's where the extra ~1000 tokens come from.
+
+---
+
+## What to change
+
+Replace your current block with this:
+
+```python
+elif name == "check_answer_quality":
+    full_context = "\n\n---\n\n".join(accumulated_context)
+    call_args = {**args, "context": full_context}  # new dict, args untouched
+    print(f"  [AGENT] injecting {len(full_context)} chars of accumulated context into check_answer_quality")
+    result = callables[name](**call_args)           # use call_args, not args
+    final_quality = "OK" if result.strip().startswith("OK") else "INSUFFICIENT"
+    print(f"  [AGENT STATE] final_quality set to: {final_quality}")
+```
+
+The only two changes are: `{**args, "context": full_context}` creates a **new dict** (a copy of args plus context), and `callables[name](**call_args)` uses that copy. The original `args` dict — and therefore the stored `response` in `messages` — is never touched.
+
+---
+
+## What this does
+
+Message [6] in history will now cleanly show only what the LLM actually sent:
+
+```
+args={"answer": "...the drafted answer..."}
+```
+
+No embedded context blob. The context still gets passed correctly to the `check_answer_quality` function via `call_args`, so the quality check works exactly the same — it just no longer pollutes the message history. You'll see the Iteration 3 prompt token count drop by roughly 1000 tokens for any query that hits `check_answer_quality`.
+
+
+
+by context do u mean the entire chat/memory?
+No — "context" here means something much more specific. Let me clarify the two different meanings of the word that are in play:
+
+**`context` in this code = the retrieved chunks from your vector store**
+
+It's this variable:
+
+```python
+full_context = "\n\n---\n\n".join(accumulated_context)
+```
+
+Which is built from `accumulated_context`, which gets populated here:
+
+```python
+accumulated_context.append(result)  # result = output of retrieve_documents
+```
+
+So `context` is literally just the text chunks that `retrieve_documents` pulled from ChromaDB during this query — things like:
+
+```
+[Source: Adjustable Speed Drive.txt, score: 0.652]
+Adjustable Speed Drives provide precise control over motor speed...
+
+[Source: Adjustable Speed Drive.txt, score: 0.400]
+The concept of speed control is not entirely new...
+```
+
+**It has nothing to do with:**
+- The chat/conversation history (`messages` list)
+- Memory between queries
+- Anything from previous questions
+
+---
+
+**To summarize the full picture in plain terms:**
+
+- `messages` = the conversation turns (system prompt, user query, assistant responses, tool results) — this is the "memory" for the current query only
+- `accumulated_context` = the raw text chunks retrieved from your vector store during this query
+- `full_context` = all those chunks joined into one big string, passed to `check_answer_quality` so it can verify the answer is grounded in them
+
+The bug was that `full_context` (5000+ chars of retrieved chunks) was accidentally getting embedded inside the `messages` history, making the LLM read those chunks twice.
+
+
+where is it be read twice? in which 2 places is it read?
+Great question. Look at Iteration 3's message log from your output:
+
+**Place 1 — Messages [3], [4], [5]: the tool results** (correct and intentional)
+```
+[3] role=tool  tool_call_id=r6drxyqxk
+    content: [Source: Adjustable Speed Drive.txt, score: 0.652]
+    Adjustable Speed Drives provide precise control...
+
+[4] role=tool  tool_call_id=5dhb7d7r5
+    content: [Source: Adjustable Speed Drive.txt, score: 0.400]
+    The concept of speed control is not entirely new...
+
+[5] role=tool  tool_call_id=hnbha6hyt
+    content: [Source: Adjustable Speed Drive.txt, score: 0.434]
+    Variable Frequency Drives are widely used...
+```
+
+**Place 2 — Message [6]: the assistant's tool call args** (the bug)
+```
+[6] role=assistant
+    tool_call → check_answer_quality  
+    args={"answer": "...", "context": "[Source: Adjustable Speed Drive.txt, score: 0.652]
+    Adjustable Speed Drives provide precise control...
+    [Source: Adjustable Speed Drive.txt, score: 0.400]
+    The concept of speed control is not entirely new...
+    [Source: Adjustable Speed Drive.txt, score: 0.434]
+    Variable Frequency Drives are widely used..."}
+```
+
+The exact same chunk text that arrived in messages [3], [4], [5] got stuffed again into message [6]'s `context` field. So when the LLM processes Iteration 3, it reads all those chunks once from the tool results and then immediately reads them all again from inside the assistant message args — hence the ~1000 extra tokens.
+
+The bug is still present. Look at message [6] in Iteration 3 of your second run — `"context": "[Source: ..."` is still there, meaning `args` is still being mutated.
+
+You likely made the fix but it didn't save, or applied it to the wrong place. Share your current `elif name == "check_answer_quality":` block and I'll tell you exactly what's wrong with it.
+
+That said, looking at the token counts across both runs:
+
+**Run 1 (before fix):** Iteration 3 = 2883 prompt tokens
+
+**Run 2 (after attempted fix):** Iteration 3 = 2974 prompt tokens
+
+It actually got slightly **worse**, not better. The context blob is still in message [6] in both runs. The fix didn't take effect.
+
+Also notice one thing that **did** improve though — the answer itself. Compare:
+
+Run 1 final answer: 669 chars (thin, mostly just the draft repeated verbatim)
+
+Run 2 final answer: 1262 chars (richer, uses more of the retrieved chunks)
+
+That improvement likely came from the `"OK — now write your final answer..."` change to the quality check verdict, not the args fix. So that part worked.
+
+To summarize the current state — one thing fixed, one thing still broken:
+
+| | Status |
+|---|---|
+| Richer final answer from OK verdict nudge | ✅ Working |
+| `args` mutation / context double-embedding | ❌ Still happening |
+
+Paste your current `elif` block and I'll spot the issue immediately.
+
+Found it. The fix **is correctly applied** at line 320 — `call_args = {**args, "context": full_context}` and `callables[name](**call_args)`. That part is right.
+
+The problem is something different and more subtle. Look at line 260:
+
+```python
+messages.append(response)   # ← response is appended HERE
+```
+
+And then at line 264:
+```python
+args = tool_call["args"]    # ← args is a reference INTO the response object
+```
+
+The `response` object is a LangChain `AIMessage`. Its `tool_calls` list contains dicts, and `tool_call["args"]` is one of those dicts — it lives **inside** the already-appended `response`. Your fix correctly avoids mutating `args` in the `check_answer_quality` branch. But the `context` blob still appears in message [6] in your log.
+
+The reason is that LangChain's `AIMessage` serialization — when your `_serialize_messages` prints it, and when it's sent to Groq — renders the **entire** `tool_calls` attribute of the response object, including anything that was mutated inside it. Even though you didn't mutate `args` in Python, the LangChain response object's internal representation of `tool_calls` might already contain `context` from a **previous run's** response object being reused, or more likely: `tool_call["args"]` is not a plain dict — it may be a reference type that LangChain populates differently.
+
+The real and clean fix is to **append `response` to messages only after all tool calls are processed**, not before. Change this:
+
+```python
+# Line 260 — CURRENT (wrong order)
+messages.append(response)          # appended before tool loop
+
+for tool_call in tool_calls:       # tool loop runs after
+    ...
+```
+
+To this:
+
+```python
+# FIXED — process tools first, then append the clean response
+for tool_call in tool_calls:
+    name = tool_call["name"]
+    args = tool_call["args"]
+    ...
+
+# append response AFTER the loop, before the tool result messages
+```
+
+But that breaks the message ordering (Groq requires assistant message before tool results). So the correct restructure is:
+
+```python
+tool_calls = deduped
+messages.append(response)   # keep this here — required by Groq protocol
+
+for tool_call in tool_calls:
+    name = tool_call["name"]
+    args = tool_call["args"]   # READ args but never write to this dict
+
+    if name == "check_answer_quality":
+        full_context = "\n\n---\n\n".join(accumulated_context)
+        # Explicitly build a brand-new dict — do NOT use args at all
+        call_args = {"answer": args["answer"], "context": full_context}
+        print(f"  [AGENT] injecting {len(full_context)} chars of accumulated context into check_answer_quality")
+        result = callables[name](**call_args)
+        final_quality = "OK" if result.strip().startswith("OK") else "INSUFFICIENT"
+        print(f"  [AGENT STATE] final_quality set to: {final_quality}")
+```
+
+The difference from what you have now: instead of `{**args, "context": full_context}` which spreads `args` and adds `context`, use `{"answer": args["answer"], "context": full_context}` which builds the dict from scratch without touching `args` at all. The spread operator `**args` still reads from the `args` dict object (which is fine), but if LangChain's internals track dict reads on that object, building from scratch eliminates any possible aliasing. This is the safest form of the fix.
+
+The bug is fixed. Look at message [6] in Iteration 3:
+
+```
+tool_call → check_answer_quality  args={"answer": "..."}
+```
+
+No `"context"` field — clean. That's the fix working.
+
+Now compare the token counts across all three runs:
+
+| Run | Iter 1 | Iter 2 | Iter 3 | Total prompt |
+|-----|--------|--------|--------|--------------|
+| Before fix (run 1) | 710 | 1753 | 2883 | 5346 |
+| Before fix (run 2) | 710 | 1753 | 2974 | 5437 |
+| **After fix (run 3)** | **710** | **1753** | **2009** | **4472** |
+
+Iteration 3 dropped from ~2900 tokens to 2009 — that's **874 tokens saved** on a single query, purely from removing the double-embedding. On longer conversations or queries with more retrieved chunks, this saving would be even larger.
+
+The answer quality also improved significantly — 4374 chars vs 669 chars in run 1, with proper inline citations, historical context, and a conclusion. That came from the `"OK — now write your final answer..."` verdict nudge.
+
+Everything is working correctly now.
+

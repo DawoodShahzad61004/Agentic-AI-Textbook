@@ -1,0 +1,583 @@
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\agent_query.py
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████| 103/103 [00:00<00:00, 14377.92it/s]
+BertModel LOAD REPORT from: sentence-transformers/all-MiniLM-L6-v2
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+Model 'all-MiniLM-L6-v2' loaded on cuda. Embedding dimension: 384
+GPU: NVIDIA GeForce RTX 5050 Laptop GPU
+Vector store initialized: collection='documents', path='../data/vector_store'
+Existing documents in collection: 237
+[SelfLearner] learned_qa collection has 0 entries.
+
+=== Agentic RAG — Self-Learning Query Interface ===
+Self-learning triggers every 5 successful interactions.
+
+Commands: 'bad' to flag last answer | 'stats' for learning stats | 'learn' to force distillation | 'quit' to exit
+
+Your question: What is an adjustable speed drive and how does it control motor speed?
+
+══════════════════════════════════════════════════════════════════════
+  STEP 1 — USER QUERY RECEIVED
+══════════════════════════════════════════════════════════════════════
+  Input : "What is an adjustable speed drive and how does it control motor speed?"
+  Length: 70 chars
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  FULL MESSAGE SENT TO LLM  [Iteration 1 / max 6]
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+CONTEXT: The knowledge base is a vector store of chunked documents (PDFs, Word docs, CSVs, HTML, JSON) ingested from a user's local data folder. 
+Chunks are ~1000 chars with 200-char overlap, embedded with all-MiniLM-L6-v2, and retrieved by cosine similarity. 
+A separate `learned_qa` collection contains distilled Q&A pairs from prior verified answers — treat those as equally valid sources. 
+Chunks may be fragmentary, mid-sentence, or contain table/OCR artifacts; reason across multiple chunks rather than trust...
+
+  [1] role=user
+      content: What is an adjustable speed drive and how does it control motor speed?
+
+  Tool schemas available: ['retrieve_documents', 'check_answer_quality']
+══════════════════════════════════════════════════════════════════════
+
+  [CONTEXT SIZE @ iter 1]
+    messages in payload    : 2
+    total content chars    : 2,175
+    ~tokens (chars/4 est.) : 543
+    actual prompt tokens   : 872  (from API)
+    cumulative prompt tok  : 872
+[CTXSIZE] iter=1 msgs=2 chars=2175 prompt_tokens=872 cum_prompt_tokens=872
+
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 1]
+══════════════════════════════════════════════════════════════════════
+  Tokens this call : 872 prompt + 235 completion = 1107 total
+  content (0 chars):
+    
+
+  tool_calls requested (5):
+    → name : retrieve_documents
+      id   : cqfm4gjbx
+      args : {
+      "query": "adjustable speed drive",
+      "top_k": 5
+}
+    → name : retrieve_documents
+      id   : qwm50ve60
+      args : {
+      "query": "motor speed control",
+      "top_k": 5
+}
+    → name : retrieve_documents
+      id   : tk8vhtpgf
+      args : {
+      "query": "adjustable speed drive motor control",
+      "top_k": 5
+}
+    → name : retrieve_documents
+      id   : bx52xvc36
+      args : {
+      "query": "adjustable speed drive motor speed control",
+      "top_k": 5
+}
+    → name : check_answer_quality
+      id   : hf9xrfynb
+      args : {
+      "answer": "An adjustable speed drive is a type of motor control system that allows the speed of an electric motor to be adjusted. It works by varying the frequency and voltage of the electrical power supplied to the motor, which in turn changes the motor's speed. The drive system typically consists of a controller, a power converter, and a motor. The controller receives input from sensors and adjusts the power converter to deliver the required voltage and frequency to the motor. This allows the motor to operate at a range of speeds, from low to high, making it suitable for applications where variable speed control is required. [Source: Adjustable Speed Drive.pdf]"
+}
+══════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "adjustable speed drive",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "adjustable speed drive"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [0.011542, 0.063031, 0.005661, 0.013145, -0.092976, 0.013261, -0.07855, 0.003341]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.6520  [..\data\Adjustable Speed Drive.txt]
+            preview: Adjustable Speed Drives provide precise control over motor speed and torque. This improves product quality, operational …
+    Doc 1 — score: 0.6306  [..\data\Adjustable Speed Drive.txt]
+            preview: Ultimately, Adjustable Speed Drives are not merely devices for controlling motor speed; they are key technologies that s…
+    Doc 2 — score: 0.6131  [..\data\Adjustable Speed Drive.txt]
+            preview: An Adjustable Speed Drive is a system designed to vary the speed of an electric motor by controlling electrical input pa…
+    Doc 3 — score: 0.5964  [..\data\Adjustable Speed Drive.txt]
+            preview: An Adjustable Speed Drive is an electronic or electromechanical system used to control the speed, torque, and direction …
+    Doc 4 — score: 0.5804  [..\data\Adjustable Speed Drive.txt]
+            preview: The future of Adjustable Speed Drives is closely connected with the development of smart technologies, industrial automa…
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("adjustable speed drive")
+  5 chunk(s) | 1946 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.652]
+Adjustable Speed Drives provide precise control over motor speed and torque. This improves product quality, operational consistency, and process reliability in industrial applications.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.631]
+Ultimately, Adjustable Speed Drives are not merely devices for controlling motor speed; they are key technologies that support energy conservation, industrial innovation, and sustainable development in the modern world.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.613]
+An Adjustable Speed Drive is a system designed to vary the speed of an electric motor by controlling electrical input parameters such as voltage, frequency, or current. The primary purpose of an Adjustable Speed Drive is to match motor speed with the actual requirements of the process or machine being operated.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.596]
+An Adjustable Speed Drive is an electronic or electromechanical system used to control the speed, torque, and direction of an electric motor by varying the electrical power supplied to it. Adjustable Speed Drives are considered one of the most significant technological advancements in industrial automation because they provide flexibility, energy savings, smoother operation, and reduced mechanical stress on machinery. By adjusting motor speed according to load requirements, industries can optimize performance while minimizing electricity costs and equipment wear.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.580]
+The future of Adjustable Speed Drives is closely connected with the development of smart technologies, industrial automation, and sustainable energy systems. As industries seek more efficient and environmentally friendly solutions, Adjustable Speed Drives will continue to play a critical role in shaping the future of motor control and industrial operations.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=1/5 | accumulated_context=5 chunk(s) across 1 retrieval(s)
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "motor speed control",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "motor speed control"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.0484, 0.043035, -0.038045, 0.023802, -0.040015, 0.055872, -0.000218, -0.017619]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.3997  [..\data\Adjustable Speed Drive.txt]
+            preview: The concept of speed control is not entirely new. Earlier methods involved mechanical systems such as gearboxes, belt dr…
+    Doc 1 — score: 0.3718  [..\data\Adjustable Speed Drive.txt]
+            preview: In modern industrial and commercial systems, the efficient control of electric motors has become one of the most importa…
+    Doc 2 — score: 0.2886  [..\data\Adjustable Speed Drive.txt]
+            preview: The increasing emphasis on sustainability and energy conservation has further increased the importance of Adjustable Spe…
+    Doc 3 — score: 0.2836  [..\data\Adjustable Speed Drive.txt]
+            preview: The future of Adjustable Speed Drives is closely connected with the development of smart technologies, industrial automa…
+    Doc 4 — score: 0.2802  [..\data\Adjustable Speed Drive.txt]
+            preview: The motor is the device being controlled by the Adjustable Speed Drive. Adjustable Speed Drives can be used with various…
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("motor speed control")
+  5 chunk(s) | 2962 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.400]
+The concept of speed control is not entirely new. Earlier methods involved mechanical systems such as gearboxes, belt drives, and throttling valves. Although these methods provided some degree of speed variation, they were inefficient, bulky, and prone to wear and maintenance issues. Modern Adjustable Speed Drives replaced these mechanical approaches with electronic control systems that provide greater precision, reliability, and efficiency.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.372]
+In modern industrial and commercial systems, the efficient control of electric motors has become one of the most important requirements for improving productivity, reducing energy consumption, and enhancing operational flexibility. Electric motors are widely used in manufacturing industries, transportation systems, water treatment plants, heating and ventilation systems, mining operations, robotics, and household appliances. Traditionally, motors operated at a constant speed determined by the frequency of the electrical supply and the design of the motor itself. However, many applications require motors to operate at varying speeds depending on changing operational demands. This need led to the development of Adjustable Speed Drives (Adjustable Speed Drives), devices specifically designed to regulate and control motor speed efficiently and accurately.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.289]
+The increasing emphasis on sustainability and energy conservation has further increased the importance of Adjustable Speed Drives in industrial and commercial sectors. According to energy studies, electric motors consume a significant portion of global electricity, especially in manufacturing facilities. By integrating Adjustable Speed Drives into motor-driven systems, organizations can reduce energy consumption substantially while improving process control and equipment lifespan. This essay explores the concept of Adjustable Speed Drives, including their principles, components, types, working mechanisms, applications, advantages, limitations, and future developments.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.284]
+The future of Adjustable Speed Drives is closely connected with the development of smart technologies, industrial automation, and sustainable energy systems. As industries seek more efficient and environmentally friendly solutions, Adjustable Speed Drives will continue to play a critical role in shaping the future of motor control and industrial operations.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.280]
+The motor is the device being controlled by the Adjustable Speed Drive. Adjustable Speed Drives can be used with various types of motors, including AC induction motors, synchronous motors, and DC motors. AC induction motors are the most common due to their durability, low maintenance, and widespread industrial use.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=2/5 | accumulated_context=10 chunk(s) across 2 retrieval(s)
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "adjustable speed drive motor control",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "adjustable speed drive motor control"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.007812, 0.041869, 0.007568, 0.042462, -0.077237, 0.084037, -0.052856, 0.001804]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.6642  [..\data\Adjustable Speed Drive.txt]
+            preview: Adjustable Speed Drives provide precise control over motor speed and torque. This improves product quality, operational …
+    Doc 1 — score: 0.6280  [..\data\Adjustable Speed Drive.txt]
+            preview: Ultimately, Adjustable Speed Drives are not merely devices for controlling motor speed; they are key technologies that s…
+    Doc 2 — score: 0.6084  [..\data\Adjustable Speed Drive.txt]
+            preview: An Adjustable Speed Drive is an electronic or electromechanical system used to control the speed, torque, and direction …
+    Doc 3 — score: 0.6031  [..\data\Adjustable Speed Drive.txt]
+            preview: Adjustable Speed Drives represent one of the most important advancements in modern electrical and industrial engineering…
+    Doc 4 — score: 0.5976  [..\data\Adjustable Speed Drive.txt]
+            preview: An Adjustable Speed Drive is a system designed to vary the speed of an electric motor by controlling electrical input pa…
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("adjustable speed drive motor control")
+  5 chunk(s) | 2036 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.664]
+Adjustable Speed Drives provide precise control over motor speed and torque. This improves product quality, operational consistency, and process reliability in industrial applications.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.628]
+Ultimately, Adjustable Speed Drives are not merely devices for controlling motor speed; they are key technologies that support energy conservation, industrial innovation, and sustainable development in the modern world.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.608]
+An Adjustable Speed Drive is an electronic or electromechanical system used to control the speed, torque, and direction of an electric motor by varying the electrical power supplied to it. Adjustable Speed Drives are considered one of the most significant technological advancements in industrial automation because they provide flexibility, energy savings, smoother operation, and reduced mechanical stress on machinery. By adjusting motor speed according to load requirements, industries can optimize performance while minimizing electricity costs and equipment wear.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.603]
+Adjustable Speed Drives represent one of the most important advancements in modern electrical and industrial engineering. By controlling the speed, torque, and direction of electric motors, Adjustable Speed Drives provide industries with improved efficiency, flexibility, and performance. Their ability to match motor operation with actual process requirements leads to substantial energy savings, reduced mechanical wear, and enhanced productivity.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.598]
+An Adjustable Speed Drive is a system designed to vary the speed of an electric motor by controlling electrical input parameters such as voltage, frequency, or current. The primary purpose of an Adjustable Speed Drive is to match motor speed with the actual requirements of the process or machine being operated.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=3/5 | accumulated_context=15 chunk(s) across 3 retrieval(s)
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "adjustable speed drive motor speed control",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "adjustable speed drive motor speed control"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.022038, 0.060756, -0.006943, 0.032962, -0.072415, 0.069142, -0.063111, -0.025473]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.6252  [..\data\Adjustable Speed Drive.txt]
+            preview: Ultimately, Adjustable Speed Drives are not merely devices for controlling motor speed; they are key technologies that s…
+    Doc 1 — score: 0.6191  [..\data\Adjustable Speed Drive.txt]
+            preview: Adjustable Speed Drives provide precise control over motor speed and torque. This improves product quality, operational …
+    Doc 2 — score: 0.5966  [..\data\Adjustable Speed Drive.txt]
+            preview: The future of Adjustable Speed Drives is closely connected with the development of smart technologies, industrial automa…
+    Doc 3 — score: 0.5838  [..\data\Adjustable Speed Drive.txt]
+            preview: An Adjustable Speed Drive is a system designed to vary the speed of an electric motor by controlling electrical input pa…
+    Doc 4 — score: 0.5781  [..\data\Adjustable Speed Drive.txt]
+            preview: An Adjustable Speed Drive is an electronic or electromechanical system used to control the speed, torque, and direction …
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("adjustable speed drive motor speed control")
+  5 chunk(s) | 1946 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.625]
+Ultimately, Adjustable Speed Drives are not merely devices for controlling motor speed; they are key technologies that support energy conservation, industrial innovation, and sustainable development in the modern world.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.619]
+Adjustable Speed Drives provide precise control over motor speed and torque. This improves product quality, operational consistency, and process reliability in industrial applications.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.597]
+The future of Adjustable Speed Drives is closely connected with the development of smart technologies, industrial automation, and sustainable energy systems. As industries seek more efficient and environmentally friendly solutions, Adjustable Speed Drives will continue to play a critical role in shaping the future of motor control and industrial operations.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.584]
+An Adjustable Speed Drive is a system designed to vary the speed of an electric motor by controlling electrical input parameters such as voltage, frequency, or current. The primary purpose of an Adjustable Speed Drive is to match motor speed with the actual requirements of the process or machine being operated.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.578]
+An Adjustable Speed Drive is an electronic or electromechanical system used to control the speed, torque, and direction of an electric motor by varying the electrical power supplied to it. Adjustable Speed Drives are considered one of the most significant technological advancements in industrial automation because they provide flexibility, energy savings, smoother operation, and reduced mechanical stress on machinery. By adjusting motor speed according to load requirements, industries can optimize performance while minimizing electricity costs and equipment wear.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=4/5 | accumulated_context=20 chunk(s) across 4 retrieval(s)
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: check_answer_quality
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "answer": "An adjustable speed drive is a type of motor control system that allows the speed of an electric motor to be adjusted. It works by varying the frequency and voltage of the electrical power supplied to the motor, which in turn changes the motor's speed. The drive system typically consists of a controller, a power converter, and a motor. The controller receives input from sensors and adjusts the power converter to deliver the required voltage and frequency to the motor. This allows the motor to operate at a range of speeds, from low to high, making it suitable for applications where variable speed control is required. [Source: Adjustable Speed Drive.pdf]"
+}
+──────────────────────────────────────────────────────────────────────
+  [AGENT] injecting 8911 chars of accumulated context into check_answer_quality
+  [AGENT STATE] final_quality set to: OK
+
+══════════════════════════════════════════════════════════════════════
+  FULL MESSAGE SENT TO LLM  [Iteration 2 / max 6]
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+CONTEXT: The knowledge base is a vector store of chunked documents (PDFs, Word docs, CSVs, HTML, JSON) ingested from a user's local data folder. 
+Chunks are ~1000 chars with 200-char overlap, embedded with all-MiniLM-L6-v2, and retrieved by cosine similarity. 
+A separate `learned_qa` collection contains distilled Q&A pairs from prior verified answers — treat those as equally valid sources. 
+Chunks may be fragmentary, mid-sentence, or contain table/OCR artifacts; reason across multiple chunks rather than trust...
+
+  [1] role=user
+      content: What is an adjustable speed drive and how does it control motor speed?
+
+  [2] role=assistant
+      content: 
+      tool_call → retrieve_documents  args={"query": "adjustable speed drive", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "motor speed control", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "adjustable speed drive motor control", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "adjustable speed drive motor speed control", "top_k": 5}
+      tool_call → check_answer_quality  args={"answer": "An adjustable speed drive is a type of motor control system that allows the speed of an electric motor to be adjusted. It works by varying the frequency and voltage of the electrical power supplied to the motor, which in turn changes the motor's speed. The drive system typically consists of a controller, a power converter, and a motor. The controller receives input from sensors and adjusts the power converter to deliver the required voltage and frequency to the motor. This allows the motor to operate at a range of speeds, from low to high, making it suitable for applications where variable speed control is required. [Source: Adjustable Speed Drive.pdf]"}
+
+  [3] role=tool  tool_call_id=cqfm4gjbx
+      content: [Source: ..\data\Adjustable Speed Drive.txt, score: 0.652]
+Adjustable Speed Drives provide precise control over motor speed and torque. This improves product quality, operational consistency, and process reliability in industrial applications.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.631]
+Ultimately, Adjustable Speed Drives are not merely devices for controlling motor speed; they are key technologies that support energy conservation, industrial innovation, and sustainable development in the modern world.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.613]
+An Adjustable Sp...
+
+  [4] role=tool  tool_call_id=qwm50ve60
+      content: [Source: ..\data\Adjustable Speed Drive.txt, score: 0.400]
+The concept of speed control is not entirely new. Earlier methods involved mechanical systems such as gearboxes, belt drives, and throttling valves. Although these methods provided some degree of speed variation, they were inefficient, bulky, and prone to wear and maintenance issues. Modern Adjustable Speed Drives replaced these mechanical approaches with electronic control systems that provide greater precision, reliability, and efficiency.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.372]
+In modern industrial and commercial...
+
+  [5] role=tool  tool_call_id=tk8vhtpgf
+      content: [Source: ..\data\Adjustable Speed Drive.txt, score: 0.664]
+Adjustable Speed Drives provide precise control over motor speed and torque. This improves product quality, operational consistency, and process reliability in industrial applications.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.628]
+Ultimately, Adjustable Speed Drives are not merely devices for controlling motor speed; they are key technologies that support energy conservation, industrial innovation, and sustainable development in the modern world.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.608]
+An Adjustable Sp...
+
+  [6] role=tool  tool_call_id=bx52xvc36
+      content: [Source: ..\data\Adjustable Speed Drive.txt, score: 0.625]
+Ultimately, Adjustable Speed Drives are not merely devices for controlling motor speed; they are key technologies that support energy conservation, industrial innovation, and sustainable development in the modern world.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.619]
+Adjustable Speed Drives provide precise control over motor speed and torque. This improves product quality, operational consistency, and process reliability in industrial applications.
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.597]
+The future of Ad...
+
+  [7] role=tool  tool_call_id=hf9xrfynb
+      content: OK — now write your final answer. Expand it using all retrieved chunks. Cite each source inline as [Source: filename].
+
+  Tool schemas available: ['retrieve_documents', 'check_answer_quality']
+══════════════════════════════════════════════════════════════════════
+
+  [CONTEXT SIZE @ iter 2]
+    messages in payload    : 8
+    total content chars    : 11,183
+    ~tokens (chars/4 est.) : 2,795
+    actual prompt tokens   : 2,807  (from API)
+    cumulative prompt tok  : 3,679
+[CTXSIZE] iter=2 msgs=8 chars=11183 prompt_tokens=2807 cum_prompt_tokens=3679
+
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 2]
+══════════════════════════════════════════════════════════════════════
+  Tokens this call : 2807 prompt + 2048 completion = 4855 total
+  content (11133 chars):
+    An adjustable speed drive is a type of motor control system that allows the speed of an electric motor to be adjusted. It works by varying the frequency and voltage of the electrical power supplied to the motor, which in turn changes the motor's speed. The drive system typically consists of a controller, a power converter, and a motor. The controller receives input from sensors and adjusts the power converter to deliver the required voltage and frequency to the motor. This allows the motor to operate at a range of speeds, from low to high, making it suitable for applications where variable speed control is required.
+
+The adjustable speed drive provides precise control over motor speed and torque, which improves product quality, operational consistency, and process reliability in industrial...
+
+  tool_calls: none  →  this is the FINAL ANSWER
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  FINAL ANSWER
+══════════════════════════════════════════════════════════════════════
+An adjustable speed drive is a type of motor control system that allows the speed of an electric motor to be adjusted. It works by varying the frequency and voltage of the electrical power supplied to the motor, which in turn changes the motor's speed. The drive system typically consists of a controller, a power converter, and a motor. The controller receives input from sensors and adjusts the power converter to deliver the required voltage and frequency to the motor. This allows the motor to operate at a range of speeds, from low to high, making it suitable for applications where variable speed control is required.
+
+The adjustable speed drive provides precise control over motor speed and torque, which improves product quality, operational consistency, and process reliability in industrial applications. It is not merely a device for controlling motor speed, but a key technology that supports energy conservation, industrial innovation, and sustainable development in the modern world.
+
+The adjustable speed drive is an electronic or electromechanical system used to control the speed, torque, and direction of an electric motor by varying the electrical power supplied to it. It is considered one of the most significant technological advancements in industrial automation because it provides flexibility, energy savings, smoother operation, and reduced mechanical stress on machinery. By adjusting motor speed according to load requirements, industries can optimize performance while minimizing electricity costs and equipment wear.
+
+The adjustable speed drive is a system designed to vary the speed of an electric motor by controlling electrical input parameters such as voltage, frequency, or current. The primary purpose of an adjustable speed drive is to match motor speed with the actual requirements of the process or machine being operated.
+
+The future of adjustable speed drives is closely connected with the development of smart technologies, industrial automation, and sustainable energy systems. As industries seek more efficient and environmentally friendly solutions, adjustable speed drives will continue to play a critical role in shaping the future of motor control and industrial operations.
+
+In modern industrial and commercial systems, the efficient control of electric motors has become one of the most important requirements for improving productivity, reducing energy consumption, and enhancing operational flexibility. Electric motors are widely used in manufacturing industries, transportation systems, water treatment plants, heating and ventilation systems, mining operations, robotics, and household appliances. Traditionally, motors operated at a constant speed determined by the frequency of the electrical supply and the design of the motor itself. However, many applications require motors to operate at varying speeds depending on changing operational demands. This need led to the development of adjustable speed drives, devices specifically designed to regulate and control motor speed efficiently and accurately.
+
+The increasing emphasis on sustainability and energy conservation has further increased the importance of adjustable speed drives in industrial and commercial sectors. According to energy studies, electric motors consume a significant portion of global electricity, especially in manufacturing facilities. By integrating adjustable speed drives into motor-driven systems, organizations can reduce energy consumption substantially while improving process control and equipment lifespan. This essay explores the concept of adjustable speed drives, including their principles, components, types, working mechanisms, applications, advantages, limitations, and future developments.
+
+The adjustable speed drive is a key technology that supports energy conservation, industrial innovation, and sustainable development in the modern world. It provides precise control over motor speed and torque, which improves product quality, operational consistency, and process reliability in industrial applications. The adjustable speed drive is an electronic or electromechanical system used to control the speed, torque, and direction of an electric motor by varying the electrical power supplied to it. It is considered one of the most significant technological advancements in industrial automation because it provides flexibility, energy savings, smoother operation, and reduced mechanical stress on machinery. By adjusting motor speed according to load requirements, industries can optimize performance while minimizing electricity costs and equipment wear.
+
+The adjustable speed drive is a system designed to vary the speed of an electric motor by controlling electrical input parameters such as voltage, frequency, or current. The primary purpose of an adjustable speed drive is to match motor speed with the actual requirements of the process or machine being operated. The adjustable speed drive is a key technology that supports energy conservation, industrial innovation, and sustainable development in the modern world.
+
+The future of adjustable speed drives is closely connected with the development of smart technologies, industrial automation, and sustainable energy systems. As industries seek more efficient and environmentally friendly solutions, adjustable speed drives will continue to play a critical role in shaping the future of motor control and industrial operations.
+
+In conclusion, the adjustable speed drive is a critical technology that supports energy conservation, industrial innovation, and sustainable development in the modern world. It provides precise control over motor speed and torque, which improves product quality, operational consistency, and process reliability in industrial applications. The adjustable speed drive is an electronic or electromechanical system used to control the speed, torque, and direction of an electric motor by varying the electrical power supplied to it. It is considered one of the most significant technological advancements in industrial automation because it provides flexibility, energy savings, smoother operation, and reduced mechanical stress on machinery. By adjusting motor speed according to load requirements, industries can optimize performance while minimizing electricity costs and equipment wear.
+
+[Source: Adjustable Speed Drive.pdf]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive.txt]
+[Source: Adjustable Speed Drive
+══════════════════════════════════════════════════════════════════════
+  Iterations used : 2 / 6
+  Quality signal  : OK
+  Tokens (total)  : 3679 prompt + 2283 completion = 5962 total
+  Sources searched:
+    • "adjustable speed drive"
+      preview: [Source: ..\data\Adjustable Speed Drive.txt, score: 0.652]
+Adjustable Speed Drives provide precise c...
+    • "motor speed control"
+      preview: [Source: ..\data\Adjustable Speed Drive.txt, score: 0.400]
+The concept of speed control is not entir...
+    • "adjustable speed drive motor control"
+      preview: [Source: ..\data\Adjustable Speed Drive.txt, score: 0.664]
+Adjustable Speed Drives provide precise c...
+    • "adjustable speed drive motor speed control"
+      preview: [Source: ..\data\Adjustable Speed Drive.txt, score: 0.625]
+Ultimately, Adjustable Speed Drives are n...
+══════════════════════════════════════════════════════════════════════
+Your question: 

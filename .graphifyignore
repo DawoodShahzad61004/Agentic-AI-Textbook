@@ -1,0 +1,37 @@
+# .graphifyignore
+# Same syntax as .gitignore (including ! negation).
+# .gitignore is respected automatically and merged with this file —
+# entries here only ever exclude MORE, they never re-include something
+# .gitignore already excludes.
+
+# ── graphify's own output — never index its own generated graph ──────────────
+graphify-out/
+
+# ── Agent/tool configuration — skill definitions & settings, not book content ─
+.agents/
+.claude/
+.codex/
+.docx-tools/
+
+# ── Standard noise no book project needs in the graph ─────────────────────────
+.git/
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+.DS_Store
+
+# ── Secrets — never let these anywhere near the graph ──────────────────────────
+.env
+.env.*
+*.key
+*secret*
+*credential*
+
+# Everything else — Chapters Created So Far/, Chats/, Code-bases/, Research/,
+# Runs/, and the root .md files (AGENTS.md, CLAUDE.md, Book_Index.md,
+# Markdown-Tracking-Guide.md, PROJECT_CONTEXT.md) — is intentionally left
+# UNIGNORED. That's the actual source material for the book: raw
+# conversations, source code, papers, and dry-run traces are exactly what
+# needs to be in the graph for `graphify query`/`path`/`explain` to be useful.

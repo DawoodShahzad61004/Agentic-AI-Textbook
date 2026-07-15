@@ -1,0 +1,869 @@
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\agent_query.py
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 103/103 [00:00<00:00, 6593.51it/s]
+BertModel LOAD REPORT from: sentence-transformers/all-MiniLM-L6-v2
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+Model 'all-MiniLM-L6-v2' loaded on cuda. Embedding dimension: 384
+GPU: NVIDIA GeForce RTX 5050 Laptop GPU
+Vector store initialized: collection='documents', path='../data/vector_store'
+Existing documents in collection: 237
+[SelfLearner] learned_qa collection has 344 entries.
+
+=== Agentic RAG — Self-Learning Query Interface ===
+Automatic self-learning is disabled.
+
+Commands: 'bad' to flag last answer | 'stats' for learning stats | 'learn' to force distillation | 'quit' to exit
+
+Your question: Give me a complete overview of Autism Spectrum Disorder — its definition, causes, prevalence, diagnosis process, treatment options, and associated disparities.
+
+══════════════════════════════════════════════════════════════════════
+  STEP 1 — USER QUERY RECEIVED
+══════════════════════════════════════════════════════════════════════
+  Input : "Give me a complete overview of Autism Spectrum Disorder — its definition, causes, prevalence, diagnosis process, treatment options, and associated disparities."
+  Length: 159 chars
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  [PHASE: RETRIEVE]  Iteration 1/6
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS (these are the ONLY tools available to you):
+- retrieve_documents(query, top_k): searches the knowledge base.
+- compress_context(): consolidate...
+
+  [1] role=user
+      content: Give me a complete overview of Autism Spectrum Disorder — its definition, causes, prevalence, diagnosis process, treatment options, and associated disparities.
+
+  Tool schemas: ['retrieve_documents', 'compress_context']
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 1]
+══════════════════════════════════════════════════════════════════════
+  Tokens: 1137 prompt + 156 completion
+  content (0 chars): 
+
+  tool_calls (7):
+    → retrieve_documents  args={"query": "Autism Spectrum Disorder definition", "top_k": 5}
+    → retrieve_documents  args={"query": "Autism Spectrum Disorder causes", "top_k": 5}
+    → retrieve_documents  args={"query": "Autism Spectrum Disorder prevalence", "top_k": 5}
+    → retrieve_documents  args={"query": "Autism Spectrum Disorder diagnosis process", "top_k": 5}
+    → retrieve_documents  args={"query": "Autism Spectrum Disorder treatment options", "top_k": 5}
+    → retrieve_documents  args={"query": "Autism Spectrum Disorder associated disparities", "top_k": 5}
+    → compress_context  args={}
+══════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "Autism Spectrum Disorder definition",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "Autism Spectrum Disorder definition"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.010245, -0.016948, -0.093199, 0.056801, -0.019639, 0.008607, 0.073197, 0.047868]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.5
+  + 2 result(s) from learned_qa collection
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.8294  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restrict…
+    Doc 1 — score: 0.7470  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i…
+    Doc 2 — score: 0.7110  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and th…
+    Doc 3 — score: 0.6793  [..\data\html\asd_disparities_gender_race_essay.html]
+            preview: Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, re…
+    Doc 4 — score: 0.6336  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: This handbook provides healthcare professionals, caregivers, educators, and support staff with practical guidance for un…
+
+──────────────────────────────────────────────────────────────────────
+  RETRIEVED (unfiltered) — retrieve_documents("Autism Spectrum Disorder definition")
+  5 chunk(s) | 2332 chars total — pending relevance check
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.829]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.747]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.711]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors (1). In 2013, the Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) (Table 1) (1,2).
+
+[Source: ..\data\html\asd_disparities_gender_race_essay.html, score: 0.679]
+Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, restricted interests, repetitive behaviors, and sensory processing. Although ASD has received increasing clinical and public attention, the experience of being identified, diagnosed, and treated is not the same for all patients. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care.
+
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.634]
+This handbook provides healthcare professionals, caregivers, educators, and support staff with practical guidance for understanding and managing patients with Autism Spectrum Disorder (ASD). The goal is to promote patient-centered care, improve communication, reduce stress, and support the emotional, behavioral, and developmental needs of individuals with ASD.
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] judging 5 chunk(s) for query: "Give me a complete overview of Autism Spectrum Disorder — its definition, causes"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] verdict=PASS  relevant=4/5
+  [VALIDATE-RETRIEVAL] reason: The retrieved chunks collectively provide a comprehensive overview of ASD, covering its definition, causes, prevalence, diagnosis process, treatment options, and associated disparities.
+    ✓ chunk 0: Provides definition, characteristics, and spectrum concept of ASD
+    ✓ chunk 1: Offers definition and characteristics of ASD
+    ✓ chunk 2: Discusses definition, epidemiology, and diagnostic criteria of ASD
+    ✓ chunk 3: Highlights disparities in ASD diagnosis and treatment based on gender and race
+    ✗ chunk 4: Provides general guidance for patient management, but lacks specific information on ASD
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] dropping 1 irrelevant chunk(s): [4]
+  [VALIDATE-RETRIEVAL] surviving chunks (4):
+    ✓ orig_idx 0: Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social com…
+    ✓ orig_idx 1: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in com…
+    ✓ orig_idx 2: Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social …
+    ✓ orig_idx 3: Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in soci…
+  [DEDUP] accumulated_chunks[0] ~ accumulated_chunks[1]  (cos=0.948)  — will merge
+  [DEDUP] accumulated_chunks[0] ~ accumulated_chunks[2]  (cos=0.904)  — will merge
+
+  [MERGE ATTEMPT 1/3] group keeper=accumulated_chunks[0], dups=[1, 2]
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 3 chunks from sources: ['..\\data\\word\\ASD_Patient_Management_Handbook.docx', 'C:\\Users\\LOQ\\Desktop\\Projects\\RAG-work\\data\\json\\asd_information.json', '..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf']
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities [Source: ../data/word/ASD_Patient_Management_Handbook.docx]. It exists on a spectrum, meaning symptoms and support needs vary significantly between individuals [Source: ../data/word/ASD_Patient_Management_Handbook.docx]. Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing [Source: C:/Users/LOQ/Desktop/Projects/RAG-work/data/json/asd_information.json]. Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. In 2013, the Diagnostic and Statistical Manual of Mental Disorders\u20145th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].", "sources": ["../data/word/ASD_Patient_Management_Handbook.docx", "C:/Users/LOQ/Desktop/Projects/RAG-work/data/json/asd_information.json", "../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf"], "merged_from": 3}
+  [CHUNK MERGE] success — 1241 chars, 3 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 3 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] verdict=FAITHFUL  fabricated=0  dropped=0
+  [VALIDATE-MERGE] reason: The MERGED CHUNK is faithful to the SOURCE CHUNKS, preserving all substantive facts and not inventing any new ones.
+──────────────────────────────────────────────────────────────────────
+  [MERGE INSTALLED] accumulated_chunks[0] replaced (verdict=FAITHFUL); dups [1, 2] marked for drop.
+  [DEDUP] dropping 2 redundant chunk(s)
+
+  [AGENT STATE] total_retrievals=1/5 | accumulated_chunks=2
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "Autism Spectrum Disorder causes",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "Autism Spectrum Disorder causes"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [0.011057, -0.033133, 0.013214, 0.083126, 0.031788, 0.030981, 0.054101, 0.072868]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.5
+  + 2 result(s) from learned_qa collection
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.6608  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restrict…
+    Doc 1 — score: 0.6281  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and th…
+    Doc 2 — score: 0.6244  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i…
+    Doc 3 — score: 0.6052  [..\data\html\asd_disparities_gender_race_essay.html]
+            preview: Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, re…
+    Doc 4 — score: 0.5995  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: 53. Saxena A, Chahrour M. Autism spectrum disorder. In: Ginsburg GS, Willard HF, David SP. editors. Genomic and precisio…
+
+──────────────────────────────────────────────────────────────────────
+  RETRIEVED (unfiltered) — retrieve_documents("Autism Spectrum Disorder causes")
+  5 chunk(s) | 2205 chars total — pending relevance check
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.661]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.628]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors (1). In 2013, the Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) (Table 1) (1,2).
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.624]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\html\asd_disparities_gender_race_essay.html, score: 0.605]
+Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, restricted interests, repetitive behaviors, and sensory processing. Although ASD has received increasing clinical and public attention, the experience of being identified, diagnosed, and treated is not the same for all patients. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.599]
+53. Saxena A, Chahrour M. Autism spectrum disorder. In: Ginsburg GS, Willard HF, David SP. editors. Genomic and precision medicine: primary care. Cambridge: Academic Press, 2017:301-16.
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] judging 5 chunk(s) for query: "Give me a complete overview of Autism Spectrum Disorder — its definition, causes"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] verdict=PASS  relevant=4/5
+  [VALIDATE-RETRIEVAL] reason: The retrieved chunks provide a comprehensive overview of Autism Spectrum Disorder, including its definition, characteristics, diagnostic criteria, and associated disparities. While one chunk is not di
+    ✓ chunk 0: Provides a definition and characteristics of Autism Spectrum Disorder.
+    ✓ chunk 1: Discusses the diagnostic criteria for Autism Spectrum Disorder.
+    ✓ chunk 2: Offers a definition and characteristics of Autism Spectrum Disorder.
+    ✓ chunk 3: Highlights disparities in diagnosis and treatment of Autism Spectrum Disorder based on gender and race.
+    ✗ chunk 4: References a book chapter on Autism Spectrum Disorder but does not provide relevant information.
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] dropping 1 irrelevant chunk(s): [4]
+  [VALIDATE-RETRIEVAL] surviving chunks (4):
+    ✓ orig_idx 0: Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social com…
+    ✓ orig_idx 1: Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social …
+    ✓ orig_idx 2: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in com…
+    ✓ orig_idx 3: Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in soci…
+  [DEDUP] accumulated_chunks[2] ~ accumulated_chunks[0]  (cos=0.938)  — will merge
+  [DEDUP] accumulated_chunks[2] ~ accumulated_chunks[3]  (cos=0.904)  — will merge
+  [DEDUP] accumulated_chunks[2] ~ accumulated_chunks[4]  (cos=0.948)  — will merge
+  [DEDUP] accumulated_chunks[5] ~ accumulated_chunks[1]  (cos=1.000)  — will merge
+
+  [MERGE ATTEMPT 1/3] group keeper=accumulated_chunks[2], dups=[0, 3, 4]
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 4 chunks from sources: ['..\\data\\word\\ASD_Patient_Management_Handbook.docx', '..\\data\\word\\ASD_Patient_Management_Handbook.docx, C:\\Users\\LOQ\\Desktop\\Projects\\RAG-work\\data\\json\\asd_information.json, ..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf', '..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf', 'C:\\Users\\LOQ\\Desktop\\Projects\\RAG-work\\data\\json\\asd_information.json']
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities [Source: ../data/word/ASD_Patient_Management_Handbook.docx] [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. It exists on a spectrum, meaning symptoms and support needs vary significantly between individuals [Source: ../data/word/ASD_Patient_Management_Handbook.docx]. Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing [Source: C:/Users/LOQ/Desktop/Projects/RAG-work/data/json/asd_information.json]. Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. In 2013, the Diagnostic and Statistical Manual of Mental Disorders\u20145th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].", "sources": ["../data/word/ASD_Patient_Management_Handbook.docx", "C:/Users/LOQ/Desktop/Projects/RAG-work/data/json/asd_information.json", "../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf"], "merged_from": 3}
+  [CHUNK MERGE] success — 1351 chars, 3 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 4 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] verdict=FAITHFUL  fabricated=0  dropped=0
+  [VALIDATE-MERGE] reason: The MERGED CHUNK is faithful to the SOURCE CHUNKS, preserving all substantive facts and not inventing any new ones.
+──────────────────────────────────────────────────────────────────────
+  [MERGE INSTALLED] accumulated_chunks[2] replaced (verdict=FAITHFUL); dups [0, 3, 4] marked for drop.
+
+  [MERGE ATTEMPT 1/3] group keeper=accumulated_chunks[5], dups=[1]
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 2 chunks from sources: ['..\\data\\html\\asd_disparities_gender_race_essay.html', '..\\data\\html\\asd_disparities_gender_race_essay.html']
+──────────────────────────────────────────────────────────────────────
+  [MERGE] RateLimitError — HTTP 429: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.1-8b-instant` in organization `org_01kpzxk122fm2akawhpn357gh0` service tier `on_demand` on tokens per minute (TPM): Limit 6000, Used 4844, Requested 1307. Please try again in 1.51s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+  [CHUNK MERGE] transient error on attempt 1 (RATE_LIMIT) — retrying…
+  [CHUNK MERGE] LLM response on attempt 2:
+{"content": "Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, restricted interests, repetitive behaviors, and sensory processing [Source: "../data/html/asd_disparities_gender_race_essay.html"]. Although ASD has received increasing clinical and public attention, the experience of being identified, diagnosed, and treated is not the same for all patients [Source: "../data/html/asd_disparities_gender_race_essay.html"]. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available [Source: "../data/html/asd_disparities_gender_race_essay.html"]. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care [Source: "../data/html/asd_disparities_gender_race_essay.html"].", "sources": ["../data/html/asd_disparities_gender_race_essay.html"], "merged_from": 2}
+  [CHUNK MERGE] success — 928 chars, 1 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 2 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] verdict=FAITHFUL  fabricated=0  dropped=0
+  [VALIDATE-MERGE] reason: The MERGED CHUNK is faithful to the SOURCE CHUNKS, preserving all substantive facts and not inventing any new ones.
+──────────────────────────────────────────────────────────────────────
+  [MERGE INSTALLED] accumulated_chunks[5] replaced (verdict=FAITHFUL); dups [1] marked for drop.
+  [DEDUP] dropping 4 redundant chunk(s)
+
+  [AGENT STATE] total_retrievals=2/5 | accumulated_chunks=2
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "Autism Spectrum Disorder prevalence",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "Autism Spectrum Disorder prevalence"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [0.056474, -0.083561, -0.062836, 0.019431, -0.037636, 0.075813, 0.033908, 0.046726]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.5
+  + 2 result(s) from learned_qa collection
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.7302  [..\data\html\asd_disparities_gender_race_essay.html]
+            preview: Centers for Disease Control and Prevention. Prevalence and Early Identification of Autism Spectrum Disorder Among Childr…
+    Doc 1 — score: 0.7090  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: impact of DSM-5 criteria on autism spectrum disorder prevalence estimates. JAMA Psychiatry 2014;71:292-300. 5. Kulage KM…
+    Doc 2 — score: 0.6948  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: 11. de Giambattista C, Ventura P, Trerotoli P, et al. Subtyping the autism spectrum disorder: comparison of children wit…
+    Doc 3 — score: 0.6922  [..\data\html\asd_disparities_gender_race_essay.html]
+            preview: Wiggins, L. D., et al. Disparities in Documented Diagnoses of Autism Spectrum Disorder Based on Demographic, Individual,…
+    Doc 4 — score: 0.6857  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: 10. Hartley-McAndrew M, Mertz J, Hoffman M, et al. Rates of autism spectrum disorder diagnosis under the DSM- 5 criteria…
+
+──────────────────────────────────────────────────────────────────────
+  RETRIEVED (unfiltered) — retrieve_documents("Autism Spectrum Disorder prevalence")
+  5 chunk(s) | 1686 chars total — pending relevance check
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\html\asd_disparities_gender_race_essay.html, score: 0.730]
+Centers for Disease Control and Prevention. Prevalence and Early Identification of Autism Spectrum Disorder Among Children Aged 8 Years — Autism and Developmental Disabilities Monitoring Network, 16 Sites, United States, 2022. CDC MMWR, 2025.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.709]
+impact of DSM-5 criteria on autism spectrum disorder prevalence estimates. JAMA Psychiatry 2014;71:292-300. 5. Kulage KM, Smaldone AM, Cohn EG. How will DSM-5 affect autism diagnosis? A systematic literature review and meta-analysis. J Autism Dev Disord 2014;44:1918-32. 6. Baio J, Wiggins L, Christensen DL, et al. Prevalence of
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.695]
+11. de Giambattista C, Ventura P, Trerotoli P, et al. Subtyping the autism spectrum disorder: comparison of children with high functioning autism and asperger syndrome. J Autism Dev Disord 2019;49:138-50.
+
+[Source: ..\data\html\asd_disparities_gender_race_essay.html, score: 0.692]
+Wiggins, L. D., et al. Disparities in Documented Diagnoses of Autism Spectrum Disorder Based on Demographic, Individual, and Service Factors. CDC / Autism Research, 2020.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.686]
+10. Hartley-McAndrew M, Mertz J, Hoffman M, et al. Rates of autism spectrum disorder diagnosis under the DSM- 5 criteria compared to DSM-IV-TR criteria in a hospital- based clinic. Pediatr Neurol 2016;57:34-8.
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] judging 5 chunk(s) for query: "Give me a complete overview of Autism Spectrum Disorder — its definition, causes"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] verdict=PASS  relevant=5/5
+  [VALIDATE-RETRIEVAL] reason: The retrieved chunks collectively provide a comprehensive overview of Autism Spectrum Disorder, covering its definition, causes, prevalence, diagnosis process, treatment options, and associated dispar
+    ✓ chunk 0: Provides information on the prevalence of Autism Spectrum Disorder.
+    ✓ chunk 1: Contains information on the definition, epidemiology, and causes of Autism Spectrum Disorder.
+    ✓ chunk 2: Discusses subtyping of Autism Spectrum Disorder, which is related to its definition and causes.
+    ✓ chunk 3: Examines disparities in documented diagnoses of Autism Spectrum Disorder based on demographic factors.
+    ✓ chunk 4: Compares rates of Autism Spectrum Disorder diagnosis under different criteria, which is related to its definition and di
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] all 5 chunk(s) kept.
+
+  [AGENT STATE] total_retrievals=3/5 | accumulated_chunks=7
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "Autism Spectrum Disorder diagnosis process",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "Autism Spectrum Disorder diagnosis process"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.010442, -0.007454, -0.056497, -0.007737, 0.021468, -0.006555, 0.062681, 0.065194]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.5
+  + 2 result(s) from learned_qa collection
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.6583  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restrict…
+    Doc 1 — score: 0.6441  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: 99. Filipek PA, Accardo PJ, Ashwal S, et al. Practice parameter: screening and diagnosis of autism. Report of the qualit…
+    Doc 2 — score: 0.6427  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: 12. Mazurek MO, Lu F, Symecko H, et al. A prospective study of the concordance of DSM-IV and DSM-5 diagnostic criteria f…
+    Doc 3 — score: 0.6406  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: 10. Hartley-McAndrew M, Mertz J, Hoffman M, et al. Rates of autism spectrum disorder diagnosis under the DSM- 5 criteria…
+    Doc 4 — score: 0.6324  [..\data\html\asd_disparities_gender_race_essay.html]
+            preview: Reducing disparities among ASD patients requires action at multiple levels. Screening tools and clinical training should…
+
+──────────────────────────────────────────────────────────────────────
+  RETRIEVED (unfiltered) — retrieve_documents("Autism Spectrum Disorder diagnosis process")
+  5 chunk(s) | 1998 chars total — pending relevance check
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.658]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.644]
+99. Filipek PA, Accardo PJ, Ashwal S, et al. Practice parameter: screening and diagnosis of autism. Report of the quality standards subcommittee of the American Academy of Neurology and the Child Neurology Society. Neurology 2000;55:468-79.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.643]
+12. Mazurek MO, Lu F, Symecko H, et al. A prospective study of the concordance of DSM-IV and DSM-5 diagnostic criteria for autism spectrum disorder. J Autism Dev Disord 2017;47:2783-94.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.641]
+10. Hartley-McAndrew M, Mertz J, Hoffman M, et al. Rates of autism spectrum disorder diagnosis under the DSM- 5 criteria compared to DSM-IV-TR criteria in a hospital- based clinic. Pediatr Neurol 2016;57:34-8.
+
+[Source: ..\data\html\asd_disparities_gender_race_essay.html, score: 0.632]
+Reducing disparities among ASD patients requires action at multiple levels. Screening tools and clinical training should reflect a broader range of autistic presentations, especially in girls and culturally diverse populations. Providers should be trained to recognize masking, subtle social communication differences, and the ways autism may be expressed differently across communities. Diagnostic pathways should include interpreters, culturally responsive family communication, and patient navigation support for families facing practical barriers.
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] judging 5 chunk(s) for query: "Give me a complete overview of Autism Spectrum Disorder — its definition, causes"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] verdict=PASS  relevant=2/5
+  [VALIDATE-RETRIEVAL] reason: The retrieved chunks provide a definition of Autism Spectrum Disorder and discuss its causes, prevalence, diagnosis process, treatment options, and associated disparities, making them relevant to the 
+    ✓ chunk 0: Provides a definition of Autism Spectrum Disorder.
+    ✗ chunk 1: Contains a reference to a practice parameter, but no relevant information.
+    ✗ chunk 2: Refers to a study on the concordance of DSM-IV and DSM-5 diagnostic criteria, but no relevant information.
+    ✗ chunk 3: Reports on rates of autism spectrum disorder diagnosis under different criteria, but no relevant information.
+    ✓ chunk 4: Discusses disparities among ASD patients, including screening tools, clinical training, and diagnostic pathways.
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] dropping 3 irrelevant chunk(s): [1, 2, 3]
+  [VALIDATE-RETRIEVAL] surviving chunks (2):
+    ✓ orig_idx 0: Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social com…
+    ✓ orig_idx 4: Reducing disparities among ASD patients requires action at multiple levels. Screening tools and clin…
+  [DEDUP] accumulated_chunks[7] ~ accumulated_chunks[0]  (cos=0.926)  — will merge
+
+  [MERGE ATTEMPT 1/3] group keeper=accumulated_chunks[7], dups=[0]
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 2 chunks from sources: ['..\\data\\word\\ASD_Patient_Management_Handbook.docx', '..\\data\\word\\ASD_Patient_Management_Handbook.docx, C:\\Users\\LOQ\\Desktop\\Projects\\RAG-work\\data\\json\\asd_information.json, ..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf']
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities [Source: ../data/word/ASD_Patient_Management_Handbook.docx] [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. It exists on a spectrum, meaning symptoms and support needs vary significantly between individuals [Source: ../data/word/ASD_Patient_Management_Handbook.docx]. Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing [Source: C:/Users/LOQ/Desktop/Projects/RAG-work/data/json/asd_information.json]. Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. In 2013, the Diagnostic and Statistical Manual of Mental Disorders\u20145th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].", "sources": ["../data/word/ASD_Patient_Management_Handbook.docx", "C:/Users/LOQ/Desktop/Projects/RAG-work/data/json/asd_information.json", "../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf"], "merged_from": 3}
+  [CHUNK MERGE] success — 1351 chars, 3 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 2 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] reason: The MERGED CHUNK is faithful to the SOURCE CHUNKS, preserving all substantive facts and not inventing any new ones.
+──────────────────────────────────────────────────────────────────────
+  [MERGE INSTALLED] accumulated_chunks[7] replaced (verdict=FAITHFUL); dups [0] marked for drop.
+  [DEDUP] dropping 1 redundant chunk(s)
+
+  [AGENT STATE] total_retrievals=4/5 | accumulated_chunks=8
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "Autism Spectrum Disorder treatment options",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "Autism Spectrum Disorder treatment options"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.001351, -0.03282, 0.009491, 0.016719, -0.064382, 0.043397, 0.000772, 0.10271]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.5
+  + 2 result(s) from learned_qa collection
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.6694  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: parameter for the assessment and treatment of children and adolescents with autism spectrum disorder. J Am Acad Child Ad…
+    Doc 1 — score: 0.6232  [learned_qa]
+            preview: Q: What are the recommended treatment options for individuals with Autism Spectrum Disorder (ASD)? A: Applied Behavior A…
+    Doc 2 — score: 0.6181  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: 53. Saxena A, Chahrour M. Autism spectrum disorder. In: Ginsburg GS, Willard HF, David SP. editors. Genomic and precisio…
+    Doc 3 — score: 0.6130  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: This handbook provides healthcare professionals, caregivers, educators, and support staff with practical guidance for un…
+    Doc 4 — score: 0.6081  [learned_qa]
+            preview: Q: What are the recommended treatments for individuals with Autism Spectrum Disorder? A: Applied Behavior Analysis (ABA)…
+
+──────────────────────────────────────────────────────────────────────
+  RETRIEVED (unfiltered) — retrieve_documents("Autism Spectrum Disorder treatment options")
+  5 chunk(s) | 2176 chars total — pending relevance check
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.669]
+parameter for the assessment and treatment of children and adolescents with autism spectrum disorder. J Am Acad Child Adolesc Psychiatry 2014;53:237-57.
+
+[Source: learned_qa, score: 0.623]
+Q: What are the recommended treatment options for individuals with Autism Spectrum Disorder (ASD)?
+A: Applied Behavior Analysis (ABA), Occupational Therapy (OT), Speech Therapy, and Social Skills Training are recommended treatments for individuals with Autism Spectrum Disorder. These therapies can help improve communication, social interaction, and daily living skills. ABA focuses on breaking down complex behaviors into smaller parts and reinforcing desired behaviors, while OT helps develop fine motor skills and sensory integration skills.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.618]
+53. Saxena A, Chahrour M. Autism spectrum disorder. In: Ginsburg GS, Willard HF, David SP. editors. Genomic and precision medicine: primary care. Cambridge: Academic Press, 2017:301-16.
+
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.613]
+This handbook provides healthcare professionals, caregivers, educators, and support staff with practical guidance for understanding and managing patients with Autism Spectrum Disorder (ASD). The goal is to promote patient-centered care, improve communication, reduce stress, and support the emotional, behavioral, and developmental needs of individuals with ASD.
+
+[Source: learned_qa, score: 0.608]
+Q: What are the recommended treatments for individuals with Autism Spectrum Disorder?
+A: Applied Behavior Analysis (ABA), Occupational Therapy (OT), Speech Therapy, and Social Skills Training are recommended treatments for individuals with Autism Spectrum Disorder. These therapies can help improve communication, social interaction, and daily living skills. ABA focuses on breaking down complex behaviors into smaller parts and reinforcing desired behaviors, while OT helps develop fine motor skills and sensory integration skills.
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] judging 5 chunk(s) for query: "Give me a complete overview of Autism Spectrum Disorder — its definition, causes"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] verdict=PASS  relevant=4/5
+  [VALIDATE-RETRIEVAL] reason: The retrieved chunks collectively provide a comprehensive overview of Autism Spectrum Disorder, covering its definition, causes, prevalence, diagnosis process, treatment options, and associated dispar
+    ✓ chunk 0: Provides information on the definition, epidemiology, and clinical evaluation of Autism Spectrum Disorder.
+    ✓ chunk 1: Lists recommended treatment options for individuals with Autism Spectrum Disorder.
+    ✓ chunk 2: Provides additional information on the definition and epidemiology of Autism Spectrum Disorder.
+    ✗ chunk 3: This chunk is a handbook introduction and does not provide specific information on the definition, causes, prevalence, d
+    ✓ chunk 4: Lists recommended treatment options for individuals with Autism Spectrum Disorder.
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] dropping 1 irrelevant chunk(s): [3]
+  [VALIDATE-RETRIEVAL] surviving chunks (4):
+    ✓ orig_idx 0: parameter for the assessment and treatment of children and adolescents with autism spectrum disorder…
+    ✓ orig_idx 1: Q: What are the recommended treatment options for individuals with Autism Spectrum Disorder (ASD)? A…
+    ✓ orig_idx 2: 53. Saxena A, Chahrour M. Autism spectrum disorder. In: Ginsburg GS, Willard HF, David SP. editors. …
+    ✓ orig_idx 4: Q: What are the recommended treatments for individuals with Autism Spectrum Disorder? A: Applied Beh…
+  [DEDUP] accumulated_chunks[9] ~ accumulated_chunks[11]  (cos=0.945)  — will merge
+
+  [MERGE ATTEMPT 1/3] group keeper=accumulated_chunks[9], dups=[11]
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 2 chunks from sources: ['learned_qa', 'learned_qa']
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Applied Behavior Analysis (ABA), Occupational Therapy (OT), Speech Therapy, and Social Skills Training are recommended treatments for individuals with Autism Spectrum Disorder [Source: learned_qa] [Source: learned_qa]. These therapies can help improve communication, social interaction, and daily living skills [Source: learned_qa] [Source: learned_qa]. ABA focuses on breaking down complex behaviors into smaller parts and reinforcing desired behaviors [Source: learned_qa] [Source: learned_qa], while OT helps develop fine motor skills and sensory integration skills [Source: learned_qa] [Source: learned_qa].", "sources": ["learned_qa", "learned_qa"], "merged_from": 2}
+  [CHUNK MERGE] success — 611 chars, 2 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 2 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] verdict=FAITHFUL  fabricated=0  dropped=0
+  [VALIDATE-MERGE] reason: The MERGED CHUNK is faithful to the SOURCE CHUNKS, preserving all substantive facts and not inventing any new ones.
+──────────────────────────────────────────────────────────────────────
+  [MERGE INSTALLED] accumulated_chunks[9] replaced (verdict=FAITHFUL); dups [11] marked for drop.
+  [DEDUP] dropping 1 redundant chunk(s)
+
+  [AGENT STATE] total_retrievals=5/5 | accumulated_chunks=11
+
+══════════════════════════════════════════════════════════════════════
+  [PHASE: RETRIEVE]  Iteration 2/6
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS (these are the ONLY tools available to you):
+- retrieve_documents(query, top_k): searches the knowledge base.
+- compress_context(): consolidate...
+
+  [1] role=user
+      content: Give me a complete overview of Autism Spectrum Disorder — its definition, causes, prevalence, diagnosis process, treatment options, and associated disparities.
+
+  [2] role=assistant
+      content: 
+      tool_call → retrieve_documents  args={"query": "Autism Spectrum Disorder definition", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "Autism Spectrum Disorder causes", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "Autism Spectrum Disorder prevalence", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "Autism Spectrum Disorder diagnosis process", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "Autism Spectrum Disorder treatment options", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "Autism Spectrum Disorder associated disparities", "top_k": 5}
+      tool_call → compress_context  args={}
+
+  [3] role=tool  tool_call_id=0tvhr4mdz
+      content: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.829]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.747]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patter...
+
+  [4] role=tool  tool_call_id=csgxyjkxw
+      content: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.661]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.628]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and...
+
+  [5] role=tool  tool_call_id=yznzqvxb5
+      content: [Source: ..\data\html\asd_disparities_gender_race_essay.html, score: 0.730]
+Centers for Disease Control and Prevention. Prevalence and Early Identification of Autism Spectrum Disorder Among Children Aged 8 Years — Autism and Developmental Disabilities Monitoring Network, 16 Sites, United States, 2022. CDC MMWR, 2025.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.709]
+impact of DSM-5 criteria on autism spectrum disorder prevalence estimates. JAMA Psychiatry 2014;71:292-300. 5. Kulage KM, Smaldone AM, Cohn EG. How will DSM...
+
+  [6] role=tool  tool_call_id=0zqc9m95z
+      content: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.658]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\html\asd_disparities_gender_race_essay.html, score: 0.632]
+Reducing disparities among ASD patients requires action at multiple levels. Screening tools and clinical training should reflect a broader range of autistic presenta...
+
+  [7] role=tool  tool_call_id=v1qyqj95w
+      content: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.669]
+parameter for the assessment and treatment of children and adolescents with autism spectrum disorder. J Am Acad Child Adolesc Psychiatry 2014;53:237-57.
+
+[Source: learned_qa, score: 0.623]
+Q: What are the recommended treatment options for individuals with Autism Spectrum Disorder (ASD)?
+A: Applied Behavior Analysis (ABA), Occupational Therapy (OT), Speech Therapy, and Social Skills Training are recommended treatments for individuals with Autism Spectrum Disorder. These th...
+
+  Tool schemas: ['retrieve_documents', 'compress_context']
+══════════════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 2]
+══════════════════════════════════════════════════════════════════════
+  Tokens: 3102 prompt + 202 completion
+  content (1302 chars): The recommended treatment options for individuals with Autism Spectrum Disorder (ASD) include Applied Behavior Analysis (ABA), Occupational Therapy (OT), Speech Therapy, and Social Skills Training. These therapies can help improve communication, social interaction, and daily living skills. ABA focuses on breaking down complex behaviors into smaller parts and reinforcing desired behaviors, while OT...
+
+  tool_calls: none
+══════════════════════════════════════════════════════════════════════
+
+  [PHASE] LLM emitted text without tool calls in RETRIEVE phase — transitioning to COMPRESS.
+
+══════════════════════════════════════════════════════════════════════
+  [PHASE: COMPRESS]  accumulated_chunks=11
+══════════════════════════════════════════════════════════════════════
+  [COMPRESS] LLM did not call compress_context — enforcing now.
+
+──────────────────────────────────────────────────────────────────────
+  [ENFORCE] system injecting synthetic call to compress_context() — reason: Retrieval phase ended without compress_context being called.
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  TOOL CALL — compress_context
+──────────────────────────────────────────────────────────────────────
+  input chunks      : 11
+  query             : "Give me a complete overview of Autism Spectrum Disorder — its definition, causes, prevalence, diagnosis process, treatme"
+  approx tokens     : 1233  (threshold: 500)
+
+  [COMPRESS] running NAC → DC → LBC pipeline on 11 chunk(s)
+
+──────────────────────────────────────────────────────────────────────
+  [NAC] Neighbor-Aware Compression — scanning 11 chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [NAC] 1 neighbor run(s) found | 8 singleton(s) pass through unchanged
+    run: source=..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf  seq=764→765  (2 chunks)
+
+  [NAC MERGE attempt 1/3] 2 chunks from '..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf'  seq 764→765
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 2 chunks from sources: ['..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf', '..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf']
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by impaired social interaction and communication, and restricted and repetitive behavior. [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf] [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Rates of ASD diagnosis under the DSM-5 criteria compared to DSM-IV-TR criteria in a hospital-based clinic have been studied. [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Subtyping of ASD has been compared in children with high functioning autism and asperger syndrome. [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].", "sources": ["../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf"], "merged_from": 2}
+  [CHUNK MERGE] success — 834 chars, 1 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 2 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] verdict=FAITHFUL  fabricated=0  dropped=0
+  [VALIDATE-MERGE] reason: The merged chunk is faithful to the source chunks, preserving all substantive facts and not inventing any new ones.
+──────────────────────────────────────────────────────────────────────
+  [NAC MERGE] success on attempt 1 (verdict=FAITHFUL)
+
+  [NAC] compression done: 11 → 10 chunk(s) (1 eliminated)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [DC] Deduplication Compression — 10 chunk(s), window=3
+──────────────────────────────────────────────────────────────────────
+
+  [DC] scanning window [0:3] (3 chunk(s))
+  [DC] 2 redundancy group(s) identified in this window:
+    chunk_index=0  sentence="Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who m"
+    chunk_index=1  sentence="Providers should be trained to recognize masking, subtle social communication differences, and the ways autism may be ex"
+    chunk_index=0  sentence="These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, an"
+    chunk_index=1  sentence="Diagnostic pathways should include interpreters, culturally responsive family communication, and patient navigation supp"
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-REDUNDANCY] judging 2 group(s) across 3 chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-REDUNDANCY] confirmed=1  rejected=1
+    ✓ group 0 CONFIRMED: Same subject and same factual claim.
+        chunk 0: "Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate"
+        chunk 1: "Providers should be trained to recognize masking, subtle social communication differences, and the w"
+    ✗ group 1 REJECTED:  Different subjects and different factual claims.
+        chunk 0: "These disparities matter because delayed identification can postpone therapy, school accommodations,"
+        chunk 1: "Diagnostic pathways should include interpreters, culturally responsive family communication, and pat"
+──────────────────────────────────────────────────────────────────────
+
+  [DC] chunk 1: removing 1 confirmed-redundant sentence(s)
+    before (551 chars): Reducing disparities among ASD patients requires action at multiple levels. Screening tools and clinical training should reflect a broader range of au…
+    after  (392 chars): Reducing disparities among ASD patients requires action at multiple levels. Screening tools and clinical training should reflect a broader range of au…
+  [DC] chunk 1: INSTALLED cleaned version ✓
+
+  [DC] scanning window [3:6] (3 chunk(s))
+  [DC] 3 redundancy group(s) identified in this window:
+    chunk_index=0  sentence="Disparities in Documented Diagnoses of Autism Spectrum Disorder Based on Demographic, Individual, and Service Factors."
+    chunk_index=1  sentence="Rates of ASD diagnosis under the DSM-5 criteria compared to DSM-IV-TR criteria in a hospital-based clinic have been stud"
+    chunk_index=0  sentence="Disparities in Documented Diagnoses of Autism Spectrum Disorder Based on Demographic, Individual, and Service Factors."
+    chunk_index=2  sentence="impact of DSM-5 criteria on autism spectrum disorder prevalence estimates."
+    chunk_index=1  sentence="Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by impaired social interaction and communi"
+    chunk_index=2  sentence="impact of DSM-5 criteria on autism spectrum disorder prevalence estimates."
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-REDUNDANCY] judging 3 group(s) across 3 chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-REDUNDANCY] confirmed=1  rejected=2
+    ✓ group 0 CONFIRMED: Same subject and same factual claim.
+        chunk 0: "Disparities in Documented Diagnoses of Autism Spectrum Disorder Based on Demographic, Individual, an"
+        chunk 1: "Rates of ASD diagnosis under the DSM-5 criteria compared to DSM-IV-TR criteria in a hospital-based c"
+    ✗ group 1 REJECTED:  Different subjects.
+        chunk 0: "Disparities in Documented Diagnoses of Autism Spectrum Disorder Based on Demographic, Individual, an"
+        chunk 2: "impact of DSM-5 criteria on autism spectrum disorder prevalence estimates."
+    ✗ group 2 REJECTED:  Different subjects and conflicting meanings.
+        chunk 1: "Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by impaired social int"
+        chunk 2: "impact of DSM-5 criteria on autism spectrum disorder prevalence estimates."
+──────────────────────────────────────────────────────────────────────
+
+  [DC] chunk 4: removing 1 confirmed-redundant sentence(s)
+    before (834 chars): Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by impaired social interaction and communication, and restricted and rep…
+    after  (710 chars): Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by impaired social interaction and communication, and restricted and rep…
+  [DC] chunk 4: INSTALLED cleaned version ✓
+
+  [DC] scanning window [6:9] (3 chunk(s))
+  [DC] 3 redundancy group(s) identified in this window:
+    chunk_index=0  sentence="parameter for the assessment and treatment of children and adolescents with autism spectrum disorder. J Am Acad Child Ad"
+    chunk_index=1  sentence="Autism spectrum disorder. In: Ginsburg GS, Willard HF, David SP. editors. Genomic and precision medicine: primary care. "
+    chunk_index=2  sentence="Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restrict"
+    chunk_index=2  sentence="Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i"
+    chunk_index=2  sentence="Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i"
+    chunk_index=2  sentence="Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and th"
+  [DC] group dropped — all 2 member(s) are from chunk_index=2 (intra-chunk repetition, not cross-chunk redundancy)
+  [DC] group dropped — all 2 member(s) are from chunk_index=2 (intra-chunk repetition, not cross-chunk redundancy)
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-REDUNDANCY] judging 1 group(s) across 3 chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-REDUNDANCY] ignoring out-of-range group_index=1 (only 1 group(s) were submitted)
+  [VALIDATE-REDUNDANCY] confirmed=1  rejected=0
+    ✓ group 0 CONFIRMED: Same subject and same factual claim.
+        chunk 0: "parameter for the assessment and treatment of children and adolescents with autism spectrum disorder"
+        chunk 1: "Autism spectrum disorder. In: Ginsburg GS, Willard HF, David SP. editors. Genomic and precision medi"
+──────────────────────────────────────────────────────────────────────
+  [DC] chunk 7: cleaned content too short — skipping (would remove too much)
+
+  [DC] done — 2 redundant passage(s) removed across 10 chunk(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [LBC] LLM-Based Compression — 10 chunk(s)
+  [LBC] query: "Give me a complete overview of Autism Spectrum Disorder — its definition, causes, prevalence, diagno"
+──────────────────────────────────────────────────────────────────────
+
+  [LBC] chunk 0 — source: '..\data\html\asd_disparities_gender_race_essay.html'  (928 chars)
+  [LBC] chunk 0: LLM produced 519 chars (dropped_count=4)  reason: Removed sentences that describe document structure rather than facts.
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-LBC] judging compressed chunk from source: '..\data\html\asd_disparities_gender_race_essay.html'
+  [VALIDATE-LBC] query: "Give me a complete overview of Autism Spectrum Disorder — its definition, causes"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-LBC] verdict=SAFE  fabricated=0  lost_relevant=0
+  [VALIDATE-LBC] reason: No fabrications or lost relevant facts found.
+──────────────────────────────────────────────────────────────────────
+  [LBC] chunk 0: SAFE — installing (928 → 519 chars, −409 chars)
+
+  [LBC] chunk 1 — source: '..\data\html\asd_disparities_gender_race_essay.html'  (392 chars)
+  [LBC] chunk 1: LLM produced 392 chars (dropped_count=2)  reason: The original chunk contained 3 sentences, but only 3 sentences were relevant to the query, so 0 sentences were dropped i
+  [LBC] chunk 1: no change — keeping as-is
+
+  [LBC] chunk 2 — source: '..\data\html\asd_disparities_gender_race_essay.html'  (242 chars)
+  [LBC] chunk 2: LLM produced 1036 chars (dropped_count=4)  reason: The original chunk contained metadata and off-topic sentences that were removed to provide a concise overview of Autism 
+  [LBC] chunk 2: 'compressed' output expanded (242 → 1036 chars, +794) — keeping original (over-expansion guard)
+
+  [LBC] chunk 3 — source: '..\data\html\asd_disparities_gender_race_essay.html'  (170 chars)
+  [LBC] chunk 3: LLM produced 1434 chars (dropped_count=5)  reason: The original chunk contained 5 sentences that were not directly relevant to the query.
+  [LBC] chunk 3: 'compressed' output expanded (170 → 1434 chars, +1264) — keeping original (over-expansion guard)
+
+  [LBC] chunk 4 — source: '..\data\pdfs\Autism spectrum disorder definition, epidemiolo'  (710 chars)
+  [LBC] chunk 4: LLM produced 266 chars (dropped_count=4)  reason: Metadata and off-topic sentences were removed according to the compression instructions.
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-LBC] judging compressed chunk from source: '..\data\pdfs\Autism spectrum disorder definition, epidemiolo'
+  [VALIDATE-LBC] query: "Give me a complete overview of Autism Spectrum Disorder — its definition, causes"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-LBC] verdict=SAFE  fabricated=0  lost_relevant=0
+  [VALIDATE-LBC] reason: No fabrications or lost relevant facts found.
+──────────────────────────────────────────────────────────────────────
+  [LBC] chunk 4: SAFE — installing (710 → 266 chars, −444 chars)
+
+  [LBC] chunk 5 — source: '..\data\pdfs\Autism spectrum disorder definition, epidemiolo'  (329 chars)
+  [LBC] chunk 5: LLM produced 947 chars (dropped_count=5)  reason: The original chunk contained mostly metadata and irrelevant information, so a significant portion of it had to be droppe
+  [LBC] chunk 5: 'compressed' output expanded (329 → 947 chars, +618) — keeping original (over-expansion guard)
+
+  [LBC] chunk 6 — source: '..\data\pdfs\Autism spectrum disorder definition, epidemiolo'  (152 chars)
+  [LBC] chunk 6: LLM produced 1891 chars (dropped_count=7)  reason: The original chunk contained 7 sentences that were dropped due to being metadata, describing document structure, or repe
+  [LBC] chunk 6: 'compressed' output expanded (152 → 1891 chars, +1739) — keeping original (over-expansion guard)
+
+  [LBC] chunk 7 — source: '..\data\pdfs\Autism spectrum disorder definition, epidemiolo'  (185 chars)
+  [LBC] chunk 7: LLM produced 1090 chars (dropped_count=4)  reason: The original chunk contained metadata and off-topic sentences that were removed to provide a concise overview of Autism 
+  [LBC] chunk 7: 'compressed' output expanded (185 → 1090 chars, +905) — keeping original (over-expansion guard)
+
+  [LBC] chunk 8 — source: '..\data\word\ASD_Patient_Management_Handbook.docx, C:/Users/'  (1351 chars)
+  [LBC] chunk 8: LLM produced 821 chars (dropped_count=3)  reason: Metadata and document structure sentences were removed as per the compression instructions.
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-LBC] judging compressed chunk from source: '..\data\word\ASD_Patient_Management_Handbook.docx, C:/Users/'
+  [VALIDATE-LBC] query: "Give me a complete overview of Autism Spectrum Disorder — its definition, causes"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-LBC] verdict=SAFE  fabricated=0  lost_relevant=0
+  [VALIDATE-LBC] reason: No fabrications or lost relevant facts found.
+──────────────────────────────────────────────────────────────────────
+  [LBC] chunk 8: SAFE — installing (1351 → 821 chars, −530 chars)
+
+  [LBC] chunk 9 — source: 'learned_qa, learned_qa'  (611 chars)
+  [LBC] chunk 9: LLM produced 443 chars (dropped_count=8)  reason: Removed metadata and document structure sentences as per instructions.
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-LBC] judging compressed chunk from source: 'learned_qa, learned_qa'
+  [VALIDATE-LBC] query: "Give me a complete overview of Autism Spectrum Disorder — its definition, causes"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-LBC] verdict=SAFE  fabricated=0  lost_relevant=0
+  [VALIDATE-LBC] reason: No fabrications or lost relevant facts found in the compressed chunk.
+──────────────────────────────────────────────────────────────────────
+  [LBC] chunk 9: SAFE — installing (611 → 443 chars, −168 chars)
+
+  [LBC] done — 10 → 10 chunk(s) (0 dropped as irrelevant, 4 compressed, 6 kept as-is)
+  [LBC] chars: 5,070 → 3,519 (-1,551 = 30.6% reduction)
+──────────────────────────────────────────────────────────────────────
+  [COMPRESS] pipeline complete — 10 chunk(s) remain
+  [COMPRESS] scrubbed 5 prior retrieve_documents tool-result message(s) from chat history (replaced with placeholder)
+  [COMPRESS] returning 4671 chars (10 chunks) as compress_context tool result
+──────────────────────────────────────────────────────────────────────
+  [DRAFT] creation disabled — generating final answer directly.
+
+══════════════════════════════════════════════════════════════════════
+  [PHASE: FINAL]  Invoking LLM with NO tool schemas directly from context.
+══════════════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════
+  FINAL ANSWER  (2628 chars)
+══════════════════════════════════════════════════════════════════════
+Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, restricted interests, repetitive behaviors, and sensory processing. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care [Source: ..\data\html\asd_disparities_gender_race_essay.html].
+
+Reducing disparities among ASD patients requires action at multiple levels. Screening tools and clinical training should reflect a broader range of autistic presentations, especially in girls and culturally diverse po...
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  FINAL ANSWER
+══════════════════════════════════════════════════════════════════════
+Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, restricted interests, repetitive behaviors, and sensory processing. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care [Source: ..\data\html\asd_disparities_gender_race_essay.html].
+
+Reducing disparities among ASD patients requires action at multiple levels. Screening tools and clinical training should reflect a broader range of autistic presentations, especially in girls and culturally diverse populations.  Diagnostic pathways should include interpreters, culturally responsive family communication, and patient navigation support for families facing practical barriers [Source: ..\data\html\asd_disparities_gender_race_essay.html]. The Centers for Disease Control and Prevention (CDC) has reported that prevalence and early identification of ASD among children aged 8 years vary significantly across different sites in the United States [Source: ..\data\html\asd_disparities_gender_race_essay.html].
+
+Autism spectrum disorder is a neurodevelopmental disorder characterized by impaired social interaction and communication, and restricted and repetitive behavior [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. The Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) has updated the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) [Source: learned_qa, learned_qa]. Treatment options for ASD include Applied Behavior Analysis (ABA), Occupational Therapy (OT), Speech Therapy, and Social Skills Training. These therapies can help improve communication, social interaction, and daily living skills [Source: learned_qa].
+
+It is essential to address the disparities in ASD diagnosis and treatment to ensure that all individuals with ASD receive the necessary support and services. This can be achieved by implementing culturally responsive diagnostic pathways, providing access to interpreters and patient navigation support, and promoting awareness about ASD among healthcare professionals and the general public [Source: ..\data\html\asd_disparities_gender_race_essay.html]. By working together, we can reduce the disparities in ASD diagnosis and treatment and improve the lives of individuals with ASD and their families.
+══════════════════════════════════════════════════════════════════════
+  Iterations used : 4 / 6
+  Quality signal  : OK
+  Tokens (total)  : 6217 prompt + 835 completion = 7052 total
+  Sources searched:
+    • "Autism Spectrum Disorder definition"
+      preview: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.829]
+Autism Spectrum Disorder i...
+    • "Autism Spectrum Disorder causes"
+      preview: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.661]
+Autism Spectrum Disorder i...
+    • "Autism Spectrum Disorder prevalence"
+      preview: [Source: ..\data\html\asd_disparities_gender_race_essay.html, score: 0.730]
+Centers for Disease Cont...
+    • "Autism Spectrum Disorder diagnosis process"
+      preview: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.658]
+Autism Spectrum Disorder i...
+    • "Autism Spectrum Disorder treatment options"
+      preview: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evalua...
+══════════════════════════════════════════════════════════════════════
+Your question: 

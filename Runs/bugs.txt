@@ -1,0 +1,94 @@
+Group 1 — Ambiguous Abbreviation (ASD Problem)
+    2nd Query: 
+        How does ASD improve energy efficiency in industrial motors?
+    Answer: 
+        Adjustable speed drives (ASDs) improve energy efficiency in industrial motors by allowing them to operate at optimal speeds, reducing energy consumption and heat generation. According to a study published in the Journal of Energy and Power Engineering, ASDs can reduce energy consumption by up to 50% in certain applications. Additionally, ASDs can help to improve motor lifespan and reduce maintenance costs.
+
+    Hallucination: 
+        Journal of Energy and Power Engineering; 50%
+
+Group 2 — Tool Call Discipline
+    2nd Query:
+        What is the history, components, working principle, applications, limitations, and future of Adjustable Speed Drives?
+    Answer:
+        ══════════════════════════════════════════════════════════════════════
+        LLM RESPONSE  [Iteration 1]
+        ══════════════════════════════════════════════════════════════════════
+        content (0 chars):
+            
+
+        tool_calls requested (7):
+            → name : retrieve_documents
+            id   : kr033jmth
+            args : {
+            "query": "Adjustable Speed Drives history",
+            "top_k": 5
+        }
+            → name : retrieve_documents
+            id   : 8nm12xy5c
+            args : {
+            "query": "Adjustable Speed Drives components",
+            "top_k": 5
+        }
+            → name : retrieve_documents
+            id   : bxmsah5xk
+            args : {
+            "query": "Adjustable Speed Drives working principle",
+            "top_k": 5
+        }
+            → name : retrieve_documents
+            id   : 4kk8kskdf
+            args : {
+            "query": "Adjustable Speed Drives applications",
+            "top_k": 5
+        }
+            → name : retrieve_documents
+            id   : awmm6vfy0
+            args : {
+            "query": "Adjustable Speed Drives limitations",
+            "top_k": 5
+        }
+            → name : retrieve_documents
+            id   : s4f92tg62
+            args : {
+            "query": "Adjustable Speed Drives future",
+            "top_k": 5
+        }
+            → name : check_answer_quality
+            id   : khp9rqvet
+            args : {
+            "answer": "Adjustable Speed Drives, also known as variable speed drives, are a type of motor controller that can adjust the speed of an electric motor. They have a long history dating back to the 19th century, with the first commercial ASDs being introduced in the 1960s. The components of an ASD typically include a controller, a power converter, and a motor. The working principle of an ASD is based on the use of power electronics to convert AC power to DC power, which is then converted back to AC power at a variable frequency. ASDs have a wide range of applications, including in the manufacturing, oil and gas, and water treatment industries. However, they also have some limitations, such as high upfront costs and the need for specialized maintenance. Looking to the future, ASDs are expected to continue to play an important role in the development of more efficient and sustainable industrial processes."
+        }
+        ══════════════════════════════════════════════════════════════════════
+    Hallucination: first commercial ASDs being introduced in the 1960s
+    Called retrieve_documents SIX times, no check answer or retry for a better query possible
+
+    3rd Query: 
+        Tell me about autism diagnosis AND motor control systems.
+    Answer:
+        Autism diagnosis involves a comprehensive evaluation of an individual's behavior, communication, and motor skills. Research suggests that individuals with autism often exhibit difficulties with motor control, including challenges with coordination, balance, and fine motor skills. These difficulties can be a key indicator of autism diagnosis, particularly in early childhood. However, it's essential to note that not all individuals with autism experience motor control issues, and not all individuals with motor control difficulties have autism. A thorough diagnostic evaluation by a qualified professional is necessary to determine an accurate diagnosis.
+    weaker reasoning — it latched onto the dominant topic (autism, which has far more documents) and reinterpreted "motor control systems" to fit that context rather than recognizing it as a separate subject.
+
+
+for llama-3.3-70b-versatile on Groq:
+Limit -> Tokens
+Max input (context): 128,000 
+tokensMax output: 32,768 tokens
+
+for llama-3.1-8b-instant on Groq:
+Limit -> Tokens
+Max input (context): 128,000 
+tokensMax output: 8192 tokens
+
+    What can you tell me about the context window? Use the reference of "llama-3.1-8b-instant"?
+    What can you tell me about the actual data/tokens we can send to this llm "llama-3.1-8b-instant"? How and why are they different?
+    How is chunking done here:
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        length_function=len,
+        separators=["\n\n", "\n", " ", ""],
+    )
+    Are there any algorithms to prioritize between the retrieved chunks for future improvements? If yes what are they?
+    What is the weaknesses and limitations of the llms like "llama-3.1-8b-instant"? How can we overcome these?
+    Will "llama-3.1-8b-instant" work on 128,000 tokens (max limit)? Will it produce a reasonable output?

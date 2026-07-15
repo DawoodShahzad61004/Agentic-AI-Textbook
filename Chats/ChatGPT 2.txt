@@ -1,0 +1,468 @@
+Can u tell me about the size of chunk and the batch used?
+Good question — this is actually one of the **most important tuning parts** of your RAG pipeline.
+
+I checked your notebook, and here are the **exact values you are currently using**:
+
+---
+
+# 📦 Chunk Size (from your code)
+
+In your splitting function:
+
+```python
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000,
+    chunk_overlap=200,
+)
+```
+
+### 👉 So your values are:
+
+* **Chunk size = 1000 characters**
+* **Chunk overlap = 200 characters**
+
+---
+
+# ⚡ Batch Size (from your embedding code)
+
+From your updated embedding logic, you are using:
+
+```python
+def generate_embedding(self, text, batch_size: int = 16)
+```
+
+And also:
+
+```python
+add_documents_in_batches(..., batch_size=16)
+```
+
+### 👉 So your value is:
+
+* **Batch size = 16**
+
+---
+
+# 🧠 What these actually mean (important)
+
+## 🔹 Chunk Size = 1000
+
+Each document is split into pieces of ~1000 characters.
+
+From your PDF example, you can see each `Document(...)` contains fragments like:
+
+> "Autism spectrum disorder is a neurodevelopmental disorder..." 
+
+So instead of embedding full PDFs, you embed smaller chunks.
+
+### Why this matters:
+
+* Too small → lose context
+* Too large → embeddings become noisy + slow
+
+👉 1000 is a **very standard, safe value**
+
+---
+
+## 🔹 Chunk Overlap = 200
+
+Each chunk shares 200 characters with the next chunk.
+
+### Why this matters:
+
+* Prevents **context loss between chunks**
+* Helps retrieval stay accurate
+
+👉 200 is a **good default (20%)**
+
+---
+
+## 🔹 Batch Size = 16
+
+This is how many chunks you embed at once on GPU.
+
+### Why this matters:
+
+* Higher batch → faster but more GPU memory
+* Lower batch → safer but slower
+
+---
+
+# 🚨 Why your kernel crashed earlier
+
+This was the real problem:
+
+```python
+embeddings = embedding_manager.generate_embedding(texts)
+```
+
+👉 That was effectively:
+
+* **Batch size = ALL chunks**
+* If you had 1000 chunks → batch size = 1000 ❌
+
+So:
+
+* GPU ran out of memory
+* Kernel died
+
+---
+
+# ✅ Recommended settings (for your laptop)
+
+Since you have RTX GPU:
+
+## 🔹 Safe setup
+
+```python
+chunk_size = 800–1200
+chunk_overlap = 150–250
+batch_size = 8–16
+```
+
+## 🔹 If crashes happen
+
+Reduce batch:
+
+```python
+batch_size = 8
+# or even
+batch_size = 4
+```
+
+---
+
+# 🔥 Pro insight (this is important)
+
+These two control different things:
+
+| Parameter  | Affects            |
+| ---------- | ------------------ |
+| chunk_size | retrieval quality  |
+| batch_size | GPU memory + speed |
+
+👉 They are **independent**
+
+---
+
+# 🧠 Optimization tip (advanced but useful)
+
+For your use case (PDF academic docs like ASD):
+
+You can improve retrieval by:
+
+```python
+chunk_size = 800
+chunk_overlap = 100
+```
+
+Why?
+
+* PDFs already have structured paragraphs
+* Smaller chunks = more precise retrieval
+
+---
+
+# 🎯 Final summary
+
+Your current setup:
+
+* **Chunk size:** 1000 ✅
+* **Overlap:** 200 ✅
+* **Batch size:** 16 ⚠️ (good but can crash if dataset large)
+
+---
+
+# 💬 If you want next level
+
+I can help you tune this based on:
+
+* your GPU VRAM
+* number of documents
+* response quality vs speed
+
+Just tell me:
+
+👉 “optimize my RAG pipeline”
+
+and I’ll take you to the next level 🚀
+
+
+
+Use the variable names used in the ipynb to describe the flow shown in diagram
+Great — now let’s map **your diagram → your actual notebook variables** so everything clicks clearly.
+
+---
+
+# 🔁 FULL RAG FLOW (USING YOUR VARIABLE NAMES)
+
+---
+
+# 🟡 1. DATA INGESTION (Left side of diagram)
+
+### Diagram:
+
+> PDF / HTML / Excel → Data Parsing → Document Structure
+
+### Your code:
+
+```python
+file_paths = [...]
+loader = UnstructuredLoader(file_paths)
+documents = loader.load()
+
+pdf_documents = documents  # alias
+```
+
+👉 Explanation:
+
+* `file_paths` → all your raw files (pdfs, txt, csv)
+* `loader` → parses them
+* `documents` / `pdf_documents` → structured LangChain `Document` objects
+
+📌 Example of one document: 
+
+---
+
+# 🟣 2. CHUNKING (Chunks 1,2,3,4 in diagram)
+
+### Diagram:
+
+> Document → Chunks
+
+### Your code:
+
+```python
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000,
+    chunk_overlap=200,
+)
+
+pdf_chunks = text_splitter.split_documents(pdf_documents)
+```
+
+👉 Explanation:
+
+* `pdf_documents` → full documents
+* `pdf_chunks` → smaller pieces (Chunk1, Chunk2, Chunk3…)
+
+---
+
+# 🟡 3. EMBEDDING (Text → Vectors)
+
+### Diagram:
+
+> Chunks → Embedding → Vectors
+
+### Your code:
+
+```python
+embedding_manager = EmbeddingManager()
+
+texts = [doc.page_content for doc in pdf_chunks]
+embeddings = embedding_manager.generate_embedding(texts)
+```
+
+👉 Explanation:
+
+* `texts` → raw text from chunks
+* `embedding_manager` → SentenceTransformer model
+* `embeddings` → vectors (size 384)
+
+📌 Example output: 
+
+---
+
+# 🟢 4. VECTOR DATABASE (Storage)
+
+### Diagram:
+
+> Embeddings → Vector DB
+
+### Your code:
+
+```python
+vector_store = VectorStore()
+
+add_documents_in_batches(pdf_chunks, embedding_manager, vector_store)
+```
+
+👉 Explanation:
+
+* `vector_store` → ChromaDB
+* stores:
+
+  * chunk text
+  * metadata
+  * embeddings
+
+---
+
+# 🔍 5. RETRIEVAL (Bottom-left of diagram)
+
+### Diagram:
+
+> Query → Query Embedding → Similarity Search
+
+### Your code:
+
+```python
+rag_retriever = RAGRetriever(vector_store, embedding_manager)
+
+query = "What is autism?"
+retrieved_docs = rag_retriever.retrieve(query)
+```
+
+👉 Explanation:
+
+* `query` → user input
+* converted to embedding inside:
+
+```python
+query_embedding = embedding_manager.generate_embedding(query)
+```
+
+* searched in:
+
+```python
+vector_store.collection.query(...)
+```
+
+* result:
+
+```python
+retrieved_docs
+```
+
+---
+
+# 🟣 6. AUGMENTATION (Context building)
+
+### Diagram:
+
+> Retrieved context + Prompt
+
+### Your code:
+
+```python
+context = "\n\n".join([
+    f"Document {doc['rank']}:\n{doc['content']}"
+    for doc in retrieved_docs
+])
+```
+
+👉 Explanation:
+
+* `retrieved_docs` → top-k similar chunks
+* `context` → combined text sent to LLM
+
+---
+
+# 🟢 7. GENERATION (LLM)
+
+### Diagram:
+
+> Context + Query → LLM → Output
+
+### Your code:
+
+```python
+response = llm.invoke(prompt)
+```
+
+Inside:
+
+```python
+prompt = f"""
+Question: {query}
+
+Context:
+{context}
+"""
+```
+
+👉 Output:
+
+```python
+response.content
+```
+
+---
+
+# 🔁 COMPLETE FLOW (Your variables)
+
+```text
+file_paths
+   ↓
+loader → documents / pdf_documents
+   ↓
+text_splitter → pdf_chunks
+   ↓
+embedding_manager → embeddings
+   ↓
+vector_store (ChromaDB)
+   ↓
+query
+   ↓
+embedding_manager → query_embedding
+   ↓
+rag_retriever → retrieved_docs
+   ↓
+context (built from retrieved_docs)
+   ↓
+llm.invoke(prompt)
+   ↓
+answer
+```
+
+---
+
+# 🧠 Key Mapping (Diagram → Code)
+
+| Diagram Concept | Your Variable                     |
+| --------------- | --------------------------------- |
+| Data ingestion  | `loader`, `documents`             |
+| Chunks          | `pdf_chunks`                      |
+| Embeddings      | `embeddings`, `embedding_manager` |
+| Vector DB       | `vector_store`                    |
+| Query           | `query`                           |
+| Retrieval       | `rag_retriever`, `retrieved_docs` |
+| Context         | `context`                         |
+| LLM             | `llm`                             |
+| Output          | `response.content`                |
+
+---
+
+# 🔥 Important insight (this is gold)
+
+👉 Your system has **two embedding passes**:
+
+1. During indexing:
+
+```python
+pdf_chunks → embeddings → vector_store
+```
+
+2. During query:
+
+```python
+query → embedding → similarity search
+```
+
+---
+
+# 🚀 You now understand RAG at implementation level
+
+This is no longer theory — this is exactly how your pipeline runs.
+
+---
+
+If you want next level:
+
+👉 I can show you:
+
+* how to **improve retrieval quality**
+* how to **add citations in answers**
+* how to **optimize context size for LLM**
+
+Just say 👍

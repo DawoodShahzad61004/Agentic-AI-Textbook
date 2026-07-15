@@ -1,0 +1,203 @@
+2026-07-01 16:34:20 | DEBUG    | app_workflow.services.llm_caller | [-] |   [VALUE-VERIFY] entering FIFO gate…
+2026-07-01 16:34:20 | DEBUG    | app_workflow.services.llm_caller | [-] |   [VALUE-VERIFY] invoking LLM (attempt 1/3)…
+2026-07-01 16:34:20 | DEBUG    | groq._base_client | [-] | Request options: {'method': 'post', 'url': '/openai/v1/chat/completions', 'files': None, 'idempotency_key': 'stainless-python-retry-c06e4a7f-1cb0-4264-8cb5-579ed84b0f4a', 'json_data': {'messages': [{'role': 'system', 'content': 'You are a JSON value-correction model. You are given two inputs:\n1. RAW RESPONSE — the original, possibly messy text produced by an LLM.\n2. VALIDATED JSON — a structurally correct JSON object/array derived from that raw response. Its keys and types are already valid.\n\nYour job is to check whether the VALUES in VALIDATED JSON faithfully represent what the RAW RESPONSE actually said. Fix any value that was incorrectly extracted, truncated, misinterpreted, or defaulted to a placeholder when real data was present in the RAW RESPONSE.\n\nRULES:\n- Return ONLY the corrected JSON — no prose, no markdown, no code fences.\n- Keep the exact same structure (keys, nesting, top-level type) as VALIDATED JSON.\n- Do NOT add or remove keys.\n- Do NOT fabricate information that is absent from the RAW RESPONSE — use the existing default (empty string, 0, [], or the first enum value) for genuinely missing fields.\n- Preserve values that are already correct.\n\nRAW RESPONSE:\n{"content":"x is y","sources":["a.pdf","b.pdf"],"merged_from":2}\n\nVALIDATED JSON:\n{\n  "content": "x is y",\n  "sources": [\n    "a.pdf",\n    "b.pdf"\n  ],\n  "merged_from": 2\n}\n\nCorrected JSON:'}], 'model': 'llama-3.1-8b-instant', 'max_tokens': 2048, 'n': 1, 'reasoning_effort': None, 'reasoning_format': None, 'service_tier': 'on_demand', 'stop': None, 'stream': False, 'temperature': 0.1}}
+2026-07-01 16:34:20 | DEBUG    | groq._base_client | [-] | Sending HTTP Request: POST https://api.groq.com/openai/v1/chat/completions
+2026-07-01 16:34:20 | DEBUG    | httpcore.connection | [-] | connect_tcp.started host='api.groq.com' port=443 local_address=None timeout=None socket_options=None
+2026-07-01 16:34:20 | DEBUG    | httpcore.connection | [-] | connect_tcp.complete return_value=<httpcore._backends.sync.SyncStream object at 0x000001F73A27EF90>
+2026-07-01 16:34:20 | DEBUG    | httpcore.connection | [-] | start_tls.started ssl_context=<ssl.SSLContext object at 0x000001F73936E210> server_hostname='api.groq.com' timeout=None
+2026-07-01 16:34:20 | DEBUG    | httpcore.connection | [-] | start_tls.complete return_value=<httpcore._backends.sync.SyncStream object at 0x000001F73A282490>
+2026-07-01 16:34:20 | DEBUG    | httpcore.http11 | [-] | send_request_headers.started request=<Request [b'POST']>
+2026-07-01 16:34:20 | DEBUG    | httpcore.http11 | [-] | send_request_headers.complete
+2026-07-01 16:34:20 | DEBUG    | httpcore.http11 | [-] | send_request_body.started request=<Request [b'POST']>
+2026-07-01 16:34:20 | DEBUG    | httpcore.http11 | [-] | send_request_body.complete
+2026-07-01 16:34:20 | DEBUG    | httpcore.http11 | [-] | receive_response_headers.started request=<Request [b'POST']>
+2026-07-01 16:34:20 | DEBUG    | httpcore.http11 | [-] | receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Wed, 01 Jul 2026 11:34:21 GMT'), (b'Content-Type', b'application/json'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'Cache-Control', b'private, max-age=0, no-store, no-cache, must-revalidate'), (b'Server', b'cloudflare'), (b'vary', b'Origin'), (b'x-groq-region', b'dmm'), (b'x-ratelimit-limit-requests', b'14400'), (b'x-ratelimit-limit-tokens', b'6000'), (b'x-ratelimit-remaining-requests', b'14399'), (b'x-ratelimit-remaining-tokens', b'3654'), (b'x-ratelimit-reset-requests', b'6s'), (b'x-ratelimit-reset-tokens', b'23.46s'), (b'x-request-id', b'req_01kweqasywf1gb9bdjbqkd39w4'), (b'via', b'1.1 google'), (b'cf-cache-status', b'DYNAMIC'), (b'set-cookie', b'__cf_bm=xcWwxvCrLmBhcaSRz59LIsBvSBKHE4mbVbysdeFtHJA-1782905661.384392-1.0.1.1-KTsUU55hNvt4p8d4bUPqSMe.XC19TSg6.Elshp2wyO_8QGwdXHZULrkHn_6W0OSJsJyAgkhkJD.V8ocLnKtQiawrAAhwaFmBcTt_pu7O9ZrYkuFiQSh_iautn7w737y1; HttpOnly; SameSite=None; Secure; Path=/; Domain=groq.com; Expires=Wed, 01 Jul 2026 12:04:21 GMT'), (b'Strict-Transport-Security', b'max-age=15552000'), (b'Content-Encoding', b'gzip'), (b'CF-RAY', b'a14519dfa913e8c7-KHI'), (b'alt-svc', b'h3=":443"; ma=86400')])
+2026-07-01 16:34:20 | INFO     | httpx | [-] | HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-01 16:34:20 | DEBUG    | httpcore.http11 | [-] | receive_response_body.started request=<Request [b'POST']>
+2026-07-01 16:34:20 | DEBUG    | httpcore.http11 | [-] | receive_response_body.complete
+2026-07-01 16:34:20 | DEBUG    | httpcore.http11 | [-] | response_closed.started
+2026-07-01 16:34:20 | DEBUG    | httpcore.http11 | [-] | response_closed.complete
+2026-07-01 16:34:20 | DEBUG    | groq._base_client | [-] | HTTP Response: POST https://api.groq.com/openai/v1/chat/completions "200 OK" Headers({'date': 'Wed, 01 Jul 2026 11:34:21 GMT', 'content-type': 'application/json', 'transfer-encoding': 'chunked', 'connection': 'keep-alive', 'cache-control': 'private, max-age=0, no-store, no-cache, must-revalidate', 'server': 'cloudflare', 'vary': 'Origin', 'x-groq-region': 'dmm', 'x-ratelimit-limit-requests': '14400', 'x-ratelimit-limit-tokens': '6000', 'x-ratelimit-remaining-requests': '14399', 'x-ratelimit-remaining-tokens': '3654', 'x-ratelimit-reset-requests': '6s', 'x-ratelimit-reset-tokens': '23.46s', 'x-request-id': 'req_01kweqasywf1gb9bdjbqkd39w4', 'via': '1.1 google', 'cf-cache-status': 'DYNAMIC', 'set-cookie': '__cf_bm=xcWwxvCrLmBhcaSRz59LIsBvSBKHE4mbVbysdeFtHJA-1782905661.384392-1.0.1.1-KTsUU55hNvt4p8d4bUPqSMe.XC19TSg6.Elshp2wyO_8QGwdXHZULrkHn_6W0OSJsJyAgkhkJD.V8ocLnKtQiawrAAhwaFmBcTt_pu7O9ZrYkuFiQSh_iautn7w737y1; HttpOnly; SameSite=None; Secure; Path=/; Domain=groq.com; Expires=Wed, 01 Jul 2026 12:04:21 GMT', 'strict-transport-security': 'max-age=15552000', 'content-encoding': 'gzip', 'cf-ray': 'a14519dfa913e8c7-KHI', 'alt-svc': 'h3=":443"; ma=86400'})
+2026-07-01 16:34:20 | DEBUG    | app_workflow.services.llm_caller | [-] |   [VALUE-VERIFY] LLM call attempt 1 took 0.458s
+2026-07-01 16:34:20 | DEBUG    | app_workflow.services.llm_caller | [-] | [LLM] could not extract rate-limit headers — cooldown base will be 0
+2026-07-01 16:34:20 | DEBUG    | llm_data_check | [-] | 
+========================================================================
+timestamp          : 2026-07-01T16:34:20.994829
+llm_ok             : True
+raw_response       : '{"content":"x is y","sources":["a.pdf","b.pdf"],"merged_from":2}'
+--- VALIDATED INPUT ---
+{
+  "content": "x is y",
+  "sources": [
+    "a.pdf",
+    "b.pdf"
+  ],
+  "merged_from": 2
+}
+--- PARSED CORRECTED ---
+{
+  "content": "x is y",
+  "sources": [
+    "a.pdf",
+    "b.pdf"
+  ],
+  "merged_from": 2
+}
+correction_applied : True
+2026-07-01 16:34:20 | DEBUG    | app_workflow.services.llm_caller | [-] |   [JSON-REPAIR] entering FIFO gate…
+2026-07-01 16:34:20 | DEBUG    | app_workflow.services.llm_caller | [-] |   [JSON-REPAIR] invoking LLM (attempt 1/3)…
+2026-07-01 16:34:20 | DEBUG    | openai._base_client | [-] | Request options: {'method': 'post', 'url': '/chat/completions', 'headers': {'X-Stainless-Raw-Response': 'true'}, 'files': None, 'idempotency_key': 'stainless-python-retry-2c1b7898-4f64-476d-b12c-212b7c96ee15', 'security': {'bearer_auth': True}, 'content': None, 'json_data': {'messages': [{'content': 'You are a JSON repair model. You receive a malformed or partially broken string and return a single, valid, complete JSON dict matching the required schema exactly.\n\nReturn ONLY a JSON dict with this structure (no prose, no markdown, no code fences, no keys outside the schema):\n\n{\n  "properties": {\n    "content": {\n      "title": "Content",\n      "type": "string"\n    },\n    "sources": {\n      "items": {\n        "type": "string"\n      },\n      "title": "Sources",\n      "type": "array"\n    },\n    "merged_from": {\n      "default": 0,\n      "title": "Merged From",\n      "type": "integer"\n    }\n  },\n  "required": [\n    "content"\n  ],\n  "title": "MergeSchema",\n  "type": "object"\n}\n\nEXAMPLE INPUT:\n{"content": "Motor speed is regulated by voltage.", "sources": ["a.pdf",, "merged_from": "two"}\n\nEXAMPLE OUTPUT:\n{"content": "Motor speed is regulated by voltage.", "sources": ["a.pdf"], "merged_from": 2}\n\nRULES:\n- Preserve all values from the raw input exactly — never fabricate data not present in the input.\n- Each key must appear exactly once — if a key is duplicated, keep the last occurrence.\n- If a required field is completely absent from the input, use its default: "" for strings, 0 for integers, [] for lists, or the first listed enum value.\n- Output nothing outside the JSON value — no explanation, no comments, no trailing text.\n\nRAW INPUT:\nI think the answer is yes because the retrieved chunks agree.', 'role': 'system'}], 'model': 'Qwen/Qwen2.5-3B-Instruct', 'max_completion_tokens': 1024, 'stream': False, 'temperature': 0.0}}
+2026-07-01 16:34:20 | DEBUG    | openai._base_client | [-] | Sending HTTP Request: POST https://router.huggingface.co/v1/chat/completions
+2026-07-01 16:34:20 | DEBUG    | httpcore.connection | [-] | connect_tcp.started host='router.huggingface.co' port=443 local_address=None timeout=None socket_options=[(65535, 8, 1)]
+2026-07-01 16:34:21 | DEBUG    | httpcore.connection | [-] | connect_tcp.complete return_value=<httpcore._backends.sync.SyncStream object at 0x000001F73A2839D0>
+2026-07-01 16:34:21 | DEBUG    | httpcore.connection | [-] | start_tls.started ssl_context=<ssl.SSLContext object at 0x000001F7395A9A50> server_hostname='router.huggingface.co' timeout=None
+2026-07-01 16:34:21 | DEBUG    | httpcore.connection | [-] | start_tls.complete return_value=<httpcore._backends.sync.SyncStream object at 0x000001F73A212780>
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | send_request_headers.started request=<Request [b'POST']>
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | send_request_headers.complete
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | send_request_body.started request=<Request [b'POST']>
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | send_request_body.complete
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | receive_response_headers.started request=<Request [b'POST']>
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | receive_response_headers.complete return_value=(b'HTTP/1.1', 400, b'Bad Request', [(b'Content-Type', b'application/json; charset=utf-8'), (b'Content-Length', b'197'), (b'Connection', b'keep-alive'), (b'Date', b'Wed, 01 Jul 2026 11:34:22 GMT'), (b'ETag', b'W/"c5-JYxQLmETRujzfJO6gY0J41nFHOQ"'), (b'X-Powered-By', b'huggingface-moon'), (b'X-Request-Id', b'Root=1-6a44fb3e-609578ec1f2a26cc4e3ae4b6'), (b'cross-origin-opener-policy', b'same-origin'), (b'Referrer-Policy', b'strict-origin-when-cross-origin'), (b'Vary', b'Origin'), (b'Access-Control-Allow-Origin', b'*'), (b'Access-Control-Expose-Headers', b'X-Repo-Commit,X-Request-Id,X-Error-Code,X-Error-Message,X-Total-Count,ETag,Link,Accept-Ranges,Content-Range,X-Linked-Size,X-Linked-ETag,X-Xet-Hash'), (b'X-Robots-Tag', b'none'), (b'X-Cache', b'Error from cloudfront'), (b'Via', b'1.1 58ec43176b7272f01555dc70222a8024.cloudfront.net (CloudFront)'), (b'X-Amz-Cf-Pop', b'DXB53-P2'), (b'X-Amz-Cf-Id', b'ysqpGINpmOkHgDuFvVneg69ytemTJdCnX4TZmJIisEQrlVMquFiNVg==')])
+2026-07-01 16:34:21 | INFO     | httpx | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | receive_response_body.started request=<Request [b'POST']>
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | receive_response_body.complete
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | response_closed.started
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | response_closed.complete
+2026-07-01 16:34:21 | DEBUG    | openai._base_client | [-] | HTTP Response: POST https://router.huggingface.co/v1/chat/completions "400 Bad Request" Headers({'content-type': 'application/json; charset=utf-8', 'content-length': '197', 'connection': 'keep-alive', 'date': 'Wed, 01 Jul 2026 11:34:22 GMT', 'etag': 'W/"c5-JYxQLmETRujzfJO6gY0J41nFHOQ"', 'x-powered-by': 'huggingface-moon', 'x-request-id': 'Root=1-6a44fb3e-609578ec1f2a26cc4e3ae4b6', 'cross-origin-opener-policy': 'same-origin', 'referrer-policy': 'strict-origin-when-cross-origin', 'vary': 'Origin', 'access-control-allow-origin': '*', 'access-control-expose-headers': 'X-Repo-Commit,X-Request-Id,X-Error-Code,X-Error-Message,X-Total-Count,ETag,Link,Accept-Ranges,Content-Range,X-Linked-Size,X-Linked-ETag,X-Xet-Hash', 'x-robots-tag': 'none', 'x-cache': 'Error from cloudfront', 'via': '1.1 58ec43176b7272f01555dc70222a8024.cloudfront.net (CloudFront)', 'x-amz-cf-pop': 'DXB53-P2', 'x-amz-cf-id': 'ysqpGINpmOkHgDuFvVneg69ytemTJdCnX4TZmJIisEQrlVMquFiNVg=='})
+2026-07-01 16:34:21 | DEBUG    | openai._base_client | [-] | request_id: Root=1-6a44fb3e-609578ec1f2a26cc4e3ae4b6
+2026-07-01 16:34:21 | DEBUG    | openai._base_client | [-] | Encountered httpx.HTTPStatusError
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\openai\_base_client.py", line 1085, in request
+    response.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\httpx\_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '400 Bad Request' for url 'https://router.huggingface.co/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+2026-07-01 16:34:21 | DEBUG    | openai._base_client | [-] | Re-raising status error
+2026-07-01 16:34:21 | WARNING  | app_workflow.services.llm_caller | [-] | [JSON-REPAIR] openai.BadRequestError — HTTP 400: Error code: 400 - {'error': {'message': "The requested model 'Qwen/Qwen2.5-3B-Instruct' is not supported by any provider you have enabled.", 'type': 'invalid_request_error', 'param': 'model', 'code': 'model_not_supported'}}
+2026-07-01 16:34:21 | DEBUG    | app_workflow.services.llm_caller | [-] |   [JSON-REPAIR] LLM call attempt 1 took 0.978s
+2026-07-01 16:34:21 | DEBUG    | app_workflow.services.llm_caller | [-] | [LLM] could not extract rate-limit headers — cooldown base will be 0
+2026-07-01 16:34:21 | DEBUG    | llm_json_tries | [-] | 
+========================================================================
+timestamp : 2026-07-01T16:34:21.975639
+schema    : MergeSchema
+top_level : dict
+raw_input : 'I think the answer is yes because the retrieved chunks agree.'
+skipped   : LLM call failed (LLMErrorKind.BAD_REQUEST): Error code: 400 - {'error': {'message': "The requested model 'Qwen/Qwen2.5-3B-Instruct' is not supported by any provider
+--- RESULT ---
+None
+2026-07-01 16:34:21 | DEBUG    | app_workflow.services.llm_caller | [-] |   [JSON-REPAIR] entering FIFO gate…
+2026-07-01 16:34:21 | DEBUG    | app_workflow.services.llm_caller | [-] |   [JSON-REPAIR] invoking LLM (attempt 1/3)…
+2026-07-01 16:34:21 | DEBUG    | openai._base_client | [-] | Request options: {'method': 'post', 'url': '/chat/completions', 'headers': {'X-Stainless-Raw-Response': 'true'}, 'files': None, 'idempotency_key': 'stainless-python-retry-62cca559-6e24-4483-9744-b86b1dc501c3', 'security': {'bearer_auth': True}, 'content': None, 'json_data': {'messages': [{'content': 'You are a JSON repair model. You receive a malformed or partially broken string and return a single, valid, complete JSON dict matching the required schema exactly.\n\nReturn ONLY a JSON dict with this structure (no prose, no markdown, no code fences, no keys outside the schema):\n\n{\n  "properties": {\n    "content": {\n      "title": "Content",\n      "type": "string"\n    },\n    "sources": {\n      "items": {\n        "type": "string"\n      },\n      "title": "Sources",\n      "type": "array"\n    },\n    "merged_from": {\n      "default": 0,\n      "title": "Merged From",\n      "type": "integer"\n    }\n  },\n  "required": [\n    "content"\n  ],\n  "title": "MergeSchema",\n  "type": "object"\n}\n\nEXAMPLE INPUT:\n{"content": "Motor speed is regulated by voltage.", "sources": ["a.pdf",, "merged_from": "two"}\n\nEXAMPLE OUTPUT:\n{"content": "Motor speed is regulated by voltage.", "sources": ["a.pdf"], "merged_from": 2}\n\nRULES:\n- Preserve all values from the raw input exactly — never fabricate data not present in the input.\n- Each key must appear exactly once — if a key is duplicated, keep the last occurrence.\n- If a required field is completely absent from the input, use its default: "" for strings, 0 for integers, [] for lists, or the first listed enum value.\n- Output nothing outside the JSON value — no explanation, no comments, no trailing text.\n\nRAW INPUT:\nI think the answer is yes because the retrieved chunks agree.', 'role': 'system'}], 'model': 'Qwen/Qwen2.5-3B-Instruct', 'max_completion_tokens': 1024, 'stream': False, 'temperature': 0.0}}
+2026-07-01 16:34:21 | DEBUG    | openai._base_client | [-] | Sending HTTP Request: POST https://router.huggingface.co/v1/chat/completions
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | send_request_headers.started request=<Request [b'POST']>
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | send_request_headers.complete
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | send_request_body.started request=<Request [b'POST']>
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | send_request_body.complete
+2026-07-01 16:34:21 | DEBUG    | httpcore.http11 | [-] | receive_response_headers.started request=<Request [b'POST']>
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | receive_response_headers.complete return_value=(b'HTTP/1.1', 400, b'Bad Request', [(b'Content-Type', b'application/json; charset=utf-8'), (b'Content-Length', b'197'), (b'Connection', b'keep-alive'), (b'Date', b'Wed, 01 Jul 2026 11:34:22 GMT'), (b'ETag', b'W/"c5-JYxQLmETRujzfJO6gY0J41nFHOQ"'), (b'X-Powered-By', b'huggingface-moon'), (b'X-Request-Id', b'Root=1-6a44fb3e-234646237021573974b182d9'), (b'cross-origin-opener-policy', b'same-origin'), (b'Referrer-Policy', b'strict-origin-when-cross-origin'), (b'Vary', b'Origin'), (b'Access-Control-Allow-Origin', b'*'), (b'Access-Control-Expose-Headers', b'X-Repo-Commit,X-Request-Id,X-Error-Code,X-Error-Message,X-Total-Count,ETag,Link,Accept-Ranges,Content-Range,X-Linked-Size,X-Linked-ETag,X-Xet-Hash'), (b'X-Robots-Tag', b'none'), (b'X-Cache', b'Error from cloudfront'), (b'Via', b'1.1 58ec43176b7272f01555dc70222a8024.cloudfront.net (CloudFront)'), (b'X-Amz-Cf-Pop', b'DXB53-P2'), (b'X-Amz-Cf-Id', b'TnXC-js1Up2MRce__Qqp5mDFJsE0S5WWdSF33SF0XuiqGuK7NuYLow==')])
+2026-07-01 16:34:22 | INFO     | httpx | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | receive_response_body.started request=<Request [b'POST']>
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | receive_response_body.complete
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | response_closed.started
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | response_closed.complete
+2026-07-01 16:34:22 | DEBUG    | openai._base_client | [-] | HTTP Response: POST https://router.huggingface.co/v1/chat/completions "400 Bad Request" Headers({'content-type': 'application/json; charset=utf-8', 'content-length': '197', 'connection': 'keep-alive', 'date': 'Wed, 01 Jul 2026 11:34:22 GMT', 'etag': 'W/"c5-JYxQLmETRujzfJO6gY0J41nFHOQ"', 'x-powered-by': 'huggingface-moon', 'x-request-id': 'Root=1-6a44fb3e-234646237021573974b182d9', 'cross-origin-opener-policy': 'same-origin', 'referrer-policy': 'strict-origin-when-cross-origin', 'vary': 'Origin', 'access-control-allow-origin': '*', 'access-control-expose-headers': 'X-Repo-Commit,X-Request-Id,X-Error-Code,X-Error-Message,X-Total-Count,ETag,Link,Accept-Ranges,Content-Range,X-Linked-Size,X-Linked-ETag,X-Xet-Hash', 'x-robots-tag': 'none', 'x-cache': 'Error from cloudfront', 'via': '1.1 58ec43176b7272f01555dc70222a8024.cloudfront.net (CloudFront)', 'x-amz-cf-pop': 'DXB53-P2', 'x-amz-cf-id': 'TnXC-js1Up2MRce__Qqp5mDFJsE0S5WWdSF33SF0XuiqGuK7NuYLow=='})
+2026-07-01 16:34:22 | DEBUG    | openai._base_client | [-] | request_id: Root=1-6a44fb3e-234646237021573974b182d9
+2026-07-01 16:34:22 | DEBUG    | openai._base_client | [-] | Encountered httpx.HTTPStatusError
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\openai\_base_client.py", line 1085, in request
+    response.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\httpx\_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '400 Bad Request' for url 'https://router.huggingface.co/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+2026-07-01 16:34:22 | DEBUG    | openai._base_client | [-] | Re-raising status error
+2026-07-01 16:34:22 | WARNING  | app_workflow.services.llm_caller | [-] | [JSON-REPAIR] openai.BadRequestError — HTTP 400: Error code: 400 - {'error': {'message': "The requested model 'Qwen/Qwen2.5-3B-Instruct' is not supported by any provider you have enabled.", 'type': 'invalid_request_error', 'param': 'model', 'code': 'model_not_supported'}}
+2026-07-01 16:34:22 | DEBUG    | app_workflow.services.llm_caller | [-] |   [JSON-REPAIR] LLM call attempt 1 took 0.270s
+2026-07-01 16:34:22 | DEBUG    | app_workflow.services.llm_caller | [-] | [LLM] could not extract rate-limit headers — cooldown base will be 0
+2026-07-01 16:34:22 | DEBUG    | llm_json_tries | [-] | 
+========================================================================
+timestamp : 2026-07-01T16:34:22.246398
+schema    : MergeSchema
+top_level : dict
+raw_input : 'I think the answer is yes because the retrieved chunks agree.'
+skipped   : LLM call failed (LLMErrorKind.BAD_REQUEST): Error code: 400 - {'error': {'message': "The requested model 'Qwen/Qwen2.5-3B-Instruct' is not supported by any provider
+--- RESULT ---
+None
+2026-07-01 16:34:22 | DEBUG    | app_workflow.services.llm_caller | [-] |   [VALUE-VERIFY] entering FIFO gate…
+2026-07-01 16:34:22 | DEBUG    | app_workflow.services.llm_caller | [-] |   [VALUE-VERIFY] invoking LLM (attempt 1/3)…
+2026-07-01 16:34:22 | DEBUG    | groq._base_client | [-] | Request options: {'method': 'post', 'url': '/openai/v1/chat/completions', 'files': None, 'idempotency_key': 'stainless-python-retry-095ee389-a024-4f68-8cd6-ddf4c977095b', 'json_data': {'messages': [{'role': 'system', 'content': 'You are a JSON value-correction model. You are given two inputs:\n1. RAW RESPONSE — the original, possibly messy text produced by an LLM.\n2. VALIDATED JSON — a structurally correct JSON object/array derived from that raw response. Its keys and types are already valid.\n\nYour job is to check whether the VALUES in VALIDATED JSON faithfully represent what the RAW RESPONSE actually said. Fix any value that was incorrectly extracted, truncated, misinterpreted, or defaulted to a placeholder when real data was present in the RAW RESPONSE.\n\nRULES:\n- Return ONLY the corrected JSON — no prose, no markdown, no code fences.\n- Keep the exact same structure (keys, nesting, top-level type) as VALIDATED JSON.\n- Do NOT add or remove keys.\n- Do NOT fabricate information that is absent from the RAW RESPONSE — use the existing default (empty string, 0, [], or the first enum value) for genuinely missing fields.\n- Preserve values that are already correct.\n\nRAW RESPONSE:\nHere is the final merged chunk:\n\n{"content":"x","sources":["a.pdf"],"merged_from":1}\n\nHope this helps!\n\nVALIDATED JSON:\n{\n  "content": "x",\n  "sources": [\n    "a.pdf"\n  ],\n  "merged_from": 1\n}\n\nCorrected JSON:'}], 'model': 'llama-3.1-8b-instant', 'max_tokens': 2048, 'n': 1, 'reasoning_effort': None, 'reasoning_format': None, 'service_tier': 'on_demand', 'stop': None, 'stream': False, 'temperature': 0.1}}
+2026-07-01 16:34:22 | DEBUG    | groq._base_client | [-] | Sending HTTP Request: POST https://api.groq.com/openai/v1/chat/completions
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | send_request_headers.started request=<Request [b'POST']>
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | send_request_headers.complete
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | send_request_body.started request=<Request [b'POST']>
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | send_request_body.complete
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | receive_response_headers.started request=<Request [b'POST']>
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Wed, 01 Jul 2026 11:34:23 GMT'), (b'Content-Type', b'application/json'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'Cache-Control', b'private, max-age=0, no-store, no-cache, must-revalidate'), (b'Server', b'cloudflare'), (b'vary', b'Origin'), (b'x-groq-region', b'dmm'), (b'x-ratelimit-limit-requests', b'14400'), (b'x-ratelimit-limit-tokens', b'6000'), (b'x-ratelimit-remaining-requests', b'14398'), (b'x-ratelimit-remaining-tokens', b'1415'), (b'x-ratelimit-reset-requests', b'12s'), (b'x-ratelimit-reset-tokens', b'45.85s'), (b'x-request-id', b'req_01kweqavbvep4b3qwxh58qaj68'), (b'via', b'1.1 google'), (b'cf-cache-status', b'DYNAMIC'), (b'Strict-Transport-Security', b'max-age=15552000'), (b'Content-Encoding', b'gzip'), (b'CF-RAY', b'a14519e89b14e8c7-KHI'), (b'alt-svc', b'h3=":443"; ma=86400')])
+2026-07-01 16:34:22 | INFO     | httpx | [-] | HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | receive_response_body.started request=<Request [b'POST']>
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | receive_response_body.complete
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | response_closed.started
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | response_closed.complete
+2026-07-01 16:34:22 | DEBUG    | groq._base_client | [-] | HTTP Response: POST https://api.groq.com/openai/v1/chat/completions "200 OK" Headers({'date': 'Wed, 01 Jul 2026 11:34:23 GMT', 'content-type': 'application/json', 'transfer-encoding': 'chunked', 'connection': 'keep-alive', 'cache-control': 'private, max-age=0, no-store, no-cache, must-revalidate', 'server': 'cloudflare', 'vary': 'Origin', 'x-groq-region': 'dmm', 'x-ratelimit-limit-requests': '14400', 'x-ratelimit-limit-tokens': '6000', 'x-ratelimit-remaining-requests': '14398', 'x-ratelimit-remaining-tokens': '1415', 'x-ratelimit-reset-requests': '12s', 'x-ratelimit-reset-tokens': '45.85s', 'x-request-id': 'req_01kweqavbvep4b3qwxh58qaj68', 'via': '1.1 google', 'cf-cache-status': 'DYNAMIC', 'strict-transport-security': 'max-age=15552000', 'content-encoding': 'gzip', 'cf-ray': 'a14519e89b14e8c7-KHI', 'alt-svc': 'h3=":443"; ma=86400'})
+2026-07-01 16:34:22 | DEBUG    | app_workflow.services.llm_caller | [-] |   [VALUE-VERIFY] LLM call attempt 1 took 0.337s
+2026-07-01 16:34:22 | DEBUG    | app_workflow.services.llm_caller | [-] | [LLM] could not extract rate-limit headers — cooldown base will be 0
+2026-07-01 16:34:22 | DEBUG    | llm_data_check | [-] | 
+========================================================================
+timestamp          : 2026-07-01T16:34:22.584117
+llm_ok             : True
+raw_response       : 'Here is the final merged chunk:\n\n{"content":"x","sources":["a.pdf"],"merged_from":1}\n\nHope this helps!'
+--- VALIDATED INPUT ---
+{
+  "content": "x",
+  "sources": [
+    "a.pdf"
+  ],
+  "merged_from": 1
+}
+--- PARSED CORRECTED ---
+{
+  "content": "x",
+  "sources": [
+    "a.pdf"
+  ],
+  "merged_from": 1
+}
+correction_applied : True
+2026-07-01 16:34:22 | DEBUG    | app_workflow.services.llm_caller | [-] |   [VALUE-VERIFY] entering FIFO gate…
+2026-07-01 16:34:22 | DEBUG    | app_workflow.services.llm_caller | [-] |   [VALUE-VERIFY] invoking LLM (attempt 1/3)…
+2026-07-01 16:34:22 | DEBUG    | groq._base_client | [-] | Request options: {'method': 'post', 'url': '/openai/v1/chat/completions', 'files': None, 'idempotency_key': 'stainless-python-retry-af339523-49c2-43e2-9171-bdad145c7a40', 'json_data': {'messages': [{'role': 'system', 'content': 'You are a JSON value-correction model. You are given two inputs:\n1. RAW RESPONSE — the original, possibly messy text produced by an LLM.\n2. VALIDATED JSON — a structurally correct JSON object/array derived from that raw response. Its keys and types are already valid.\n\nYour job is to check whether the VALUES in VALIDATED JSON faithfully represent what the RAW RESPONSE actually said. Fix any value that was incorrectly extracted, truncated, misinterpreted, or defaulted to a placeholder when real data was present in the RAW RESPONSE.\n\nRULES:\n- Return ONLY the corrected JSON — no prose, no markdown, no code fences.\n- Keep the exact same structure (keys, nesting, top-level type) as VALIDATED JSON.\n- Do NOT add or remove keys.\n- Do NOT fabricate information that is absent from the RAW RESPONSE — use the existing default (empty string, 0, [], or the first enum value) for genuinely missing fields.\n- Preserve values that are already correct.\n\nRAW RESPONSE:\n```json\n{"content":"x","sources":["a.pdf"],"merged_from":1}\n```\n\nVALIDATED JSON:\n{\n  "content": "x",\n  "sources": [\n    "a.pdf"\n  ],\n  "merged_from": 1\n}\n\nCorrected JSON:'}], 'model': 'llama-3.1-8b-instant', 'max_tokens': 2048, 'n': 1, 'reasoning_effort': None, 'reasoning_format': None, 'service_tier': 'on_demand', 'stop': None, 'stream': False, 'temperature': 0.1}}
+2026-07-01 16:34:22 | DEBUG    | groq._base_client | [-] | Sending HTTP Request: POST https://api.groq.com/openai/v1/chat/completions
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | send_request_headers.started request=<Request [b'POST']>
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | send_request_headers.complete
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | send_request_body.started request=<Request [b'POST']>
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | send_request_body.complete
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | receive_response_headers.started request=<Request [b'POST']>
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | receive_response_headers.complete return_value=(b'HTTP/1.1', 429, b'Too Many Requests', [(b'Date', b'Wed, 01 Jul 2026 11:34:23 GMT'), (b'Content-Type', b'application/json'), (b'Content-Length', b'378'), (b'Connection', b'keep-alive'), (b'Cache-Control', b'private, max-age=0, no-store, no-cache, must-revalidate'), (b'retry-after', b'10'), (b'Server', b'cloudflare'), (b'vary', b'Origin'), (b'x-groq-region', b'dmm'), (b'x-ratelimit-limit-requests', b'14400'), (b'x-ratelimit-limit-tokens', b'6000'), (b'x-ratelimit-remaining-requests', b'14398'), (b'x-ratelimit-remaining-tokens', b'1418'), (b'x-ratelimit-reset-requests', b'12s'), (b'x-ratelimit-reset-tokens', b'45.82s'), (b'x-request-id', b'req_01kweqavp6ep4axkheb4k53yx5'), (b'via', b'1.1 google'), (b'cf-cache-status', b'DYNAMIC'), (b'Strict-Transport-Security', b'max-age=15552000'), (b'CF-RAY', b'a14519eabdc4e8c7-KHI'), (b'alt-svc', b'h3=":443"; ma=86400')])
+2026-07-01 16:34:22 | INFO     | httpx | [-] | HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 429 Too Many Requests"
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | receive_response_body.started request=<Request [b'POST']>
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | receive_response_body.complete
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | response_closed.started
+2026-07-01 16:34:22 | DEBUG    | httpcore.http11 | [-] | response_closed.complete
+2026-07-01 16:34:22 | DEBUG    | groq._base_client | [-] | HTTP Response: POST https://api.groq.com/openai/v1/chat/completions "429 Too Many Requests" Headers({'date': 'Wed, 01 Jul 2026 11:34:23 GMT', 'content-type': 'application/json', 'content-length': '378', 'connection': 'keep-alive', 'cache-control': 'private, max-age=0, no-store, no-cache, must-revalidate', 'retry-after': '10', 'server': 'cloudflare', 'vary': 'Origin', 'x-groq-region': 'dmm', 'x-ratelimit-limit-requests': '14400', 'x-ratelimit-limit-tokens': '6000', 'x-ratelimit-remaining-requests': '14398', 'x-ratelimit-remaining-tokens': '1418', 'x-ratelimit-reset-requests': '12s', 'x-ratelimit-reset-tokens': '45.82s', 'x-request-id': 'req_01kweqavp6ep4axkheb4k53yx5', 'via': '1.1 google', 'cf-cache-status': 'DYNAMIC', 'strict-transport-security': 'max-age=15552000', 'cf-ray': 'a14519eabdc4e8c7-KHI', 'alt-svc': 'h3=":443"; ma=86400'})
+2026-07-01 16:34:22 | DEBUG    | groq._base_client | [-] | Encountered httpx.HTTPStatusError
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\groq\_base_client.py", line 1024, in request
+    response.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\httpx\_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '429 Too Many Requests' for url 'https://api.groq.com/openai/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429
+2026-07-01 16:34:22 | DEBUG    | groq._base_client | [-] | Re-raising status error
+2026-07-01 16:34:22 | WARNING  | app_workflow.services.llm_caller | [-] | [VALUE-VERIFY] RateLimitError — HTTP 429: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.1-8b-instant` in organization `org_01kpzynv78fygsyt8naxwbn470` service tier `on_demand` on tokens per minute (TPM): Limit 6000, Used 4582, Requested 2339. Please try again in 9.21s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+2026-07-01 16:34:22 | DEBUG    | app_workflow.services.llm_caller | [-] |   [VALUE-VERIFY] LLM call attempt 1 took 0.117s
+2026-07-01 16:34:22 | DEBUG    | app_workflow.services.llm_caller | [-] | [LLM] wait hint from 'x-ratelimit-reset-tokens': 45.82s (raw='45.82s')
+2026-07-01 16:34:22 | WARNING  | app_workflow.services.llm_caller | [-] |   [VALUE-VERIFY] 429 received; holding gate, token window resets in 45.82s — retrying at front (attempt 2/3)…
+2026-07-01 16:34:22 | WARNING  | app_workflow.services.llm_caller | [-] |   [VALUE-VERIFY] token window not yet refilled — sleeping 45.82s before calling Groq…
+2026-07-01 16:34:40 | DEBUG    | httpcore.connection | [-] | close.started
+2026-07-01 16:34:40 | DEBUG    | httpcore.connection | [-] | close.complete
+2026-07-01 16:34:40 | DEBUG    | httpcore.connection | [-] | close.started
+2026-07-01 16:34:40 | DEBUG    | httpcore.connection | [-] | close.complete

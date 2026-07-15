@@ -1,0 +1,2674 @@
+=====================================================Continual Harness Paper Code Base ===================================================
+
+<task-notification>
+<task-id>a99bbdc1827da58e8</task-id>
+<tool-use-id>toolu_015QZzbragrVdjRkYJYvF5iJ</tool-use-id>
+<output-file>C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-continual-harness\9d96884c-c37f-4aef-92f3-92e825f5d16a\tasks\a99bbdc1827da58e8.output</output-file>
+<status>completed</status>
+<summary>Agent "Trace PokeAgent main run loop" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I now have everything needed. Here is the report.
+
+## PokeAgent.py — lines 1350 onward
+
+**1. `run()` method — top-level loop** (`agents/PokeAgent.py:2997-3115`)
+
+`run()` resets `self.conversation_history = []` (line 3000), logs config, then calls `check_prerequisites()` (3021, waits for `/health` on the game server). The main loop is `while True:` (3032):
+- Checks `self.max_steps` against `self.step_count` to break (3034-3036).
+- `next_step = self.runtime.peek_next_step()` (3038) — a preview of the step counter; `self.step_count` itself is kept in sync via an `on_step_change` callback registered on `self.runtime` at construction time (`agents/PokeAgent.py:226`: `on_step_change=lambda step: setattr(self, "step_count", step)`), so `step_count` updates automatically when the runtime advances (via `claim_step`/`publish_history`), not by manual increment.
+- Fetches game state via `_execute_function_call_by_name("get_game_state", {})` (3047), extracts `screenshot_base64` from the parsed JSON (3050-3054).
+- Builds the prompt: `_build_optimized_prompt(...)` if `self.optimization_enabled` else `_build_structured_prompt(...)` (3057-3060).
+- Calls `self.run_step(prompt, screenshot_b64=..., step_number=next_step)` (3063). On failure, sleeps 5s and `continue`s (3065-3068).
+- Posts server metrics update, auto-saves checkpoint + agent history via `/checkpoint` and `/save_agent_history` HTTP endpoints (3078-3097), sleeps 1s (3100-3101).
+- `KeyboardInterrupt` returns 0 after printing history; other exceptions return 1 (3103-3110).
+
+**2. Core single-step method: `run_step()`** (`agents/PokeAgent.py:1643-2139`)
+
+Given `prompt`, `screenshot_b64`, `step_number`: gets `run_manager` (trajectory logger) via `get_run_data_manager()` (1664), captures a **pre-state** snapshot by calling `get_game_state` again through the MCP adapter and `run_manager.create_state_snapshot(raw_state)` (1683-1700). Decodes the screenshot to a PIL image, validates it, checks for black frames via `_is_black_frame` (returns `"WAIT"` if black, 1742-1744). Calls `self.runtime.claim_step(owner="orchestrator", interaction_name=...)` (1746-1749) to claim the step slot, then invokes the VLM: `self.vlm.get_query(image, prompt, ...)` (image path) or `self.vlm.get_text_query(prompt, ...)` (text-only path), each wrapped in a `ThreadPoolExecutor` with a 600s timeout and up to 3 retries (1757-1824). Extensive response introspection/logging of `finish_reason` and content parts follows (1826-1873). It then calls `self._handle_vlm_function_calls(response, tool_calls_made, tool_call_count, max_tool_calls)` (1899-1901) to actually execute any tool calls. If tool calls executed: builds `full_response`/`display_text` combining extracted text + tool reasoning + "Action executed: X" (1918-1936), extracts action-specific `action_details` (press_buttons/navigate_to/subagent_gym_puzzle/red_puzzle_agent, 1943-1988), captures post-step coordinates via another `get_game_state` call after `_wait_for_actions_complete()` (1991-2004), publishes the function result and history via `self.runtime.publish_function_result(...)` and `self.runtime.publish_history(...)` (2009-2025), then calls `_log_trajectory_for_step(...)` (2030-2038), then checks optimization triggers (2043-2066). If no tool calls executed, it falls into the plain-text branch (2069-2129) which does the same publish/log/optimization steps but with empty `tool_calls=[]`.
+
+**3. `_handle_vlm_function_calls`** (`agents/PokeAgent.py:3117-3238`)
+
+Validates `response.candidates[0].content.parts` exist. For each part with a `function_call`, converts protobuf args (`_convert_protobuf_args`), calls `self._execute_function_call(function_call, allowed_tool_names=...)` (3195), appends `{name, args, result}` to `tool_calls_made` (3217-3221), and if the tool was `press_buttons`, calls `self._wait_for_actions_complete()` (3224-3225). Returns `True` only if function calls were found and at least one was tracked. `_execute_function_call` itself (`agents/PokeAgent.py:1444-1496`) dispatches: local subagent tools via `is_local_subagent_tool`/`get_local_subagent_spec` (1470-1472), special-cased `return_to_orchestrator`, `run_skill`, `run_code`, `evolve_harness` (1475-1490), else falls through to `self.mcp_adapter.call_tool(function_name, arguments)` (1493) — this is the generic MCP dispatch analogous to `_execute_function_call_by_name` (1444 vs 396, nearly identical logic, used from the two different call sites — direct name-based calls vs. VLM-produced protobuf function_call objects).
+
+**4. Conversation history / context management**
+
+`_add_to_history` (1498-1561) appends entries to `self.conversation_history` and trims to the last 20 entries (1557-1559) — this is a hard cap, not driven by `max_context_chars`. `_calculate_context_size` (1563-1572) sums prompt/response/tool-call string lengths. `self.max_context_chars`/`target_context_chars` are set in `__init__` (187-188, 201-202) and only referenced again in a log line at `run():3014` ("Context: Max X chars (compact to Y)") — no compaction routine using these values appears in lines 1350-3337; the actual short-term memory bound is the 20-entry cap plus `ACTION_HISTORY_WINDOW` used in `_format_action_history` (2952-2995).
+
+**5. Optimization triggers** (`agents/PokeAgent.py:2043-2066` and duplicated at `2103-2127`)
+
+Gated by `self.optimization_enabled`. If `self.harness_evolver` is set, `harness_evolver.should_evolve(active_step, self.optimization_window_length)` gates a call to `harness_evolver.evolve(current_step=active_step, num_trajectory_steps=self.optimization_window_length)`, followed by `self._inject_evolution_summary(results)` (2229-2256) which stores a human-readable summary via `_store_function_result_for_context`. Else if `self.prompt_optimizer` is set, `prompt_optimizer.should_optimize(...)` gates `prompt_optimizer.optimize_prompt(current_step=active_step, num_trajectory_steps=self.optimization_window_length)`.
+
+**6. `_log_trajectory_for_step`** (`agents/PokeAgent.py:2914-2950`)
+
+Builds an `action` dict of `{type: "tool_calls", tool_calls: [{name, args (minus screenshot_base64)}...], total_tool_calls}` and a fixed `outcome = {"success": True, "objectives_completed": []}`, then calls `run_manager.log_trajectory(step=step_num, reasoning=reasoning, action=action, pre_state=pre_state, outcome=outcome, llm_prompt=prompt)`, which per its docstring writes one entry to `trajectory_history.jsonl`. It is called from `run_step` in both the tool-call branch (2030-2038) and the plain-text branch (2091-2099), and also inside the planner loop (`_run_planner_loop`, at line 1356-1364, in the portion before line 1350).</result>
+<usage><subagent_tokens>49896</subagent_tokens><tool_uses>8</tool_uses><duration_ms>79269</duration_ms></usage>
+</task-notification>
+Show less
+<task-notification>
+<task-id>ad37c477a623a5fa1</task-id>
+<tool-use-id>toolu_01DHEoozRUPJnV2qsoBmXGVe</tool-use-id>
+<output-file>C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-continual-harness\9d96884c-c37f-4aef-92f3-92e825f5d16a\tasks\ad37c477a623a5fa1.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore harness evolver and prompt optimizer" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result># Continual Harness — HarnessEvolver Subsystem
+
+## 1. `create_harness_evolver` / `HarnessEvolver`
+
+`create_harness_evolver` (agents/utils/harness_evolver.py:634-645) is a thin factory returning a `HarnessEvolver(vlm, run_data_manager, base_prompt_path, system_prompt_path, initial_prompt_override)`.
+
+`HarnessEvolver.__init__` (harness_evolver.py:56-76) does not do its own LLM setup — it composes a `PromptOptimizer` (`self.prompt_optimizer = PromptOptimizer(...)`, line 65) and reuses that optimizer's text-only VLM (`self.text_vlm = self.prompt_optimizer.vlm`, line 70) for all of its own LLM calls. It also tracks `self.generation` and `self.evolution_log`. Store handles (memory/skill/subagent) are fetched lazily via `_get_memory_store`/`_get_skill_store`/`_get_subagent_store` (lines 82-92), which import singletons from `utils/stores/memory.py`, `skills.py`, `subagents.py`.
+
+`evolve(current_step, num_trajectory_steps=50)` (harness_evolver.py:115-148) is the main entry point:
+- **Reads**: recent trajectories via `self.prompt_optimizer.get_recent_trajectories(num_trajectory_steps)` (line 126), which pulls from `trajectory_history.jsonl` via `agents/subagents/utils/trajectory_window.py`'s `resolve_trajectory_path`/`read_last_jsonl_lines`. If none, it returns `{"skipped": True, "reason": "no_trajectories"}`.
+- **Runs four independent passes** (lines 134-144), each wrapped in try/except so one failure doesn't block the others: `_evolve_prompt`, `_evolve_subagents`, `_evolve_skills`, `_evolve_memory`.
+- **Writes/returns**: increments `self.generation`, calls `_save_evolution_log(current_step, results)` (line 147), and returns the `results` dict (per-pass summaries).
+
+## 2. The four passes
+
+- **Prompt (p)**: `_evolve_prompt` (harness_evolver.py:154-164) — delegates entirely to `PromptOptimizer.optimize_prompt` (prompt_optimizer.py:138-247).
+- **Sub-agents (G)**: `_evolve_subagents` (harness_evolver.py:198-327) — builds a prompt from `store.get_tree_overview()` + trajectory summary + `_extract_tool_failures` (lines 166-196), one LLM call (line 266: `self.text_vlm.get_text_query(...)`), then applies `create`/`update`/`retire` via `SubagentStore.add`/`update`/`remove` (lines 274-321).
+- **Skills (K)**: `_evolve_skills` (harness_evolver.py:329-460) — same pattern; detects a "run_code instead of run_skill" antipattern (lines 341-357), one LLM call (line 422), applies `add`/`update` (lines 429-454).
+- **Memory (M)**: `_evolve_memory` (harness_evolver.py:462-563) — gathers `locations_visited` from trajectory `pre_state`, one LLM call (line 526), applies `add`/`update` (lines 533-557).
+
+Each pass makes exactly **one LLM call** to `self.text_vlm.get_text_query`, and parses its JSON response via the shared helper `_parse_json_response` (harness_evolver.py:569-593).
+
+Note: `store.add(...)` in `BaseStore` (utils/stores/base_store.py:82-108) returns a plain `str` entry id (line 108: `return entry_id`), but the three CRUD passes treat the return value as an object with `.id`/`.name` (e.g. harness_evolver.py:282-296, :431-440, :535-543). This mismatch is flagged in the repo's own notes at `System-Design/architecture/implementation_gaps.md:39` — the row is still saved but the follow-up `entry.id`/`entry.name` access would raise, so results reporting for "created" entries is likely broken in practice.
+
+## 3. `prompt_optimizer.py` vs `harness_evolver.py`
+
+`PromptOptimizer` (prompt_optimizer.py:30-351) is the base/subset: it only rewrites the strategic base-prompt text via `optimize_prompt` (line 138), using its own dedicated text-only `VLM` instance (constructed at line 61, with `tools=None`). `create_prompt_optimizer` (line 354-356) is its factory. `HarnessEvolver` "subsumes" it (per the module docstring, harness_evolver.py:5) by holding a `PromptOptimizer` instance as `self.prompt_optimizer` and adding the subagent/skill/memory passes on top.
+
+In `PokeAgent.__init__` (agents/PokeAgent.py:283-309): if `scaffold == "continualharness"`, it builds a `HarnessEvolver` and sets `self.prompt_optimizer = self.harness_evolver.prompt_optimizer` (line 300). For any other scaffold (e.g. `pokeagent`, `simple`) with `--enable-prompt-optimization`, it instead calls `create_prompt_optimizer` directly (lines 303-308) — so those scaffolds get prompt-only evolution, never subagent/skill/memory CRUD.
+
+## 4. `evolve_harness` tool wiring
+
+Declared in `agents/tools/registry.py:559-589` with `"scaffolds": frozenset({"continualharness"})`, parameters `reasoning` (required) and `num_steps` (default 50). `build_tools_for_scaffold` (registry.py:601-636) filters the static registry by scaffold, so only the `continualharness` scaffold gets this declaration.
+
+Gating: `PokeAgent.__init__` only constructs `self.harness_evolver` when `enable_prompt_optimization=True` AND `scaffold == "continualharness"` (PokeAgent.py:283-301). The dispatcher (`agents/PokeAgent.py:411-414` and duplicate at :1487-1489) routes `function_name == "evolve_harness"` to `_execute_evolve_harness` (PokeAgent.py:521-540), which checks `if not self.harness_evolver: return {"success": False, "error": "HarnessEvolver not available..."}` (line 526-527) — so without the flag, the tool exists but is a no-op stub, matching README.md:82.
+
+## 5. What gets persisted
+
+- **`memory.json` / `skills.json` / `subagents.json`** — each `BaseStore.save()` (utils/stores/base_store.py:306-316) writes `{next_id, entries}` to `os.path.join(cache_dir, self.file_name)` immediately after every `add`/`update`/`remove` call (base_store.py:104, 131, 141). File names set per subclass: `memory.py:53` (`memory.json`), `skills.py:48` (`skills.json`), subagents.py (`subagents.json`, not shown but same pattern).
+- **Evolved prompt snapshots** — `PromptOptimizer._save_optimized_prompt` (prompt_optimizer.py:321-347) writes `run_dir/prompt_evolution/meta_prompts/steps_{start}_to_{end}.md` plus a sibling `_metadata.json`. The original `base_prompt_path` file is never overwritten; only `self.current_base_prompt` in memory is updated (line 233).
+- **Evolution log** — `HarnessEvolver._save_evolution_log` (harness_evolver.py:595-631) appends a JSON line (generation, step, per-pass created/updated/retired ids, store counts) to `get_cache_path("evolution_log.jsonl")`.</result>
+<usage><subagent_tokens>67717</subagent_tokens><tool_uses>13</tool_uses><duration_ms>75700</duration_ms></usage>
+</task-notification>
+Show less
+<task-notification>
+<task-id>ad42bb97f928c7110</task-id>
+<tool-use-id>toolu_012tzQpbDTto6DiePRh4eYLm</tool-use-id>
+<output-file>C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-continual-harness\9d96884c-c37f-4aef-92f3-92e825f5d16a\tasks\ad42bb97f928c7110.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore VLM backends and persistence" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Now I have enough to write the report.
+
+## 1. The `VLM` class (`utils/agent_infrastructure/vlm_backends.py:2567-2680`)
+
+`VLM` is a thin dispatcher, not an abstract class itself. It holds a `BACKENDS` dict (line 2570) mapping `"openai"→OpenAIBackend`, `"anthropic"→AnthropicBackend`, `"openrouter"→OpenRouterBackend`, `"gemini"→GeminiBackend`, `"vertex"→VertexBackend`. All backends inherit from the ABC `VLMBackend` (line 54), which declares two abstract methods: `get_query(img, text, module_name)` and `get_text_query(text, module_name)` (lines 58-70).
+
+`VLM.__init__` (2578) picks a backend class (auto-detecting from the model name via `_auto_detect_backend`, 2618, if `backend="auto"`) and instantiates it with `tools=self.tools, system_instruction=...`. `VLM.get_query`/`get_text_query` (2633, 2660) simply forward to `self.backend.get_query`/`get_text_query`, catching exceptions to log errors that the backend itself didn't already log. So the "unification" happens by having every concrete backend implement the same two-method contract and return the same result shape: a plain `str` when no tools are configured, or a "Gemini-like adapter" object (`.candidates[0].content.parts[...]` with `.text`/`.function_call`) when tools are configured.
+
+**Gemini path** (`GeminiBackend.get_query`, 2320-2446): builds `content_parts = [text, image]` (images upscaled 4x via `_prepare_image`, 2203), calls `self.model.generate_content(content_parts, tool_config={"function_calling_config": {"mode": "ANY"}})` through `_call_generate_content` (2249, with retry/backoff for 429/5xx). Since Gemini's native SDK response already has `candidates[0].content.parts[].function_call/.text`, no adapter is needed — the raw `google.generativeai` response is returned as-is when `self.tools` is set.
+
+**Anthropic path** (`AnthropicBackend.get_query`, 733-818): builds `messages=[{"role":"user","content":[{"type":"text",...},{"type":"image","source":{"type":"base64","media_type":"image/png","data":...}}]}]`, calls `client.messages.create(model=..., system=[{"type":"text","text":...,"cache_control":{"type":"ephemeral"}}], messages=..., tools=self._tools_anthropic, tool_choice={"type":"auto"})` via `_call_messages` (700). Anthropic's native response (`response.content` = list of `text`/`tool_use` blocks) is *not* Gemini-shaped, so `_anthropic_response_adapter` (558-605) converts each `tool_use` block into a `function_call` part (via shared helper `_openai_tool_call_part`, 73) and each `text` block into a text part (`_openai_text_part`, 87), then wraps them into synthetic `Content`/`Candidate`/`ResponseAdapter` objects (built with `type(...)`) so downstream agent code can treat all backends identically.
+
+OpenAI (Responses API, `_openai_responses_adapter`, 170) and OpenRouter (Chat Completions, `_openrouter_response_adapter`, 977) use the same adapter trick for their own response shapes.
+
+## 2. Tool/function declaration schema
+
+Yes — there is one canonical schema, Gemini-style, defined by the caller (agent code, not shown) as dicts like `{"name": ..., "description": ..., "parameters": {"properties": {"prop": {"type_": "STRING"/"INTEGER"/"ARRAY"/"BOOLEAN", "description": ..., "enum": [...]}, "required": [...]}}}`. Each backend translates this once at init/`_setup_function_calling` time:
+- `OpenAIBackend._convert_tools_to_openai_format` (277) → flat Responses API format `{"type":"function","name":...,"parameters":{"type":"object","properties":...,"required":...}}`, via `_build_json_schema_properties` (296) which maps `type_` values to lowercase JSON Schema types.
+- `AnthropicBackend._convert_tools_to_anthropic_format` (670) → `{"name":...,"description":...,"input_schema":{"type":"object","properties":...,"required":...}}` via near-identical `_build_input_schema` (647).
+- `OpenRouterBackend._convert_tools_to_openrouter_format` (1132) → nested Chat Completions format `{"type":"function","function":{"name":...,"parameters":...}}` via `_build_json_schema_properties` (1109).
+- `VertexBackend._setup_function_calling` (1653) builds native `FunctionDeclaration`/`Tool` objects (1664, 1670).
+- `GeminiBackend` passes the Gemini-style dicts straight through as `tools=self.tools` (2140) since that's the native format.
+
+## 3. `run_data_manager.py`
+
+`RunDataManager.__init__` (22-70) computes a `run_id` (timestamp + objective id/desc + optional run_name, or `run_{timestamp}`) and creates `run_data/{run_id}/` via `_create_directory_structure` (72-93), which builds 3 top-level components:
+- `prompt_evolution/llm_traces/` — for prompt-optimization data.
+- `end_state/{game_state,map_data,frame_cache,videos,logs}/` — final-state artifacts.
+- `agent_scratch_space/` — files the LLM's tool calls read/write (objectives.json, memory.json, skills.json, subagents.json, completed_objectives.json).
+
+`initialize_run_data_manager(run_id=None, run_name=None, first_objective_id=None, first_objective_desc=None)` (679-700) constructs a `RunDataManager` and stores it in the module-level global `_run_data_manager`, retrievable via `get_run_data_manager()` (674).
+
+`get_cache_directory()` (703-724) returns `.pokeagent_cache/{run_id}/` (creating it), falling back to `.pokeagent_cache/{RUN_DATA_ID env}` or plain `.pokeagent_cache/` if no run manager is initialized. `get_cache_path(relative_path)` (727) is `get_cache_directory() / relative_path`.
+
+**Difference between the two directories**: `.pokeagent_cache/{run_id}/` is the *live, working scratch/cache* used *during* a run — it's where `trajectory_history.jsonl`, `checkpoint.state`, `cumulative_metrics.json`, `memory.json`, `objectives.json`, `checkpoint_llm.txt`, and the `workspace/` (CLI sandbox, `get_cli_workspace_dir`, 740) actually live and get read/written continuously, and it's also what `backup_manager.py` zips up. `run_data/{run_id}/` is the *curated, archival snapshot for analysis* — the various `copy_*` methods (`copy_llm_traces`, `copy_game_state`, `copy_map_data`, `copy_memory`, `copy_skills`, `copy_subagents`, `copy_submission_log`, `copy_frame_cache`, `sync_trajectories_to_run_data`, 310-631) explicitly `shutil.copy2` files *from* the cache directory *into* the structured `run_data` tree at checkpoints/finalization, and `_export_bootstrap_artifacts` (449) even writes a `bootstrap/` copy to both locations so a later run can `--bootstrap-from` either.
+
+## 4. `llm_logger.py`
+
+`LLMLogger` (20) writes one JSONL entry per interaction to `llm_logs/llm_log_{session_id}.jsonl` (line 43, dir defaults to `"llm_logs"`). `log_interaction`/convenience function `log_llm_interaction` (204, 1131) records `interaction_type`, `prompt`, `response` (or extracted "thinking" text for tool calls), `duration`, `metadata` (incl. `token_usage`: prompt/completion/total/cached/cache_write tokens), and `model_info`. It also updates an in-memory `cumulative_metrics` dict — incrementing `total_llm_calls`, `total_tokens`, `total_run_time`, and computing `total_cost` from a hardcoded per-model `self.pricing` table (86-154, covering GPT-5/4, o-series, Claude, Gemini) with separate cached/cache-write rates. Per-step entries append to `cumulative_metrics["steps"]`, and `log_milestone_completion`/`log_objective_completion` (640, 719) append cumulative+delta ("split") metrics to `cumulative_metrics["milestones"]`/`["objectives"]`. `save_cumulative_metrics`/`load_cumulative_metrics` (856, 884) persist/restore this dict as `cumulative_metrics.json` under `get_cache_path(...)` (i.e., `.pokeagent_cache/{run_id}/cumulative_metrics.json`), gated by `_metrics_write_enabled()` (single-writer pattern for server vs CLI). `get_llm_logger()` (1103) is the module-level singleton accessor — lazily creates one `LLMLogger` (session id from `LLM_SESSION_ID` env var for multiprocess consistency) and returns it on every subsequent call.
+
+## 5. `backup_manager.py` / `server_metrics.py` (brief)
+
+`backup_manager.py`'s `create_cache_backup(objective_id, objective_description, cache_dir=None, backup_base_dir="backups")` (35) zips the current `.pokeagent_cache/{run_id}/` directory into `backups/{run_id}/{timestamp}_{objective_id}_{desc}.zip` (skipping unreadable files from containerized runs) whenever an objective completes; `restore_cache_from_backup` (187) and `list_backups` (282) handle unzip/restore and enumeration.
+
+`server_metrics.py` is small (57 lines) and doesn't itself write `cumulative_metrics.json` — that's `llm_logger.py`'s job. Its one function, `update_server_metrics(server_url="http://localhost:8000")` (13), pulls the current metrics via `get_llm_logger().get_cumulative_metrics()` and POSTs them to the running server's `/agent_step` (for live UI display) and `/sync_llm_metrics` (to sync the CLI's in-memory metrics into the server's single-writer `cumulative_metrics.json`), silently ignoring connection failures.</result>
+<usage><subagent_tokens>93049</subagent_tokens><tool_uses>8</tool_uses><duration_ms>70643</duration_ms></usage>
+</task-notification>
+Show less
+<task-notification>
+<task-id>a850fb8b2232e8522</task-id>
+<tool-use-id>toolu_012VdsgAu9DnTroe8chhaQa3</tool-use-id>
+<output-file>C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-continual-harness\9d96884c-c37f-4aef-92f3-92e825f5d16a\tasks\a850fb8b2232e8522.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore game server app.py" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result># Pokemon Emerald Agent Harness — Server Implementation Notes
+
+## 1. FastAPI routes (server/app.py)
+
+Core game control:
+- `GET /stream` → `get_stream` (app.py:926) — serves `server/stream.html` viewer UI.
+- `GET /config` → `get_config` (:938) — returns `game_type`/resolution for the UI.
+- `GET /status` → `get_status` (:954) — step count, current/base FPS (2x during dialog).
+- `GET /screenshot` (:975), `GET /api/frame` (:1013), `GET /frame` (:1050, disabled — 410) → screenshot/frame retrieval; `WS /ws/frames` → `websocket_frames` (:1059) streams `frame_manager.latest_frame` at ~60Hz poll.
+- `POST /action` → `take_action` (:1088) — the low-level button-queue endpoint (see §4).
+- `GET /queue_status` → `get_queue_status` (:1303) — inspects the action queue/current held button.
+- `GET /state` → `get_comprehensive_state` (:1381) — the big state endpoint (see §3).
+- `GET /whole_map` (:1744), `/debug/memory*` (:1876‑1991), `/milestones` (:2632), `/recent_actions` (:2684), `/metrics` (:2231), `/agent`, `/agent_stream`, `/agent_step` — telemetry/debug/UI-support endpoints.
+
+MCP tool endpoints (all under `/mcp/*`, called by the agent's tool layer, implemented via `server/game_tools.py`):
+- `POST /mcp/get_game_state` → `mcp_get_game_state` (:2822) — full state + screenshot + current objective guidance.
+- `POST /mcp/get_map_data` → `mcp_get_map_data` (:2982) — structured grid/warps/objects extracted from the same state text.
+- `POST /mcp/press_buttons` → `mcp_press_buttons` (:3117) — validates/normalizes buttons, delegates to `take_action`.
+- `POST /mcp/complete_direct_objective` → `mcp_complete_direct_objective` (:3218) — marks current objective done, advances index.
+- `POST /mcp/navigate_to` → `mcp_navigate_to` (:3546) — pathfinds to (x,y), queues resulting buttons via `take_action`.
+- `POST /mcp/add_memory` / `add_knowledge` (:3598), `search_memory` (:3631), `get_memory_summary` (:3649), `get_memory_overview` (:3662), `process_memory` (:3674) — long-term memory CRUD.
+- `POST /mcp/get_skill_overview` / `process_skill` (:3700, :3712), `get_subagent_overview` / `process_subagent` (:3738, :3750) — skill library and subagent registry CRUD.
+- `POST /mcp/lookup_pokemon_info`, `/list_wiki_sources`, `/get_walkthrough` (:3776‑4021) — wiki/walkthrough lookups.
+- `POST /mcp/save_memory` (:4023), `/replan_objectives` → `mcp_replan_objectives` (:4065), `/get_full_objective_sequence` (:4109), `/get_progress_summary` → `mcp_get_progress_summary` (:4131), `/save_map` / `/load_map` (:4224, :4267).
+- Misc lifecycle: `POST /stop`, `/save_state`, `/load_state`, `/checkpoint`, `/sync_llm_metrics`, `/save_agent_history`, `/load_checkpoint` (:4321‑4629).
+
+## 2. Emulator wiring / GAME_TYPE
+
+`game_type = os.environ.get("GAME_TYPE", "emerald").lower()` (app.py:51). `setup_environment()` (app.py:578) branches on it: for `"red"` it imports `RedEmulator` from `pokemon_red_env.red_emulator` with ROM `PokemonRed-GBC/pokered.gbc`; otherwise it imports `EmeraldEmulator` from `pokemon_env/emulator.py` with ROM `Emerald-GBAdvance/rom.gba` (app.py:583‑594), then calls `env.initialize()`. `EmeraldEmulator.__init__`/`initialize()` (emulator.py:373‑472) loads the ROM into libmgba (`mgba.core.load_path`), sets up a video buffer, and instantiates `PokemonEmeraldReader(self.core, milestone_tracker=...)` as `self.memory_reader` (emulator.py:458) — this is the RAM-reading half of the emulator wrapper.
+
+## 3. `/state` and `get_game_state` call chain
+
+`GET /state` (app.py:1381) calls `env.get_comprehensive_state()` (100ms-cached, emulator.py:903), which — if `self.memory_reader` exists — delegates to `PokemonEmeraldReader.get_comprehensive_state(screenshot)` (memory_reader.py:2503), which reads map tiles (`read_map`), `read_coordinates`, `read_location`, `read_money`, `read_badges`, battle/dialog state, etc. directly from GBA RAM, then attaches the PIL screenshot into `state["visual"]["screenshot"]`. `/state` layers on porymap-derived ASCII map data and location connections.
+
+The MCP variant `mcp_get_game_state` (:2822) instead calls `game_tools.get_game_state_direct(env, format_state_for_llm, ...)` (game_tools.py:116): it grabs `current_obs` (latest frame from the game loop) or falls back to `env.get_screenshot()`, calls `env.get_comprehensive_state(screenshot=...)`, then runs `format_state_for_llm` (`utils/state_formatter.py`) to build the ASCII map / text block, base64-encodes the screenshot, and merges in `direct_objectives_manager` guidance before returning.
+
+## 4. `press_buttons` flow / frame-advance
+
+`mcp_press_buttons` (:3117) normalizes/validates button names, strips `WAIT`, then builds an `ActionRequest` and calls `take_action` (:1088), which appends `{button, speed, hold_frames, release_frames}` dicts to the global `action_queue` (does not step the emulator itself). The actual stepping happens in `game_loop()` (app.py:769), running in the main thread: it pops queue entries, holds each button for `hold_frames` (SPEED_PRESETS: fast/normal/slow, app.py:158‑163) by calling `step_environment()` → `env.run_frame_with_buttons(actions_pressed)` (emulator.py:565, sets keys, `core.run_frame()`, clears keys) each loop iteration, then applies a `release_frames` no-input delay, sleeping `1/current_fps` per frame (app.py:908). This is a request-driven queue but continuously stepped/drained by the always-running `game_loop`.
+
+## 5. Objectives
+
+`direct_objectives_manager` (a `DirectObjectiveManager` from `agents/objectives.py`, global at app.py:63) is lazily created in `mcp_get_game_state`/`mcp_complete_direct_objective`/etc. It loads either a `categorized_full_game` sequence (story/battling/dynamics sub-sequences with separate indices) or a legacy single sequence, persisted via `auto_save()`/`objectives.json` cache. `mcp_complete_direct_objective` (:3218) fetches current state, marks the current objective completed (`_mark_objective_completed`), advances `story_index`/`battling_index`/`dynamics_index` (or `current_index` in legacy mode) (:3317‑3369), and appends the "plan more objectives" placeholder (`_build_story_planning_objective`, :78) when a sub-sequence is exhausted. `mcp_get_progress_summary` (:4131) aggregates completed milestones, current objective status (`get_sequence_status`), completed-objective history from `completed_objectives.json`, and memory overview into one payload for the LLM.
+
+## 6. Background loop vs request-driven stepping
+
+There is exactly one continuous stepper: `game_loop()` runs in the **main thread** (started via `game_loop(manual_mode=False)` at app.py:4889) and is the only place `step_environment`/`env.run_frame_with_buttons` gets called — it always ticks at `1/current_fps` even with an empty queue (idle frames pass empty `actions_pressed`). Two additional daemon threads run alongside: `run_fastapi_server` (uvicorn, app.py:4853) serving all HTTP/WS routes, and `periodic_milestone_updater` (app.py:445, started at :4849) which every 5s does a lightweight `env.check_and_update_milestones` pass without touching the frame stepping. So HTTP requests only enqueue actions/read cached state; the emulator itself is advanced by the perpetual `game_loop`, not per-request.</result>
+<usage><subagent_tokens>86502</subagent_tokens><tool_uses>18</tool_uses><duration_ms>87179</duration_ms></usage>
+</task-notification>
+Show less
+I need to understand this research paper’s codebase at a practical implementation level.
+
+Please analyze the repository and explain:
+
+1. Codebase structure
+* Explain the purpose of each important folder and file
+* Identify the main entry points
+* Explain which files are most important for understanding the implementation
+
+2. Practical implementation flow
+* Step-by-step, explain what happens when the project runs
+* Trace the flow from input → processing → model/agent logic → output
+* Mention the exact functions/classes/files involved
+
+3. Core components
+   Explain the implementation of:
+* Model/LLM usage
+* Agent loop or decision-making logic
+* Tools/harness/scaffolding, if present
+* Dataset loading or environment setup
+* Training/fine-tuning/evaluation loop, if present
+* Reward/scoring/validation logic, if present
+* Logging, memory, checkpoints, or saved outputs
+
+Please explain in simple language because I am learning the practical coding implementation. Use file names, function names, and concrete examples from this repository wherever possible. Do not give a generic explanation; base the answer strictly on this codebase.
+Show less
+I'll first check the repo structure and see if there's already a graphify knowledge graph output, since this task (understanding codebase structure, architecture, file relationships) matches that skill's use case.
+
+Bash List repo root and check for existing graphify output
+IN
+ls -la "c:\Users\LOQ\Desktop\Projects\continual-harness" && echo "---" && ls -la "c:\Users\LOQ\Desktop\Projects\continual-harness\graphify-out" 2>&1 | head -20
+
+OUT
+total 1826
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 .
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:26 ..
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 .devcontainer
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:30 .git
+-rw-r--r-- 1 LOQ 197121    3115 Jul  7 11:27 .gitignore
+-rw-r--r-- 1 LOQ 197121       4 Jul  7 11:27 .python-version
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 Emerald-GBAdvance
+-rw-r--r-- 1 LOQ 197121    1194 Jul  7 11:27 LICENSE
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 PokemonRed-GBC
+-rw-r--r-- 1 LOQ 197121   39694 Jul  7 11:27 README.md
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 System-Design
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 agents
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 docs
+-rw-r--r-- 1 LOQ 197121  243800 Jul  7 11:27 layout.png
+-rw-r--r-- 1 LOQ 197121 1031358 Jul  7 11:27 pokeagent_architecture.png
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 pokemon_env
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 pokemon_red_env
+-rw-r--r-- 1 LOQ 197121    2345 Jul  7 11:27 pyproject.toml
+-rw-r--r-- 1 LOQ 197121     224 Jul  7 11:27 pytest.ini
+-rw-r--r-- 1 LOQ 197121    5129 Jul  7 11:27 requirements.txt
+-rwxr-xr-x 1 LOQ 197121   24555 Jul  7 11:27 run.py
+-rwxr-xr-x 1 LOQ 197121   41061 Jul  7 11:27 run_cli.py
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 scripts
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 server
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 tests
+drwxr-xr-x 1 LOQ 197121       0 Jul  7 11:27 utils
+-rw-r--r-- 1 LOQ 197121  385216 Jul  7 11:27 uv.lock
+---
+ls: cannot access 'c:\Users\LOQ\Desktop\Projects\continual-harness\graphify-out': No such file or directory
+This is the PokeAgent Challenge harness (Pokemon-playing agent research codebase). Let me explore the key directories and entry points directly.
+
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\README.md
+Globpattern: "**/*.py"
+Found 30 files
+Globpattern: "**/*.py"
+Found 8 files
+Globpattern: "**/*.py"
+Found 6 files
+Globpattern: "**/*.py"
+Found 14 files
+Now let's look at the main entry point and the core agent loop.
+
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\run.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py
+This is a large, complex codebase (PokeAgent.py alone is 3337 lines). Let me explore the remaining core subsystems in parallel to build a complete picture.
+
+Agent:Trace PokeAgent main run loop
+IN
+In the repo c:\Users\LOQ\Desktop\Projects\continual-harness, read agents/PokeAgent.py (it's 3337 lines; I've already read lines 1-1350 which cover __init__, tool declarations, subagent execution methods like _execute_subagent_reflect/_execute_subagent_verify/_execute_subagent_battler/_run_battler_loop/_run_planner_loop). I need the REST of the file (from line 1350 onward), specifically:
+
+1. The main `run()` method — how does it start, what's the top-level loop structure (while loop, step counter, termination conditions)?
+2. The core single-step method (likely something like `_run_agent_step` or `step()`) — trace exactly what happens each step: how it gets game state/screenshot, builds the prompt, calls the VLM, handles the response.
+3. `_handle_vlm_function_calls` — how tool/function calls from the VLM response are parsed and dispatched (map to `_execute_function_call_by_name` presumably).
+4. Conversation history management / context compaction (mentioned `max_context_chars`, `target_context_chars`, `conversation_history`).
+5. Where/how `self.prompt_optimizer` or `self.harness_evolver` get triggered periodically during the loop (the optimization_window_length check).
+6. Any trajectory logging call (`_log_trajectory_for_step`) — what does it log and where.
+
+Report back with concrete function names, line numbers, and a step-by-step trace of one full agent step from "get game state" to "action executed" to "logged". Keep the report focused and around 500-700 words, citing agents/PokeAgent.py:LINE for each claim.
+Agent:Explore game server app.py
+IN
+In the repo c:\Users\LOQ\Desktop\Projects\continual-harness, read server/app.py (the FastAPI game server) and server/game_tools.py, plus skim pokemon_env/emulator.py and pokemon_env/memory_reader.py enough to understand their role.
+
+I need to understand, for someone learning practical agent-harness implementation:
+1. What FastAPI routes exist (especially /state, /action, /mcp/get_game_state, /mcp/press_buttons, /mcp/navigate_to, /mcp/add_memory, /mcp/replan_objectives, /stream, etc.) — list them with the handler function name and a one-line description of what each does.
+2. How the emulator is wired in: where EmeraldEmulator (pokemon_env/emulator.py) and/or RedEmulator get instantiated, and how GAME_TYPE env var selects between them.
+3. How `get_game_state` assembles its response — does it call memory_reader.py (PokemonEmeraldReader) to read RAM, format an ASCII map, encode a screenshot? Trace the function call chain briefly.
+4. How `press_buttons` works — how button input reaches the emulator, and whether there's a frame-advance / wait mechanism.
+5. Where objectives (direct_objectives) are tracked server-side and how `complete_direct_objective` / `get_progress_summary` work.
+6. Any background loop/thread that steps the emulator continuously vs. request-driven stepping.
+
+Report in ~500-700 words with concrete file:line references. This is for a README-style explanation of the implementation, so be concrete and cite real function/class names.
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py (lines 1351-2050)
+Agent:Explore harness evolver and prompt optimizer
+IN
+In the repo c:\Users\LOQ\Desktop\Projects\continual-harness, this is the "Continual Harness" paper's core contribution. Read these files fully:
+- agents/utils/harness_evolver.py
+- agents/utils/prompt_optimizer.py
+- agents/subagents/utils/trajectory_window.py
+- agents/tools/registry.py (focus on how "continualharness" scaffold and evolve_harness tool are wired)
+
+I need a clear explanation, for someone learning the practical implementation, of:
+1. What `create_harness_evolver` / the HarnessEvolver class does — its constructor args, and its main `evolve()` method: what does it read (trajectory window, current prompt/subagents/skills/memory), what LLM calls does it make, and what does it write/return?
+2. The "four passes" mentioned in the README (rewrite system prompt p; CRUD over sub-agents G; CRUD over skills K; CRUD over memory M) — find the actual methods/functions implementing each pass, with function names and line numbers.
+3. How `prompt_optimizer.py`'s `create_prompt_optimizer` and its class differ from harness_evolver — is prompt_optimizer a subset/base used by non-continualharness scaffolds too?
+4. How the `evolve_harness` tool is exposed to the model (its tool declaration/schema) and how it's gated by `--enable-prompt-optimization`.
+5. What gets persisted to disk after an evolution pass (e.g. memory.json, skills.json, subagents.json, evolved prompt file) — file paths and which functions write them.
+
+Report in ~600-800 words with concrete file:line citations. This is the most important subsystem for the paper's contribution, so be thorough and precise — don't guess, only report what you actually read in the code.
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py (lines 2051-2450)
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\server\game_tools.py
+Grep "def run\(|def _handle_vlm_function_calls|def _log_trajectory_for_step|max_context_chars|target_context_chars|def _execute_function_call_by_name|def _compact|optimization_window_length" (in c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py)
+23 lines of output
+Agent:Explore VLM backends and persistence
+IN
+In the repo c:\Users\LOQ\Desktop\Projects\continual-harness, read:
+- utils/agent_infrastructure/vlm_backends.py
+- utils/data_persistence/run_data_manager.py
+- utils/data_persistence/llm_logger.py
+- utils/data_persistence/backup_manager.py (briefly)
+- utils/metric_tracking/server_metrics.py (briefly)
+
+I need a clear explanation, for someone learning the practical implementation, of:
+1. The `VLM` class in vlm_backends.py — how it unifies OpenAI/Gemini/Anthropic/OpenRouter/Vertex backends behind one interface. What are its main methods (e.g. `get_query`, `get_text_query`)? How does it convert a screenshot + prompt + tool declarations into a provider-specific API call for at least two backends (e.g. Gemini and Anthropic)? How does it parse the response back (text + function/tool calls) into a common format?
+2. How tool/function declarations are formatted — is there one canonical dict schema that gets translated per-backend?
+3. `run_data_manager.py` — what directory structure does it create per run (run_data/{run_id}/...), what does `initialize_run_data_manager` do, what is `get_cache_path`/`get_cache_directory` (.pokeagent_cache/{run_id}/) used for, and what's the difference between the two directories (run_data vs .pokeagent_cache)?
+4. `llm_logger.py` — what does it log per step (prompts, responses, tokens, cost?), where do logs get written (llm_logs/ folder), and what's `get_llm_logger()`?
+5. Briefly: what does backup_manager.py do (creating/restoring zip backups) and what does server_metrics.py track (cumulative_metrics.json)?
+
+Report in ~600-800 words with concrete file:line citations, function/class names. Be precise, cite only what you actually read.
+Grep "def complete_direct_objective|def get_progress_summary|direct_objectives_manager|class DirectObjective|def press_buttons|press_buttons_direct" (in c:\Users\LOQ\Desktop\Projects\continual-harness\server\app.py)
+121 lines of output
+Read C:\Users\LOQ\Desktop\Projects\continual-harness\agents\tools\registry.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py (lines 2901-3120)
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\server\app.py (lines 3117-3266)
+I've launched four research agents in parallel to trace the main agent loop, the game server, the harness-evolution logic, and the VLM/persistence layers. While those run, let me look at the tools registry and objectives system myself.
+
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py (lines 3118-3317)
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\tools\registry.py
+Read C:\Users\LOQ\Desktop\Projects\continual-harness\utils\data_persistence\llm_logger.py
+Grep "create_harness_evolver|HarnessEvolver\(|harness_evolver\."
+19 lines of output
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\server\app.py (lines 4131-4225)
+This confirms the tool registry pattern — a scaffold-gated list of tool declarations. Let me also check the System-Design README for the architecture diagram context while the research agents run.
+
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\System-Design\README.md
+Grep "def step_count|self\.step_count =|self\._step_count|@property" (in c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py)
+1 line of output
+Good, that confirms the architecture split. Now let's wait for the parallel research agents to finish and check in on their findings.
+
+Bash
+IN
+wc -l "c:\Users\LOQ\Desktop\Projects\continual-harness\pokemon_env\emulator.py" "c:\Users\LOQ\Desktop\Projects\continual-harness\pokemon_env\memory_reader.py"
+
+OUT
+  1628 c:\Users\LOQ\Desktop\Projects\continual-harness\pokemon_env\emulator.py
+  5125 c:\Users\LOQ\Desktop\Projects\continual-harness\pokemon_env\memory_reader.py
+  6753 total
+Globpattern: "System-Design/architecture/*.md"
+Found 8 files
+Read C:\Users\LOQ\Desktop\Projects\continual-harness\utils\metric_tracking\server_metrics.py
+There's already a dedicated harness_evolver.md design doc — useful for cross-checking the agent's findings once it returns.
+
+Grep "step_count" (in c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py)
+19 lines of output
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\server\app.py (lines 4821-4920)
+Read C:\Users\LOQ\Desktop\Projects\continual-harness\utils\agent_infrastructure\vlm_backends.py (lines 2113-2681)
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\System-Design\architecture\harness_evolver.md
+Read C:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py (lines 401-560)
+Grep "class PokemonEmeraldReader|def read_coordinates|def read_map_around_player|def get_comprehensive_state|def read_badges|def _check_area_transition" (in c:\Users\LOQ\Desktop\Projects\continual-harness\pokemon_env\memory_reader.py)
+6 lines of output
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py (lines 397-436)
+Globpattern: "utils/stores/*.py"
+Found 6 files
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\System-Design\architecture\pokeagent.md
+Grep "def restore_|def list_backups|def create_cache_backup" (in C:\Users\LOQ\Desktop\Projects\continual-harness\utils\data_persistence\backup_manager.py)
+3 lines of output
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\System-Design\architecture\client_server.md
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\System-Design\architecture\data_persistence.md
+Read C:\Users\LOQ\Desktop\Projects\continual-harness\utils\stores\subagents.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\pokemon_env\emulator.py (lines 904-963)
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\prompts\paths.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\objectives\direct_objectives.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\pokemon_env\memory_reader.py (lines 2504-2563)
+Pokemon Emerald Agent Harness — Server Implementation Notes
+1. FastAPI routes (server/app.py)
+Core game control:
+
+GET /stream → get_stream (app.py:926) — serves server/stream.html viewer UI.
+GET /config → get_config (:938) — returns game_type/resolution for the UI.
+GET /status → get_status (:954) — step count, current/base FPS (2x during dialog).
+GET /screenshot (:975), GET /api/frame (:1013), GET /frame (:1050, disabled — 410) → screenshot/frame retrieval; WS /ws/frames → websocket_frames (:1059) streams frame_manager.latest_frame at ~60Hz poll.
+POST /action → take_action (:1088) — the low-level button-queue endpoint (see §4).
+GET /queue_status → get_queue_status (:1303) — inspects the action queue/current held button.
+GET /state → get_comprehensive_state (:1381) — the big state endpoint (see §3).
+GET /whole_map (:1744), /debug/memory* (:1876‑1991), /milestones (:2632), /recent_actions (:2684), /metrics (:2231), /agent, /agent_stream, /agent_step — telemetry/debug/UI-support endpoints.
+MCP tool endpoints (all under /mcp/*, called by the agent's tool layer, implemented via server/game_tools.py):
+
+POST /mcp/get_game_state → mcp_get_game_state (:2822) — full state + screenshot + current objective guidance.
+POST /mcp/get_map_data → mcp_get_map_data (:2982) — structured grid/warps/objects extracted from the same state text.
+POST /mcp/press_buttons → mcp_press_buttons (:3117) — validates/normalizes buttons, delegates to take_action.
+POST /mcp/complete_direct_objective → mcp_complete_direct_objective (:3218) — marks current objective done, advances index.
+POST /mcp/navigate_to → mcp_navigate_to (:3546) — pathfinds to (x,y), queues resulting buttons via take_action.
+POST /mcp/add_memory / add_knowledge (:3598), search_memory (:3631), get_memory_summary (:3649), get_memory_overview (:3662), process_memory (:3674) — long-term memory CRUD.
+POST /mcp/get_skill_overview / process_skill (:3700, :3712), get_subagent_overview / process_subagent (:3738, :3750) — skill library and subagent registry CRUD.
+POST /mcp/lookup_pokemon_info, /list_wiki_sources, /get_walkthrough (:3776‑4021) — wiki/walkthrough lookups.
+POST /mcp/save_memory (:4023), /replan_objectives → mcp_replan_objectives (:4065), /get_full_objective_sequence (:4109), /get_progress_summary → mcp_get_progress_summary (:4131), /save_map / /load_map (:4224, :4267).
+Misc lifecycle: POST /stop, /save_state, /load_state, /checkpoint, /sync_llm_metrics, /save_agent_history, /load_checkpoint (:4321‑4629).
+2. Emulator wiring / GAME_TYPE
+game_type = os.environ.get("GAME_TYPE", "emerald").lower() (app.py:51). setup_environment() (app.py:578) branches on it: for "red" it imports RedEmulator from pokemon_red_env.red_emulator with ROM PokemonRed-GBC/pokered.gbc; otherwise it imports EmeraldEmulator from pokemon_env/emulator.py with ROM Emerald-GBAdvance/rom.gba (app.py:583‑594), then calls env.initialize(). EmeraldEmulator.__init__/initialize() (emulator.py:373‑472) loads the ROM into libmgba (mgba.core.load_path), sets up a video buffer, and instantiates PokemonEmeraldReader(self.core, milestone_tracker=...) as self.memory_reader (emulator.py:458) — this is the RAM-reading half of the emulator wrapper.
+
+3. /state and get_game_state call chain
+GET /state (app.py:1381) calls env.get_comprehensive_state() (100ms-cached, emulator.py:903), which — if self.memory_reader exists — delegates to PokemonEmeraldReader.get_comprehensive_state(screenshot) (memory_reader.py:2503), which reads map tiles (read_map), read_coordinates, read_location, read_money, read_badges, battle/dialog state, etc. directly from GBA RAM, then attaches the PIL screenshot into state["visual"]["screenshot"]. /state layers on porymap-derived ASCII map data and location connections.
+
+The MCP variant mcp_get_game_state (:2822) instead calls game_tools.get_game_state_direct(env, format_state_for_llm, ...) (game_tools.py:116): it grabs current_obs (latest frame from the game loop) or falls back to env.get_screenshot(), calls env.get_comprehensive_state(screenshot=...), then runs format_state_for_llm (utils/state_formatter.py) to build the ASCII map / text block, base64-encodes the screenshot, and merges in direct_objectives_manager guidance before returning.
+
+4. press_buttons flow / frame-advance
+mcp_press_buttons (:3117) normalizes/validates button names, strips WAIT, then builds an ActionRequest and calls take_action (:1088), which appends {button, speed, hold_frames, release_frames} dicts to the global action_queue (does not step the emulator itself). The actual stepping happens in game_loop() (app.py:769), running in the main thread: it pops queue entries, holds each button for hold_frames (SPEED_PRESETS: fast/normal/slow, app.py:158‑163) by calling step_environment() → env.run_frame_with_buttons(actions_pressed) (emulator.py:565, sets keys, core.run_frame(), clears keys) each loop iteration, then applies a release_frames no-input delay, sleeping 1/current_fps per frame (app.py:908). This is a request-driven queue but continuously stepped/drained by the always-running game_loop.
+
+5. Objectives
+direct_objectives_manager (a DirectObjectiveManager from agents/objectives.py, global at app.py:63) is lazily created in mcp_get_game_state/mcp_complete_direct_objective/etc. It loads either a categorized_full_game sequence (story/battling/dynamics sub-sequences with separate indices) or a legacy single sequence, persisted via auto_save()/objectives.json cache. mcp_complete_direct_objective (:3218) fetches current state, marks the current objective completed (_mark_objective_completed), advances story_index/battling_index/dynamics_index (or current_index in legacy mode) (:3317‑3369), and appends the "plan more objectives" placeholder (_build_story_planning_objective, :78) when a sub-sequence is exhausted. mcp_get_progress_summary (:4131) aggregates completed milestones, current objective status (get_sequence_status), completed-objective history from completed_objectives.json, and memory overview into one payload for the LLM.
+
+6. Background loop vs request-driven stepping
+There is exactly one continuous stepper: game_loop() runs in the main thread (started via game_loop(manual_mode=False) at app.py:4889) and is the only place step_environment/env.run_frame_with_buttons gets called — it always ticks at 1/current_fps even with an empty queue (idle frames pass empty actions_pressed). Two additional daemon threads run alongside: run_fastapi_server (uvicorn, app.py:4853) serving all HTTP/WS routes, and periodic_milestone_updater (app.py:445, started at :4849) which every 5s does a lightweight env.check_and_update_milestones pass without touching the frame stepping. So HTTP requests only enqueue actions/read cached state; the emulator itself is advanced by the perpetual game_loop, not per-request.
+
+I now have a solid grasp of the objectives/curriculum system (hardcoded DirectObjective sequences with completion conditions — this is the "scoring" mechanism, not an RL reward). Let me wait for the four research agents to finish before synthesizing the full answer.
+
+Continual Harness — HarnessEvolver Subsystem
+1. create_harness_evolver / HarnessEvolver
+create_harness_evolver (agents/utils/harness_evolver.py:634-645) is a thin factory returning a HarnessEvolver(vlm, run_data_manager, base_prompt_path, system_prompt_path, initial_prompt_override).
+
+HarnessEvolver.__init__ (harness_evolver.py:56-76) does not do its own LLM setup — it composes a PromptOptimizer (self.prompt_optimizer = PromptOptimizer(...), line 65) and reuses that optimizer's text-only VLM (self.text_vlm = self.prompt_optimizer.vlm, line 70) for all of its own LLM calls. It also tracks self.generation and self.evolution_log. Store handles (memory/skill/subagent) are fetched lazily via _get_memory_store/_get_skill_store/_get_subagent_store (lines 82-92), which import singletons from utils/stores/memory.py, skills.py, subagents.py.
+
+evolve(current_step, num_trajectory_steps=50) (harness_evolver.py:115-148) is the main entry point:
+
+Reads: recent trajectories via self.prompt_optimizer.get_recent_trajectories(num_trajectory_steps) (line 126), which pulls from trajectory_history.jsonl via agents/subagents/utils/trajectory_window.py's resolve_trajectory_path/read_last_jsonl_lines. If none, it returns {"skipped": True, "reason": "no_trajectories"}.
+Runs four independent passes (lines 134-144), each wrapped in try/except so one failure doesn't block the others: _evolve_prompt, _evolve_subagents, _evolve_skills, _evolve_memory.
+Writes/returns: increments self.generation, calls _save_evolution_log(current_step, results) (line 147), and returns the results dict (per-pass summaries).
+2. The four passes
+Prompt (p): _evolve_prompt (harness_evolver.py:154-164) — delegates entirely to PromptOptimizer.optimize_prompt (prompt_optimizer.py:138-247).
+Sub-agents (G): _evolve_subagents (harness_evolver.py:198-327) — builds a prompt from store.get_tree_overview() + trajectory summary + _extract_tool_failures (lines 166-196), one LLM call (line 266: self.text_vlm.get_text_query(...)), then applies create/update/retire via SubagentStore.add/update/remove (lines 274-321).
+Skills (K): _evolve_skills (harness_evolver.py:329-460) — same pattern; detects a "run_code instead of run_skill" antipattern (lines 341-357), one LLM call (line 422), applies add/update (lines 429-454).
+Memory (M): _evolve_memory (harness_evolver.py:462-563) — gathers locations_visited from trajectory pre_state, one LLM call (line 526), applies add/update (lines 533-557).
+Each pass makes exactly one LLM call to self.text_vlm.get_text_query, and parses its JSON response via the shared helper _parse_json_response (harness_evolver.py:569-593).
+
+Note: store.add(...) in BaseStore (utils/stores/base_store.py:82-108) returns a plain str entry id (line 108: return entry_id), but the three CRUD passes treat the return value as an object with .id/.name (e.g. harness_evolver.py:282-296, :431-440, :535-543). This mismatch is flagged in the repo's own notes at System-Design/architecture/implementation_gaps.md:39 — the row is still saved but the follow-up entry.id/entry.name access would raise, so results reporting for "created" entries is likely broken in practice.
+
+3. prompt_optimizer.py vs harness_evolver.py
+PromptOptimizer (prompt_optimizer.py:30-351) is the base/subset: it only rewrites the strategic base-prompt text via optimize_prompt (line 138), using its own dedicated text-only VLM instance (constructed at line 61, with tools=None). create_prompt_optimizer (line 354-356) is its factory. HarnessEvolver "subsumes" it (per the module docstring, harness_evolver.py:5) by holding a PromptOptimizer instance as self.prompt_optimizer and adding the subagent/skill/memory passes on top.
+
+In PokeAgent.__init__ (agents/PokeAgent.py:283-309): if scaffold == "continualharness", it builds a HarnessEvolver and sets self.prompt_optimizer = self.harness_evolver.prompt_optimizer (line 300). For any other scaffold (e.g. pokeagent, simple) with --enable-prompt-optimization, it instead calls create_prompt_optimizer directly (lines 303-308) — so those scaffolds get prompt-only evolution, never subagent/skill/memory CRUD.
+
+4. evolve_harness tool wiring
+Declared in agents/tools/registry.py:559-589 with "scaffolds": frozenset({"continualharness"}), parameters reasoning (required) and num_steps (default 50). build_tools_for_scaffold (registry.py:601-636) filters the static registry by scaffold, so only the continualharness scaffold gets this declaration.
+
+Gating: PokeAgent.__init__ only constructs self.harness_evolver when enable_prompt_optimization=True AND scaffold == "continualharness" (PokeAgent.py:283-301). The dispatcher (agents/PokeAgent.py:411-414 and duplicate at :1487-1489) routes function_name == "evolve_harness" to _execute_evolve_harness (PokeAgent.py:521-540), which checks if not self.harness_evolver: return {"success": False, "error": "HarnessEvolver not available..."} (line 526-527) — so without the flag, the tool exists but is a no-op stub, matching README.md:82.
+
+5. What gets persisted
+memory.json / skills.json / subagents.json — each BaseStore.save() (utils/stores/base_store.py:306-316) writes {next_id, entries} to os.path.join(cache_dir, self.file_name) immediately after every add/update/remove call (base_store.py:104, 131, 141). File names set per subclass: memory.py:53 (memory.json), skills.py:48 (skills.json), subagents.py (subagents.json, not shown but same pattern).
+Evolved prompt snapshots — PromptOptimizer._save_optimized_prompt (prompt_optimizer.py:321-347) writes run_dir/prompt_evolution/meta_prompts/steps_{start}_to_{end}.md plus a sibling _metadata.json. The original base_prompt_path file is never overwritten; only self.current_base_prompt in memory is updated (line 233).
+Evolution log — HarnessEvolver._save_evolution_log (harness_evolver.py:595-631) appends a JSON line (generation, step, per-pass created/updated/retired ids, store counts) to get_cache_path("evolution_log.jsonl").
+Agent:Check status placeholder
+IN
+This is a no-op — just reply "ok" immediately without reading any files.
+I now have everything needed. Here is the report.
+
+PokeAgent.py — lines 1350 onward
+1. run() method — top-level loop (agents/PokeAgent.py:2997-3115)
+
+run() resets self.conversation_history = [] (line 3000), logs config, then calls check_prerequisites() (3021, waits for /health on the game server). The main loop is while True: (3032):
+
+Checks self.max_steps against self.step_count to break (3034-3036).
+next_step = self.runtime.peek_next_step() (3038) — a preview of the step counter; self.step_count itself is kept in sync via an on_step_change callback registered on self.runtime at construction time (agents/PokeAgent.py:226: on_step_change=lambda step: setattr(self, "step_count", step)), so step_count updates automatically when the runtime advances (via claim_step/publish_history), not by manual increment.
+Fetches game state via _execute_function_call_by_name("get_game_state", {}) (3047), extracts screenshot_base64 from the parsed JSON (3050-3054).
+Builds the prompt: _build_optimized_prompt(...) if self.optimization_enabled else _build_structured_prompt(...) (3057-3060).
+Calls self.run_step(prompt, screenshot_b64=..., step_number=next_step) (3063). On failure, sleeps 5s and continues (3065-3068).
+Posts server metrics update, auto-saves checkpoint + agent history via /checkpoint and /save_agent_history HTTP endpoints (3078-3097), sleeps 1s (3100-3101).
+KeyboardInterrupt returns 0 after printing history; other exceptions return 1 (3103-3110).
+2. Core single-step method: run_step() (agents/PokeAgent.py:1643-2139)
+
+Given prompt, screenshot_b64, step_number: gets run_manager (trajectory logger) via get_run_data_manager() (1664), captures a pre-state snapshot by calling get_game_state again through the MCP adapter and run_manager.create_state_snapshot(raw_state) (1683-1700). Decodes the screenshot to a PIL image, validates it, checks for black frames via _is_black_frame (returns "WAIT" if black, 1742-1744). Calls self.runtime.claim_step(owner="orchestrator", interaction_name=...) (1746-1749) to claim the step slot, then invokes the VLM: self.vlm.get_query(image, prompt, ...) (image path) or self.vlm.get_text_query(prompt, ...) (text-only path), each wrapped in a ThreadPoolExecutor with a 600s timeout and up to 3 retries (1757-1824). Extensive response introspection/logging of finish_reason and content parts follows (1826-1873). It then calls self._handle_vlm_function_calls(response, tool_calls_made, tool_call_count, max_tool_calls) (1899-1901) to actually execute any tool calls. If tool calls executed: builds full_response/display_text combining extracted text + tool reasoning + "Action executed: X" (1918-1936), extracts action-specific action_details (press_buttons/navigate_to/subagent_gym_puzzle/red_puzzle_agent, 1943-1988), captures post-step coordinates via another get_game_state call after _wait_for_actions_complete() (1991-2004), publishes the function result and history via self.runtime.publish_function_result(...) and self.runtime.publish_history(...) (2009-2025), then calls _log_trajectory_for_step(...) (2030-2038), then checks optimization triggers (2043-2066). If no tool calls executed, it falls into the plain-text branch (2069-2129) which does the same publish/log/optimization steps but with empty tool_calls=[].
+
+3. _handle_vlm_function_calls (agents/PokeAgent.py:3117-3238)
+
+Validates response.candidates[0].content.parts exist. For each part with a function_call, converts protobuf args (_convert_protobuf_args), calls self._execute_function_call(function_call, allowed_tool_names=...) (3195), appends {name, args, result} to tool_calls_made (3217-3221), and if the tool was press_buttons, calls self._wait_for_actions_complete() (3224-3225). Returns True only if function calls were found and at least one was tracked. _execute_function_call itself (agents/PokeAgent.py:1444-1496) dispatches: local subagent tools via is_local_subagent_tool/get_local_subagent_spec (1470-1472), special-cased return_to_orchestrator, run_skill, run_code, evolve_harness (1475-1490), else falls through to self.mcp_adapter.call_tool(function_name, arguments) (1493) — this is the generic MCP dispatch analogous to _execute_function_call_by_name (1444 vs 396, nearly identical logic, used from the two different call sites — direct name-based calls vs. VLM-produced protobuf function_call objects).
+
+4. Conversation history / context management
+
+_add_to_history (1498-1561) appends entries to self.conversation_history and trims to the last 20 entries (1557-1559) — this is a hard cap, not driven by max_context_chars. _calculate_context_size (1563-1572) sums prompt/response/tool-call string lengths. self.max_context_chars/target_context_chars are set in __init__ (187-188, 201-202) and only referenced again in a log line at run():3014 ("Context: Max X chars (compact to Y)") — no compaction routine using these values appears in lines 1350-3337; the actual short-term memory bound is the 20-entry cap plus ACTION_HISTORY_WINDOW used in _format_action_history (2952-2995).
+
+5. Optimization triggers (agents/PokeAgent.py:2043-2066 and duplicated at 2103-2127)
+
+Gated by self.optimization_enabled. If self.harness_evolver is set, harness_evolver.should_evolve(active_step, self.optimization_window_length) gates a call to harness_evolver.evolve(current_step=active_step, num_trajectory_steps=self.optimization_window_length), followed by self._inject_evolution_summary(results) (2229-2256) which stores a human-readable summary via _store_function_result_for_context. Else if self.prompt_optimizer is set, prompt_optimizer.should_optimize(...) gates prompt_optimizer.optimize_prompt(current_step=active_step, num_trajectory_steps=self.optimization_window_length).
+
+6. _log_trajectory_for_step (agents/PokeAgent.py:2914-2950)
+
+Builds an action dict of {type: "tool_calls", tool_calls: [{name, args (minus screenshot_base64)}...], total_tool_calls} and a fixed outcome = {"success": True, "objectives_completed": []}, then calls run_manager.log_trajectory(step=step_num, reasoning=reasoning, action=action, pre_state=pre_state, outcome=outcome, llm_prompt=prompt), which per its docstring writes one entry to trajectory_history.jsonl. It is called from run_step in both the tool-call branch (2030-2038) and the plain-text branch (2091-2099), and also inside the planner loop (_run_planner_loop, at line 1356-1364, in the portion before line 1350).
+
+While waiting for those agents, let me look at the subagent runtime/registry pattern directly since it's a core piece of the "agent loop" architecture.
+
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\subagents\utils\runtime.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\subagents\utils\registry.py
+First research agent is done — I have the full main loop trace now. Let me wait for the remaining three.
+
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\subagents\utils\executor.py
+Now I have enough to write the report.
+
+1. The VLM class (utils/agent_infrastructure/vlm_backends.py:2567-2680)
+VLM is a thin dispatcher, not an abstract class itself. It holds a BACKENDS dict (line 2570) mapping "openai"→OpenAIBackend, "anthropic"→AnthropicBackend, "openrouter"→OpenRouterBackend, "gemini"→GeminiBackend, "vertex"→VertexBackend. All backends inherit from the ABC VLMBackend (line 54), which declares two abstract methods: get_query(img, text, module_name) and get_text_query(text, module_name) (lines 58-70).
+
+VLM.__init__ (2578) picks a backend class (auto-detecting from the model name via _auto_detect_backend, 2618, if backend="auto") and instantiates it with tools=self.tools, system_instruction=.... VLM.get_query/get_text_query (2633, 2660) simply forward to self.backend.get_query/get_text_query, catching exceptions to log errors that the backend itself didn't already log. So the "unification" happens by having every concrete backend implement the same two-method contract and return the same result shape: a plain str when no tools are configured, or a "Gemini-like adapter" object (.candidates[0].content.parts[...] with .text/.function_call) when tools are configured.
+
+Gemini path (GeminiBackend.get_query, 2320-2446): builds content_parts = [text, image] (images upscaled 4x via _prepare_image, 2203), calls self.model.generate_content(content_parts, tool_config={"function_calling_config": {"mode": "ANY"}}) through _call_generate_content (2249, with retry/backoff for 429/5xx). Since Gemini's native SDK response already has candidates[0].content.parts[].function_call/.text, no adapter is needed — the raw google.generativeai response is returned as-is when self.tools is set.
+
+Anthropic path (AnthropicBackend.get_query, 733-818): builds messages=[{"role":"user","content":[{"type":"text",...},{"type":"image","source":{"type":"base64","media_type":"image/png","data":...}}]}], calls client.messages.create(model=..., system=[{"type":"text","text":...,"cache_control":{"type":"ephemeral"}}], messages=..., tools=self._tools_anthropic, tool_choice={"type":"auto"}) via _call_messages (700). Anthropic's native response (response.content = list of text/tool_use blocks) is not Gemini-shaped, so _anthropic_response_adapter (558-605) converts each tool_use block into a function_call part (via shared helper _openai_tool_call_part, 73) and each text block into a text part (_openai_text_part, 87), then wraps them into synthetic Content/Candidate/ResponseAdapter objects (built with type(...)) so downstream agent code can treat all backends identically.
+
+OpenAI (Responses API, _openai_responses_adapter, 170) and OpenRouter (Chat Completions, _openrouter_response_adapter, 977) use the same adapter trick for their own response shapes.
+
+2. Tool/function declaration schema
+Yes — there is one canonical schema, Gemini-style, defined by the caller (agent code, not shown) as dicts like {"name": ..., "description": ..., "parameters": {"properties": {"prop": {"type_": "STRING"/"INTEGER"/"ARRAY"/"BOOLEAN", "description": ..., "enum": [...]}, "required": [...]}}}. Each backend translates this once at init/_setup_function_calling time:
+
+OpenAIBackend._convert_tools_to_openai_format (277) → flat Responses API format {"type":"function","name":...,"parameters":{"type":"object","properties":...,"required":...}}, via _build_json_schema_properties (296) which maps type_ values to lowercase JSON Schema types.
+AnthropicBackend._convert_tools_to_anthropic_format (670) → {"name":...,"description":...,"input_schema":{"type":"object","properties":...,"required":...}} via near-identical _build_input_schema (647).
+OpenRouterBackend._convert_tools_to_openrouter_format (1132) → nested Chat Completions format {"type":"function","function":{"name":...,"parameters":...}} via _build_json_schema_properties (1109).
+VertexBackend._setup_function_calling (1653) builds native FunctionDeclaration/Tool objects (1664, 1670).
+GeminiBackend passes the Gemini-style dicts straight through as tools=self.tools (2140) since that's the native format.
+3. run_data_manager.py
+RunDataManager.__init__ (22-70) computes a run_id (timestamp + objective id/desc + optional run_name, or run_{timestamp}) and creates run_data/{run_id}/ via _create_directory_structure (72-93), which builds 3 top-level components:
+
+prompt_evolution/llm_traces/ — for prompt-optimization data.
+end_state/{game_state,map_data,frame_cache,videos,logs}/ — final-state artifacts.
+agent_scratch_space/ — files the LLM's tool calls read/write (objectives.json, memory.json, skills.json, subagents.json, completed_objectives.json).
+initialize_run_data_manager(run_id=None, run_name=None, first_objective_id=None, first_objective_desc=None) (679-700) constructs a RunDataManager and stores it in the module-level global _run_data_manager, retrievable via get_run_data_manager() (674).
+
+get_cache_directory() (703-724) returns .pokeagent_cache/{run_id}/ (creating it), falling back to .pokeagent_cache/{RUN_DATA_ID env} or plain .pokeagent_cache/ if no run manager is initialized. get_cache_path(relative_path) (727) is get_cache_directory() / relative_path.
+
+Difference between the two directories: .pokeagent_cache/{run_id}/ is the live, working scratch/cache used during a run — it's where trajectory_history.jsonl, checkpoint.state, cumulative_metrics.json, memory.json, objectives.json, checkpoint_llm.txt, and the workspace/ (CLI sandbox, get_cli_workspace_dir, 740) actually live and get read/written continuously, and it's also what backup_manager.py zips up. run_data/{run_id}/ is the curated, archival snapshot for analysis — the various copy_* methods (copy_llm_traces, copy_game_state, copy_map_data, copy_memory, copy_skills, copy_subagents, copy_submission_log, copy_frame_cache, sync_trajectories_to_run_data, 310-631) explicitly shutil.copy2 files from the cache directory into the structured run_data tree at checkpoints/finalization, and _export_bootstrap_artifacts (449) even writes a bootstrap/ copy to both locations so a later run can --bootstrap-from either.
+
+4. llm_logger.py
+LLMLogger (20) writes one JSONL entry per interaction to llm_logs/llm_log_{session_id}.jsonl (line 43, dir defaults to "llm_logs"). log_interaction/convenience function log_llm_interaction (204, 1131) records interaction_type, prompt, response (or extracted "thinking" text for tool calls), duration, metadata (incl. token_usage: prompt/completion/total/cached/cache_write tokens), and model_info. It also updates an in-memory cumulative_metrics dict — incrementing total_llm_calls, total_tokens, total_run_time, and computing total_cost from a hardcoded per-model self.pricing table (86-154, covering GPT-5/4, o-series, Claude, Gemini) with separate cached/cache-write rates. Per-step entries append to cumulative_metrics["steps"], and log_milestone_completion/log_objective_completion (640, 719) append cumulative+delta ("split") metrics to cumulative_metrics["milestones"]/["objectives"]. save_cumulative_metrics/load_cumulative_metrics (856, 884) persist/restore this dict as cumulative_metrics.json under get_cache_path(...) (i.e., .pokeagent_cache/{run_id}/cumulative_metrics.json), gated by _metrics_write_enabled() (single-writer pattern for server vs CLI). get_llm_logger() (1103) is the module-level singleton accessor — lazily creates one LLMLogger (session id from LLM_SESSION_ID env var for multiprocess consistency) and returns it on every subsequent call.
+
+5. backup_manager.py / server_metrics.py (brief)
+backup_manager.py's create_cache_backup(objective_id, objective_description, cache_dir=None, backup_base_dir="backups") (35) zips the current .pokeagent_cache/{run_id}/ directory into backups/{run_id}/{timestamp}_{objective_id}_{desc}.zip (skipping unreadable files from containerized runs) whenever an objective completes; restore_cache_from_backup (187) and list_backups (282) handle unzip/restore and enumeration.
+
+server_metrics.py is small (57 lines) and doesn't itself write cumulative_metrics.json — that's llm_logger.py's job. Its one function, update_server_metrics(server_url="http://localhost:8000") (13), pulls the current metrics via get_llm_logger().get_cumulative_metrics() and POSTs them to the running server's /agent_step (for live UI display) and /sync_llm_metrics (to sync the CLI's in-memory metrics into the server's single-writer cumulative_metrics.json), silently ignoring connection failures.
+
+Good — this confirms the generic subagent execution engine. Now I have enough independent understanding. Let me wait for the remaining three background agents.
+
+Bash No-op placeholder
+IN
+echo "waiting for background agents"
+
+OUT
+waiting for background agents
+Three of four agents are done, giving me the harness-evolver internals and the VLM/persistence layer. Waiting on the server/app.py trace now.
+
+Bash No-op wait for final background agent
+IN
+echo waiting
+
+OUT
+waiting
+All four research agents are done. Here's the complete breakdown of Continual Harness (formerly PokéAgent Challenge) — an LLM-agent framework that plays Pokémon Emerald/Red through a headless game server.
+
+1. Codebase Structure
+Two-process architecture: a game server (owns the emulator) and an agent client (owns the LLM) talk over HTTP.
+
+Path	Purpose
+run.py	Main entry point. Spawns the server subprocess, then imports and runs a PokeAgent (or VisionOnlyAgent) instance in-process.
+run_cli.py	Alternate entry point for external CLI agents (Claude Code, Gemini CLI, Codex) via an MCP proxy instead of the in-repo agent.
+server/app.py	The most important server file. ~4600-line FastAPI app: owns the emulator, the always-running game loop, /state, /action, and every /mcp/* tool endpoint.
+server/game_tools.py	Helpers that assemble the get_game_state payload for the LLM (map text, screenshot, objective guidance).
+pokemon_env/emulator.py, memory_reader.py	EmeraldEmulator wraps mGBA; PokemonEmeraldReader reads game RAM directly (player position, badges, party, map tiles).
+pokemon_red_env/red_emulator.py	Same role, but PyBoy-backed, for Pokémon Red.
+agents/PokeAgent.py	The most important agent file (3337 lines). The whole agent loop, prompt building, tool dispatch, and subagent orchestration live here.
+agents/tools/registry.py	Single source of truth for which LLM-callable tools exist per "scaffold" (ablation setting).
+agents/subagents/	Small specialized helper agents (reflect, verify, summarize, battler, planner, gym/puzzle solver) plus shared runtime/executor/registry plumbing.
+agents/utils/harness_evolver.py	The paper's core contribution — reset-free harness self-editing.
+agents/utils/prompt_optimizer.py	Simpler prompt-only-rewrite ancestor of the harness evolver, still used by non-continualharness scaffolds.
+agents/objectives/	Hardcoded story/battle curricula (DirectObjective sequences) — this is the "scoring" mechanism, not RL reward.
+utils/agent_infrastructure/vlm_backends.py	Unified VLM wrapper over OpenAI/Anthropic/Gemini/OpenRouter/Vertex.
+utils/data_persistence/	run_data_manager.py (run directories), llm_logger.py (cost/token logging), backup_manager.py (zip snapshots).
+2. Practical Implementation Flow (what happens when you run it)
+
+python run.py --game emerald --scaffold continualharness --enable-prompt-optimization --backend gemini ...
+run.py:main() sets GAME_TYPE env var before importing agents (paths.py reads it at import time), creates a RunDataManager (run_data/{run_id}/), then calls start_server() — spawns python -m server.app --port 8000 --game emerald as a subprocess (run.py:106).
+server/app.py boots: setup_environment() (app.py:578) picks EmeraldEmulator (mGBA) or RedEmulator (PyBoy) based on GAME_TYPE, loads the ROM, and starts an always-on game_loop() in the main thread that steps the emulator at 1/fps regardless of whether the agent is calling anything. FastAPI (uvicorn) serves all HTTP routes in a separate thread.
+Back in run.py, start_custom_agent() dynamically imports agents.PokeAgent.PokeAgent and instantiates it with server_url, model, backend, scaffold (run.py:212).
+PokeAgent.__init__ (agents/PokeAgent.py:180) loads the system prompt file for the chosen scaffold (agents/prompts/paths.py picks the Red/Emerald variant), builds tool declarations via build_tools_for_scaffold(scaffold), and constructs a VLM — the model client. If --enable-prompt-optimization and scaffold=="continualharness", it also builds a HarnessEvolver.
+agent.run() (PokeAgent.py:2997) is the top-level while True loop:
+fetch get_game_state (screenshot + ASCII map + objective text) from the server,
+build the prompt,
+call run_step() (PokeAgent.py:1643).
+run_step() snapshots pre-state, calls self.vlm.get_query(image, prompt) (the actual model call, with retries/timeout), then _handle_vlm_function_calls() (PokeAgent.py:3117) parses any tool calls the model made and dispatches each through _execute_function_call.
+Tool dispatch either hits MCPToolAdapter (PokeAgent.py:99), which does POST http://localhost:8000/mcp/press_buttons etc. against the server, or runs locally for run_skill/run_code/evolve_harness/local subagents (no HTTP round-trip).
+On the server, e.g. mcp_press_buttons (app.py:3117) just enqueues a button press; the perpetual game_loop() thread actually advances mGBA/PyBoy frames and holds the button for N frames.
+Back in the agent: the step is logged to trajectory_history.jsonl via _log_trajectory_for_step, conversation history is trimmed to the last 20 entries, and — every ~25/100 steps (adaptive cadence) — the harness evolver or prompt optimizer may fire, rewriting the agent's own prompt/subagents/skills/memory.
+Loop repeats until max_steps or a termination condition (e.g., badge count for run_cli.py).
+3. Core Components
+Model/LLM usage
+utils/agent_infrastructure/vlm_backends.py defines one VLM class that dispatches to a per-provider backend (GeminiBackend, AnthropicBackend, OpenAIBackend, OpenRouterBackend, VertexBackend), all implementing the same two-method interface: get_query(image, text) / get_text_query(text). Tool declarations are written once in a Gemini-style dict schema ({"type_": "STRING"/"OBJECT"/...}) and each backend translates them into its own native tool-calling format at init. Non-Gemini backends wrap their native response (Anthropic's tool_use blocks, OpenAI's Responses API) into a synthetic Gemini-shaped object (candidates[0].content.parts[].function_call) so the rest of the agent code never branches on backend.
+
+Agent loop / decision-making
+A single ReAct-style loop: get observation → build prompt → one VLM call → execute any tool calls it requested → log → repeat. There's no separate "planner" LLM by default; planning is delegated on-demand to a planner subagent (_run_planner_loop, PokeAgent.py:1289) which runs its own mini-loop with a restricted toolset and calls replan_objectives on the server.
+
+Tools / harness / scaffolding
+agents/tools/registry.py is a flat list of tool dicts, each tagged with which --scaffold values may use it (pokeagent gets pathfinding/walkthrough/wiki; simple/continualharness get generic primitives like run_skill/run_code/process_subagent; simplest gets almost nothing). build_tools_for_scaffold() filters this list per run. This is literally how the paper's ablations (H_expert, H_min, H_auto) are implemented — same code, different tool/prompt subsets.
+
+The paper's core contribution: HarnessEvolver
+agents/utils/harness_evolver.py is only active for --scaffold continualharness --enable-prompt-optimization. Every ~25–100 steps (or on-demand via the evolve_harness tool), evolve() runs four independent LLM-analysis passes over the recent trajectory window (trajectory_history.jsonl):
+
+_evolve_prompt — rewrites the system/base prompt (delegates to PromptOptimizer.optimize_prompt).
+_evolve_subagents — LLM proposes create/update/retire ops on the subagent registry, applied to subagents.json.
+_evolve_skills — same CRUD pattern for executable "skills" (skills.json).
+_evolve_memory — same for long-term memory entries (memory.json).
+Each pass is one text_vlm.get_text_query() call parsed as JSON, wrapped in try/except so failures in one pass don't block the others. Results are appended to evolution_log.jsonl as an audit trail.
+
+Dataset/environment setup
+There's no dataset in the ML sense — the "environment" is the actual Pokémon ROM run through mGBA/PyBoy. PokemonEmeraldReader (pokemon_env/memory_reader.py) reads game state directly out of emulated RAM (coordinates, badges, party, map tiles) rather than parsing pixels.
+
+Training/fine-tuning/evaluation loop
+There's no gradient-based training in this part of the codebase — it's inference-time, in-context adaptation (the README mentions an online DAgger + PRM pipeline for weight training as future/separate work, not implemented in the files explored here). "Evaluation" is just running an episode and tracking milestone/objective completion and step count.
+
+Reward/scoring/validation
+No numeric RL reward. Progress is tracked via hardcoded DirectObjective sequences (agents/objectives/direct_objectives.py) with completion_condition strings (e.g. "location_contains_route_101"), plus milestone constants (MILESTONE_PHASES in pokemon_env/emulator.py). The model itself calls complete_direct_objective to self-report completion; a subagent_verify can double-check claims.
+
+Logging, memory, checkpoints
+Memory: memory.json/skills.json/subagents.json under .pokeagent_cache/{run_id}/, CRUD'd both by the agent (process_memory tool) and by the harness evolver.
+Trajectory log: trajectory_history.jsonl — one line per step (reasoning, action, pre-state, outcome).
+LLM logs/cost: llm_logger.py writes per-call JSONL to llm_logs/ and maintains cumulative_metrics.json (tokens, cost via a hardcoded per-model pricing table).
+Checkpoints/backups: checkpoint.state (emulator save state) + backup_manager.py zips the whole cache dir to backups/{run_id}/...zip on objective completion, restorable via --backup-state.
+Bootstrap: a finished run can export its evolved memory/skills/subagents/prompt so a new run can start from it via --bootstrap-from.
+c#29-33
+Answer briefly:
+Whats their use?
+These three constants control the adaptive cadence in should_evolve(): while current_step <= EARLY_PHASE_CUTOFF (200), evolution fires every EARLY_FREQUENCY (25) steps; once past that, it backs off to every STABLE_FREQUENCY (100) steps. The idea is to refine the harness aggressively early on (when the prompt/subagents/skills/memory are still rough) and less often later (once the harness has stabilized), avoiding constant costly re-evolution passes late in a long episode.
+
+c:\Users\LOQ\Desktop\Projects\continual-harness\agents\utils\harness_evolver.py
+Answer briefly:
+How is this system creating a "sandbox" to run generated codes?
+Where r the evolutions or the harness (prompts, skills, subagents, memory) logged/stored?
+Show less
+Sandbox (run_skill/run_code) — agents/PokeAgent.py:421-628: not a real OS sandbox, just Python's exec() with a restricted globals dict. It builds sandbox_globals containing a cut-down __builtins__ (safe primitives like range, len, json, math — no open, eval, file/os access), a tools dict of closures that proxy to mcp_adapter.call_tool(...) (so skill code can call tools['press_buttons'](...), tools['get_game_state']()), and the passed-in args. It then runs exec(code, sandbox_globals) and reads back a result variable. run_code additionally captures print() output into a StringIO. It's process-level isolation via a restricted namespace, not container/VM isolation.
+
+Where evolutions are stored:
+
+Prompt — snapshots written to run_data/{run_id}/prompt_evolution/meta_prompts/steps_{start}_to_{end}.md + a _metadata.json sibling (prompt_optimizer.py:321). The original base prompt file on disk is never overwritten — only the in-memory current_base_prompt is updated for the rest of the run.
+Subagents / Skills / Memory — each CRUD pass writes straight to .pokeagent_cache/{run_id}/subagents.json, skills.json, memory.json via BaseStore.save(), immediately after every add/update/remove.
+Audit trail of the evolve() calls themselves — .pokeagent_cache/{run_id}/evolution_log.jsonl, one JSON line per completed evolution pass (generation, step, per-pass created/updated/retired ids).
+Answer briefly:
+Where, why and how are they running codes for?
+Where — two tools in agents/PokeAgent.py: run_code (:542) and run_skill (:421), available on the pokeagent/simple/continualharness scaffolds (not simplest).
+
+Why — to let the agent turn a reasoning pattern it keeps repeating (e.g. "walk to these coordinates avoiding obstacles") into reusable Python instead of re-deriving it via an LLM call every time. run_code is for prototyping/debugging only (read-only tools, no press_buttons) — the agent tests logic before saving it. run_skill executes a saved entry from the skill library (skills.json) that has actual game-action access, so once a skill is proven, subsequent uses are a cheap deterministic function call instead of a fresh, expensive VLM turn. The HarnessEvolver's skills pass also codifies successful action sequences into skills automatically.
+
+How — both exec() the code string in a restricted sandbox: a cut-down __builtins__ (safe primitives only, no file/os/eval access) plus a tools dict of closures that proxy to mcp_adapter.call_tool(...) (so the code can call tools['press_buttons'](...), tools['get_game_state'](), etc., which round-trip over HTTP to the game server) and the caller-supplied args. run_skill additionally auto-waits for the emulator (_wait_for_actions_complete) after any press_buttons call inside the code so subsequent get_game_state() calls see the updated position. The result variable set by the code (and, for run_code, captured stdout) is returned to the agent as JSON.
+
+c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py
+Answer briefly:
+The code executed with run_code and run_skill would always have been generated from am LLM?
+Grep "code=|"code":|seed|BUILTIN_SKILL" (in c:\Users\LOQ\Desktop\Projects\continual-harness\utils\stores)
+2 lines of output
+Grep "def _default|_seed|_builtin_skills|DEFAULT_SKILLS" (in c:\Users\LOQ\Desktop\Projects\continual-harness\utils\stores\skills.py)
+1 line of output
+Yes — confirmed, no hardcoded/pre-seeded skill code exists in utils/stores/skills.py. All executed code originates from the LLM:
+
+run_code: the code argument comes directly from the VLM's tool-call arguments in that turn — the model writes it on the spot.
+run_skill: executes code stored in a skill entry (skills.json), but that field was only ever populated when the LLM itself called process_skill(action="add", ..., code=...) — either during normal play or during a HarnessEvolver skills pass (still an LLM call, just the Refiner role instead of the orchestrator).
+There's no human-authored or hardcoded code path feeding either tool — everything executed there was generated by the model at some point (either this turn, or a prior turn that got saved as a skill).
+
+
+What is the execution flow of this project?
+Trace the complete runtime from executing the main entry point until the program finishes. Show the exact sequence of function calls, classes, and files involved, preferably as a call graph or flow diagram.
+Show less
+The user's question about execution flow and architecture matches the graphify skill's trigger conditions, so I'll invoke it first.
+
+graphify skill
+Globpattern: "graphify-out/**"
+No files found
+Globpattern: "agents/*.py"
+Found 3 files
+Running the full graphify pipeline (community detection, semantic clustering) is built for broad corpus exploration, not for producing an exact ordered call sequence — which is what you asked for. I'll trace the actual code directly instead to get a precise, verifiable call graph.
+
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py
+Globpattern: "*"
+Found 101 files
+There's a System-Design/architecture/ folder with docs that likely already describe this flow, plus I need to find the actual main entry point (probably run.py). Let me check both in parallel.
+
+Globpattern: "run.py"
+Found 1 file
+Globpattern: "*.py"
+Found 101 files
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\System-Design\architecture\pokeagent.md
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\System-Design\architecture\client_server.md
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\run.py
+Grep "def run\(|def main\(|if __name__ == .__main__." (in c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py)
+2 lines of output
+Grep "def run\(self" (in c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py)
+2 lines of output
+Grep "def _handle_vlm_function_calls|def _process_step|def _add_to_history|def _log_trajectory_for_step|def _wait_for_actions_complete" (in c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py)
+2 lines of output
+Grep "def run\(self|def _handle_vlm_function_calls|def _process_step|def _add_to_history|def _log_trajectory_for_step|def _wait_for_actions_complete|def _run_step|def step\(" (in c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py)
+5 lines of output
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py (lines 2998-3117)
+Grep "def run_step\(|def check_prerequisites\(|def _build_structured_prompt\(|def _build_optimized_prompt\(|def _calculate_context_size\(" (in c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py)
+5 lines of output
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py (lines 1644-1863)
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py (lines 1863-2142)
+Now let me check _handle_vlm_function_calls (the dispatch hub) to complete the picture, plus server/app.py's main.
+
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py (lines 3118-3337)
+Grep "def _execute_function_call\(" (in c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py)
+16 lines of output
+Grep "def main\(|if __name__|def setup_environment\(" (in c:\Users\LOQ\Desktop\Projects\continual-harness\server\app.py)
+3 lines of output
+I have enough precise detail now to build an accurate, exact call-graph trace. Let me write this up as an artifact for clarity given the depth of the flow.
+
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\server\app.py (lines 4629-4688)
+artifact-design skill
+Write C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-continual-harness\12c6e066-ce3b-4b6d-aa70-81fdffd917be\scratchpad\execution-flow.html
+438 lines
+ArtifactC:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-continual-harness\12c6e066-ce3b-4b6d-aa70-81fdffd917be\scratchpad\execution-flow.html
+Published — Open artifact ↗
+I traced this directly from source rather than running the full graphify pipeline — that tool builds clustered knowledge graphs for broad exploration, which isn't suited to an exact, ordered call sequence. I built the artifact here: Execution Flow
+
+Key findings:
+
+Three processes, one entry point. run.py is a launcher, not the agent — main() spawns server.app (owns the emulator + /mcp/* HTTP routes) and frame_server (visualization) as subprocesses, then instantiates PokeAgent and calls .run() in the same process, blocking until it returns.
+The agent never touches the emulator. Every perception/action (get_game_state, press_buttons, memory, objectives...) goes through MCPToolAdapter.call_tool() → POST http://server_url/mcp/<tool> to the server process.
+The core loop (PokeAgent.run(), agents/PokeAgent.py:2997) is: fetch game state → build prompt → run_step() → VLM call → _handle_vlm_function_calls() → _execute_function_call_by_name() dispatches to either a built-in local subagent (reflect/verify/battler/planner, each its own inner loop), a sandboxed run_skill/run_code exec, or a generic HTTP tool call — then logs history/trajectory and loops.
+Shutdown unwinds back through run.py's finally block, which SIGTERMs both subprocesses before exiting.
+The artifact has the full nested call tree with exact file:line references for every hop, plus a table of the files on the critical path.
+
+How does the repository implement the Continual Harness?
+Identify every class, function, and file responsible for the Continual Harness. Explain how prompts, skills, sub-agents, memories, and the harness state are represented in code and how they interact.
+Show less
+This is a broad architecture question spanning multiple subsystems (harness evolution, prompt optimization, skills/subagent/memory stores) — I'll research it directly rather than running the full graphify pipeline again, since I already know several of the relevant files and can verify precisely with targeted reads.
+
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\System-Design\architecture\harness_evolver.md
+Globpattern: "utils/stores/*.py"
+Found 6 files
+Globpattern: "agents/prompts/**/*"
+Found 16 files
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\utils\harness_evolver.py, c:\Users\LOQ\Desktop\Projects\continual-harness\agents\utils\prompt_optimizer.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\utils\stores\base_store.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\utils\stores\memory.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\utils\stores\skills.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\utils\stores\subagents.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\prompts\paths.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\utils\stores\bootstrap.py
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\subagents\utils\executor.py
+Grep "def process_memory|def process_skill|def process_subagent|@app.post.*process_memory|@app.post.*process_skill|@app.post.*process_subagent" (in c:\Users\LOQ\Desktop\Projects\continual-harness\server\app.py)
+3 lines of output
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\System-Design\architecture\implementation_gaps.md
+Write C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-continual-harness\12c6e066-ce3b-4b6d-aa70-81fdffd917be\scratchpad\continual-harness.html
+242 lines
+ArtifactC:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-continual-harness\12c6e066-ce3b-4b6d-aa70-81fdffd917be\scratchpad\continual-harness.html
+Published — Open artifact ↗
+I traced this from source (agents/utils/harness_evolver.py, agents/utils/prompt_optimizer.py, utils/stores/*.py, agents/subagents/utils/executor.py) plus the repo's own System-Design/architecture/ docs. Full writeup: How the Continual Harness is Implemented
+
+Key points:
+
+"Continual Harness" = the continualharness scaffold + HarnessEvolver. It only activates when scaffold is continualharness, --enable-prompt-optimization is set, and a run_data_manager exists (agents/PokeAgent.py:280-309). HarnessEvolver composes a PromptOptimizer rather than replacing it.
+Four components, one base class. Skills (utils/stores/skills.py), subagents (utils/stores/subagents.py), and memory (utils/stores/memory.py) are all dataclass entries in JSON stores inheriting from BaseStore (utils/stores/base_store.py), which provides CRUD, a path-grouped tree overview (what actually gets shown in-prompt), and JSON persistence. The prompt itself is just markdown text held in PromptOptimizer.current_base_prompt — not store-backed.
+Trigger is hardcoded, not the CLI flag. HarnessEvolver.should_evolve() ignores the optimization_window_length argument for scheduling — it fires every 25 steps after a 25-step warmup, then every 100 steps past step 200. That argument only controls how many trajectory steps each pass analyzes.
+evolve() runs four isolated passes (prompt, subagents, skills, memory), each in its own try/except, each one VLM call returning JSON that's applied via the relevant store's add/update/remove.
+Writing ≠ using. Evolution only populates the stores; separate code paths consume them later — _execute_run_skill execs SkillEntry.code in a sandbox, SubagentExecutor.execute_custom_subagent runs evolved subagent configs through a generic turn loop, and memory surfaces via get_tree_overview() in every prompt.
+Cross-run continuity goes through bootstrap_stores() (utils/stores/bootstrap.py), which re-paths a prior run's three store files under bootstrapped/ and sanitizes an evolved prompt for reuse — this is separate from save-state checkpointing.
+I also surfaced three known bugs from the repo's own implementation_gaps.md (store add() return-type mismatch, a falsy-filter bug dropping legit updates, and an unwired last_modified_step field) since they affect how reliably evolution's writes actually land.
+c:\Users\LOQ\Desktop\Projects\continual-harness\agents\prompts\paths.py
+How is the Refiner implemented?
+Trace exactly what happens when refinement is triggered. Explain how trajectory windows are collected, how failures are detected, how edits are generated, and how CRUD operations modify the harness state. Compare each implementation step with the corresponding description in the paper.
+Show less
+Grep "Refiner|refiner"
+2 lines of output
+Globpattern: "**/*.pdf"
+No files found
+Globpattern: "System-Design/plans/*"
+No files found
+Grep "Refiner|refiner" (in c:\Users\LOQ\Desktop\Projects\continual-harness\README.md)
+50 lines of output
+Read c:\Users\LOQ\Desktop\Projects\continual-harness\agents\subagents\utils\trajectory_window.py
+Grep "evolve_harness" (in c:\Users\LOQ\Desktop\Projects\continual-harness\agents\tools\registry.py)
+23 lines of output
+Web Fetchhttps://arxiv.org/abs/2605.09998
+Fetched from https://arxiv.org/abs/2605.09998
+Web Fetchhttps://arxiv.org/html/2605.09998v1
+OUT
+The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). The user provided the following reason for the rejection:  https://arxiv.org/abs/2605.09998v1
+Web Fetchhttps://arxiv.org/abs/2605.09998v1
+Fetched from https://arxiv.org/abs/2605.09998v1
+Web Fetchhttps://arxiv.org/pdf/2605.09998
+OUT
+maxContentLength size of 10485760 exceeded
+Web Fetchhttps://arxiv.org/html/2605.09998v1
+Fetched from https://arxiv.org/html/2605.09998v1
+Grep "def _inject_evolution_summary" (in c:\Users\LOQ\Desktop\Projects\continual-harness\agents\PokeAgent.py)
+41 lines of output
+Write C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-continual-harness\12c6e066-ce3b-4b6d-aa70-81fdffd917be\scratchpad\refiner-trace.html
+252 lines
+ArtifactC:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-continual-harness\12c6e066-ce3b-4b6d-aa70-81fdffd917be\scratchpad\refiner-trace.html
+Published — Open artifact ↗
+Refiner: code vs. paper
+
+"Refiner" is the paper's name (arXiv:2605.09998, Karten et al., 2026) for what the code calls HarnessEvolver. Key findings from tracing the runtime path against the paper's description:
+
+Two trigger paths, only one in the paper's excerpt. The automatic per-step schedule (should_evolve: 25-step warmup, then every 25 steps up to step 200, every 100 after) matches the paper's "every F steps after warm-up W." But there's also an agent-invocable evolve_harness tool (agents/tools/registry.py:559 → PokeAgent._execute_evolve_harness) that bypasses the schedule entirely — not mentioned in the fetched paper text.
+Trajectory window ≠ trigger interval. The paper's notation τ_{t−F:t} implies the window size equals the trigger interval F. In code these are decoupled: the schedule is hardcoded, while the window size (num_trajectory_steps) is the independently configurable --optimization-window-length.
+Only 2 of the paper's 4 failure signatures are hand-coded. Tool-call failures (_extract_tool_failures) and navigation loops/blocked movement (_format_trajectories_for_analysis's coordinate comparisons) are explicit detectors. "Stalled objectives" and "missed exploration" have no dedicated code — they're left for the VLM to infer from raw trajectory text during the same call that generates edits.
+The four-pass structure matches exactly: prompt rewrite → subagent CRD → skill codify/repair → memory add/update/demote, same order, same per-component semantics (including that skills and memory have no delete path, matching the paper's "demotes importance" language for memory).
+CRUD lands through BaseStore, synchronously saving each store to JSON on every mutation — with two implementation bugs (a return-type mismatch on add(), a falsy-value filter dropping 0/""/False updates) that are bugs against the store's own contract, not paper-vs-code mismatches.
+The full comparison table and section-by-section trace (with exact file:line references) are in the artifact. Note: the paper's PDF exceeded fetch size limits, so the comparison draws on the abstract and arXiv's HTML rendering rather than the complete text — flagged in the artifact itself.
+c:\Users\LOQ\Desktop\Projects\continual-harness\agents\tools\registry.py
+Answer briefly:
+What does "scaffold" mean?
+In this repo, a scaffold is the named configuration of an agent's tool surface, prompt, and subagent access — not a different agent implementation. Scaffolds are selected via --scaffold on run.py and mapped in CUSTOM_AGENT_CONFIGS. The five (all but vision_only instantiate the same PokeAgent class):
+
+pokeagent — full tool set, built-in subagents, expert prompt (H_expert-adjacent)
+simple — minimal (H_min): no built-in subagents, orchestrator owns replan_objectives directly
+simplest — bare minimum: only press_buttons + process_memory
+continualharness — H_min plus the evolve_harness tool; becomes H_CH when --enable-prompt-optimization runs the Refiner
+autonomous_cli — legacy alias for pokeagent
+vision_only — separate VisionOnlyAgent class, no map/pathfinding tools
+Concretely, a scaffold determines: which tool declarations build_tools_for_scaffold() (agents/tools/registry.py) exposes, which system-prompt file agents/prompts/paths.py resolves, and whether the subagent registry starts seeded with built-ins or empty (EXCLUDE_BUILTIN_SUBAGENTS). It's the paper's H (harness) variable — scaffold = a specific harness instantiation.
+
+How is the co-learning/training pipeline implemented?
+Starting from the training entry point, explain the complete pipeline:
+rollout generation
+PRM scoring
+teacher relabeling
+soft SFT
+checkpoint saving
+loading the next iteration
+
+Show how this corresponds to Figure 2 in the paper.
+Show less
+Grep "DAgger|dagger|PRM|process.reward|soft.SFT|SFT"
+2 lines of output
+Globpattern: "**/*train*.py"
+No files found
+Globpattern: "**/train*/**"
+Found 19 files
+Grep "co-learning|co learning|joint training|weights|reward model|checkpoint saving|rollout" (in c:\Users\LOQ\Desktop\Projects\continual-harness\README.md)
+9 lines of output
+Grep "LoRA|fine.tune|finetun|Trainer\(|torch\.optim|gradient|backprop|reward_model|teacher.*relabel|relabel"
+2 lines of output
+Grep "^(torch|transformers|trl|peft|accelerate|deepspeed)/?[><=]" (in c:\Users\LOQ\Desktop\Projects\continual-harness\pyproject.toml)
+1 line of output
+It isn't. I checked — no rollout/PRM/DAgger/SFT/checkpoint code exists anywhere in this repo, and there are no ML training dependencies (torch, transformers, trl, peft, etc.) in pyproject.toml.
+
+The only mention of this pipeline is one sentence in README.md:
+
+"The same loop extends to joint training of an open-source model's weights via an online DAgger + process-reward-model pipeline."
+
+That describes a further extension discussed in the paper, not something this repository implements. Everything in this codebase (HarnessEvolver, PromptOptimizer, the stores) operates purely through in-context edits to prompts/subagents/skills/memory — no gradient updates, no model weights are touched anywhere in agents/, utils/, or server/.
+
+If you want, I can fetch the paper's Figure 2 and describe the conceptual pipeline it depicts (rollout → PRM scoring → teacher relabeling → soft SFT → checkpoint → next iteration) — but I'd be explaining the paper's proposal, not tracing code, since there's nothing here to trace.
+
+
+
+In this paper, do they discuss after which certain threshold/change were they updating the harness, and how were they changing the harness exactly?
+
+Short answer:
+
+Yes, they explain when the harness is updated.
+Partially, they explain how it is updated at a high level.
+No, they do not provide the concrete algorithm, prompts, thresholds, or decision rules used by the Refiner. Those details are abstracted away.
+1. When do they update the harness?
+
+The paper does not use a performance threshold like:
+
+"if success rate < X%"
+"if reward drops below Y"
+"if stuck for Z steps"
+
+Instead, the update schedule is time-based.
+
+The paper states:
+
+Every F steps after a warm-up of W steps, the Refiner reads the recent trajectory and updates the harness.
+
+So the flow is
+
+Warmup (W steps)
+
+↓
+
+Every F steps:
+
+Read recent trajectory
+
+↓
+
+Analyze failures
+
+↓
+
+Update harness
+
+↓
+
+Continue gameplay
+
+Notice that F and W are never specified anywhere in the paper.
+
+So we know updates are periodic, but not how often.
+
+2. What causes an update?
+
+Not "performance dropped."
+
+Instead:
+
+Every refinement cycle, the Refiner examines the last trajectory window
+
+τ(t−F : t)
+
+and searches for failure signatures.
+
+Specifically, they mention:
+
+navigation loops
+tool-call failures
+stalled objectives
+missed exploration opportunities
+
+So the trigger is simply
+
+Every F steps
+
+↓
+
+Look for failures
+
+↓
+
+If found,
+generate edits
+
+The paper does not say
+
+"Only update if failure score > threshold."
+
+It appears the Refiner runs every scheduled interval regardless.
+
+3. How exactly is the harness changed?
+
+This is actually the core algorithm.
+
+The harness has four editable components:
+
+Prompt
+Sub-agents
+Skills
+Memory
+
+The Refiner performs CRUD operations on each.
+
+A. Prompt
+
+It rewrites the system prompt according to observed failures.
+
+Example:
+
+Old prompt
+
+↓
+
+Agent repeatedly gets lost
+
+↓
+
+New prompt adds stronger navigation instructions
+
+The paper simply says:
+
+rewrite the prompt conditioned on identified failures and trajectory.
+
+It never explains:
+
+prompt template
+optimization method
+reflection prompt
+LLM prompt
+B. Sub-agents
+
+It
+
+creates new ones
+edits existing ones
+deletes unused ones
+
+Example from the paper:
+
+Initially:
+
+Battle Agent
+
+Later becomes
+
+Master Battle Agent
+
+↓
+
+delegates to
+
+- offense checker
+- defense checker
+- switching checker
+- status checker
+
+Figures 4, 12 and 13 show these structural rewrites.
+
+C. Skills
+
+The paper says the Refiner
+
+creates reusable skills from successful behavior
+repairs broken code
+fixes exceptions
+updates navigation tools
+
+Example:
+
+move_to()
+
+↓
+
+smart_BFS()
+
+↓
+
+robust_BFS()
+
+↓
+
+A* wrapper
+
+Figures 8 and 16 illustrate continual refinement of navigation skills.
+
+D. Memory
+
+It
+
+adds new memories
+updates stale memories
+lowers priority of obsolete memories
+
+Example:
+
+Brock uses Onix
+
+↓
+
+store
+
+↓
+
+Later:
+
+finished Brock
+
+↓
+
+lower importance
+
+Exactly how "importance" is computed is never explained.
+
+4. Is there any scoring function?
+
+No.
+
+Unlike RL papers, they never define something like
+
+score = α navigation
+      + β battle
+      + γ exploration
+
+There is no mathematical objective for refinement.
+
+The paper only says the Refiner identifies "failure signatures."
+
+5. How does the Refiner decide what to modify?
+
+This is one of the biggest missing details.
+
+The paper says it performs four passes:
+
+Prompt
+Sub-agents
+Skills
+Memory
+
+But it never explains questions like:
+
+Why modify the prompt instead of a skill?
+Why create a new sub-agent rather than edit an old one?
+How much should the prompt change?
+When should something be deleted?
+What makes a skill "successful"?
+
+Those decision policies are not described.
+
+6. Is there a threshold for creating new skills?
+
+Again, no.
+
+The paper simply says:
+
+it codifies skills from successful sequences.
+
+But it never defines:
+
+how many successful executions are required,
+what success means,
+how generalized a sequence must be before becoming a reusable skill.
+7. Is there a threshold for deleting components?
+
+No.
+
+It says:
+
+delete entries that have not been invoked productively.
+
+But it never defines:
+
+"productive,"
+inactivity duration,
+invocation count,
+success rate threshold.
+8. Does the paper reveal the actual Refiner prompt?
+
+No.
+
+It never shows:
+
+the system prompt,
+the reflection prompt,
+few-shot examples,
+editing instructions,
+LLM output schema.
+
+Those implementation details are omitted.
+
+9. What can we infer from the figures?
+
+Figures 3 and 11 provide indirect evidence of the refinement process:
+
+Updates occur continuously throughout long runs rather than only at the beginning.
+A small number of components (especially navigation and battle modules) receive repeated updates.
+Some components are completely rewritten instead of only incrementally edited.
+
+This suggests the Refiner repeatedly revisits high-impact components rather than making one-time edits.
+
+Overall assessment
+
+The paper gives a clear architectural framework but leaves many implementation details unspecified.
+
+What it specifies well
+The harness is updated periodically (every F steps after W warm-up).
+The Refiner analyzes a recent trajectory window.
+It looks for failure signatures such as navigation loops, tool failures, stalled objectives, and missed exploration.
+It edits four harness components (prompt, sub-agents, skills, memory) using CRUD-style operations.
+What it does not specify
+The values of F and W.
+Any performance or reward threshold that triggers updates.
+The prompts or algorithms used by the Refiner.
+How failures are detected internally.
+The criteria for creating, updating, or deleting harness components.
+Quantitative thresholds for "successful sequences," "productive use," or memory prioritization.
+
+So the paper explains what the Continual Harness does and when it runs at a high level, but not the concrete implementation that determines exactly how each refinement decision is made.
+
+
+What is the execution flow of this project?
+Trace the complete runtime from executing the main entry point until the program finishes. Show the exact sequence of function calls, classes, and files involved, preferably as a call graph or flow diagram.
+Show less
+Bash List project files up to 3 levels deep
+IN
+find . -maxdepth 3 -not -path '*/.git*' | sort | head -200
+
+OUT
+.
+./LICENSE
+./README.md
+./few-shot
+./few-shot/BC-self-edit.py
+./few-shot/README.md
+./few-shot/__init__.py
+./few-shot/arclib
+./few-shot/arclib/__init__.py
+./few-shot/arclib/arc.py
+./few-shot/arclib/augmenters.py
+./few-shot/arclib/eval.py
+./few-shot/arclib/messagers.py
+./few-shot/arclib/representers.py
+./few-shot/arclib/update_model.py
+./few-shot/arclib/voting.py
+./few-shot/assets
+./few-shot/assets/SEAL.png
+./few-shot/data
+./few-shot/data/arc-agi_evaluation_challenges.json
+./few-shot/data/arc-agi_evaluation_challenges_filtered_1B_eval_set.json
+./few-shot/data/arc-agi_evaluation_solutions.json
+./few-shot/data/arc-agi_evaluation_solutions_filtered_1B_eval_set.json
+./few-shot/data/arc-agi_training_challenges.json
+./few-shot/data/arc-agi_training_challenges_filtered_1B_training_set.json
+./few-shot/data/arc-agi_training_solutions.json
+./few-shot/data/arc-agi_training_solutions_filtered_1B_training_set.json
+./few-shot/data/filter_dataset.py
+./few-shot/data/sample_submission.json
+./few-shot/eval-self-edits-baseline.py
+./few-shot/eval-self-edits.py
+./few-shot/final_results.json
+./few-shot/inference
+./few-shot/inference/__init__.py
+./few-shot/inference/engine.py
+./few-shot/inference/engine_hf.py
+./few-shot/inference/engine_no_lora.py
+./few-shot/inference/engine_no_lora_vllm.py
+./few-shot/inference/engine_vllm.py
+./few-shot/inference/preprocess.py
+./few-shot/launch.sh
+./few-shot/predict_baseline.py
+./few-shot/predict_custom.py
+./few-shot/self-edit.py
+./few-shot/ttt.py
+./few-shot/utils
+./few-shot/utils/__init__.py
+./few-shot/utils/lm_api.py
+./few-shot/utils/np_cache.py
+./few-shot/utils/prompts.py
+./general-knowledge
+./general-knowledge/README.md
+./general-knowledge/__init__.py
+./general-knowledge/data
+./general-knowledge/data/squad_train.json
+./general-knowledge/data/squad_val.json
+./general-knowledge/data/synthetic_data
+./general-knowledge/results
+./general-knowledge/results/continual_self_edits
+./general-knowledge/results/cpt
+./general-knowledge/results/query_server
+./general-knowledge/scripts
+./general-knowledge/scripts/CPT.sh
+./general-knowledge/scripts/CPT_GA.sh
+./general-knowledge/scripts/CPT_fullFT.sh
+./general-knowledge/scripts/GA_server.sh
+./general-knowledge/scripts/TTT_server.sh
+./general-knowledge/scripts/continual_self_edits.sh
+./general-knowledge/scripts/make_squad_data.sh
+./general-knowledge/scripts/make_squad_data_entigraph.sh
+./general-knowledge/scripts/make_squad_data_openai.sh
+./general-knowledge/scripts/query_server.sh
+./general-knowledge/scripts/train_SFT.sh
+./general-knowledge/src
+./general-knowledge/src/EM
+./general-knowledge/src/__init__.py
+./general-knowledge/src/continual
+./general-knowledge/src/data_generation
+./general-knowledge/src/inner
+./general-knowledge/src/query
+./general-knowledge/src/utils.py
+./requirements.txt
+Read c:\Users\LOQ\Desktop\Projects\SEAL\README.md
+Read c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\README.md
+Read c:\Users\LOQ\Desktop\Projects\SEAL\general-knowledge\README.md
+This is a research codebase (SEAL) with no single main.py — it has two independent domains, each with its own multi-stage pipeline of entry scripts rather than one unified runtime:
+
+few-shot/ (ARC tasks): self-edit.py → eval-self-edits.py → BC-self-edit.py (RestEM training loop)
+general-knowledge/ (SQuAD): a chain of shell scripts (make_squad_data.sh → TTT_server.sh → query_server.sh → build_SFT_dataset.py → train_SFT.sh → continual_self_edits.sh)
+Which one would you like me to trace end-to-end? I'd lean toward few-shot's self-edit.py since it's the more self-contained single-process entry point (the general-knowledge pipeline spans multiple long-running server processes across separate SLURM jobs, which is a different kind of "runtime" to diagram).
+
+AskUserQuestion
+OUT
+Your questions have been answered: "Which execution flow should I trace?"="few-shot self-edit.py". You can now continue with these answers in mind.
+Read c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\self-edit.py
+Now let me trace the key dependencies — arclib.arc, arclib.update_model.TTT, arclib.representers, arclib.messagers, and arclib.augmenters.
+
+Read c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\arclib\update_model.py, c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\arclib\arc.py, c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\utils\prompts.py
+Grep "class (GPTTextMessageRepresenterV2|TextTaskRepresenter|TextExampleRepresenter|PythonListGridRepresenter|MessageRepresenter|TaskRepresenter)" (in c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\arclib\messagers.py)
+3 lines of output
+Grep "def encode|class Augmenter|def apply_to_task" (in c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\arclib\augmenters.py)
+8 lines of output
+I now have enough to construct a complete, accurate trace. Let me produce the flow diagram as an artifact for easier navigation.
+
+Read c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\arclib\messagers.py (lines 144-243)
+artifact-design skill
+Write C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-SEAL\f31c9427-6df4-4e70-9770-096673ea8d51\scratchpad\self-edit-trace.html
+519 lines
+<title>Execution Trace: few-shot/self-edit.py</title>
+<style>
+  :root{
+    --bg:#eef1f2;
+    --surface:#ffffff;
+    --surface-2:#e4e8e9;
+    --ink:#1b232b;
+    --muted:#5c6b74;
+    --hairline:#c9d1d3;
+    --accent:#1f7a72;      /* teal — inference / data phase */
+    --accent-soft:#1f7a7214;
+    --accent2:#a86f22;     /* ochre — training phase */
+    --accent2-soft:#a86f2214;
+    --code-bg:#f4f6f6;
+    --code-ink:#2a343b;
+    --shadow: 0 1px 2px rgba(20,30,35,.06), 0 8px 24px rgba(20,30,35,.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#11161b;
+      --surface:#161d23;
+      --surface-2:#1d252c;
+      --ink:#e8ecee;
+      --muted:#8b98a3;
+      --hairline:#2a343c;
+      --accent:#57bab1;
+      --accent-soft:#57bab11c;
+      --accent2:#d1a256;
+      --accent2-soft:#d1a2561c;
+      --code-bg:#10161b;
+      --code-ink:#cfd8dd;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 28px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#11161b; --surface:#161d23; --surface-2:#1d252c; --ink:#e8ecee; --muted:#8b98a3;
+    --hairline:#2a343c; --accent:#57bab1; --accent-soft:#57bab11c; --accent2:#d1a256; --accent2-soft:#d1a2561c;
+    --code-bg:#10161b; --code-ink:#cfd8dd; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 28px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --bg:#eef1f2; --surface:#ffffff; --surface-2:#e4e8e9; --ink:#1b232b; --muted:#5c6b74;
+    --hairline:#c9d1d3; --accent:#1f7a72; --accent-soft:#1f7a7214; --accent2:#a86f22; --accent2-soft:#a86f2214;
+    --code-bg:#f4f6f6; --code-ink:#2a343b; --shadow: 0 1px 2px rgba(20,30,35,.06), 0 8px 24px rgba(20,30,35,.05);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5;
+  }
+  .mono{
+    font-family:ui-monospace,"Cascadia Code","SF Mono",Consolas,"Liberation Mono",monospace;
+  }
+  .page{
+    max-width:900px;
+    margin:0 auto;
+    padding:56px 28px 90px;
+  }
+
+  /* ---------- Header ---------- */
+  .eyebrow{
+    font-size:12.5px;
+    font-weight:600;
+    letter-spacing:.09em;
+    text-transform:uppercase;
+    color:var(--accent);
+  }
+  h1{
+    font-size:clamp(26px,4vw,34px);
+    font-weight:700;
+    letter-spacing:-.01em;
+    margin:10px 0 6px;
+    text-wrap:balance;
+  }
+  h1 .mono{ font-weight:600; font-size:.86em; }
+  .lede{
+    color:var(--muted);
+    font-size:15.5px;
+    max-width:62ch;
+    margin:0 0 26px;
+  }
+  .invocation{
+    background:var(--code-bg);
+    border:1px solid var(--hairline);
+    border-radius:8px;
+    padding:14px 16px;
+    font-size:12.8px;
+    color:var(--code-ink);
+    overflow-x:auto;
+    white-space:pre;
+    margin-bottom:8px;
+  }
+  .invocation .flag{ color:var(--accent); }
+  .invocation .cmd{ color:var(--accent2); font-weight:600; }
+  .caption{ font-size:12.5px; color:var(--muted); margin:0 0 44px; }
+
+  /* ---------- Legend ---------- */
+  .legend{
+    display:flex; gap:22px; flex-wrap:wrap;
+    margin-bottom:40px;
+    font-size:13px;
+    color:var(--muted);
+  }
+  .legend span{ display:inline-flex; align-items:center; gap:7px; }
+  .dot{ width:9px; height:9px; border-radius:50%; display:inline-block; }
+
+  /* ---------- Pipeline ---------- */
+  .phase{
+    position:relative;
+    margin-bottom:6px;
+  }
+  .phase-head{
+    display:flex;
+    align-items:baseline;
+    gap:12px;
+    margin:46px 0 16px;
+  }
+  .phase-num{
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:.06em;
+    color:var(--surface);
+    background:var(--phase-color);
+    padding:3px 8px;
+    border-radius:5px;
+  }
+  .phase-title{
+    font-size:18px;
+    font-weight:700;
+    letter-spacing:-.005em;
+  }
+  .phase-sub{
+    font-size:13px;
+    color:var(--muted);
+    margin-left:auto;
+  }
+  .phase[data-c="setup"]{ --phase-color:#5c6b74; }
+  .phase[data-c="p1"]{ --phase-color:var(--accent); }
+  .phase[data-c="p2"]{ --phase-color:var(--accent2); }
+
+  .rail{
+    position:relative;
+    padding-left:26px;
+    border-left:2px solid var(--hairline);
+    margin-left:5px;
+  }
+  .node{
+    position:relative;
+    background:var(--surface);
+    border:1px solid var(--hairline);
+    border-radius:10px;
+    box-shadow:var(--shadow);
+    padding:14px 16px;
+    margin-bottom:12px;
+  }
+  .node::before{
+    content:"";
+    position:absolute;
+    left:-32px;
+    top:20px;
+    width:16px;
+    height:2px;
+    background:var(--hairline);
+  }
+  .node::after{
+    content:"";
+    position:absolute;
+    left:-36px;
+    top:15px;
+    width:9px;
+    height:9px;
+    border-radius:50%;
+    background:var(--node-color, var(--muted));
+    border:2px solid var(--bg);
+  }
+  .phase[data-c="setup"] .node::after{ background:#5c6b74; }
+  .phase[data-c="p1"] .node::after{ background:var(--accent); }
+  .phase[data-c="p2"] .node::after{ background:var(--accent2); }
+
+  .node-loc{
+    font-size:11.5px;
+    color:var(--muted);
+    margin-bottom:4px;
+    display:flex; gap:6px; align-items:center;
+  }
+  .node-loc .sep{ opacity:.5; }
+  .node-call{
+    font-size:14.5px;
+    font-weight:600;
+    color:var(--ink);
+    margin-bottom:5px;
+  }
+  .node-desc{
+    font-size:13.5px;
+    color:var(--muted);
+    max-width:64ch;
+  }
+  .node-desc code{
+    font-family:ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace;
+    font-size:.92em;
+    background:var(--surface-2);
+    padding:1px 5px;
+    border-radius:4px;
+    color:var(--ink);
+  }
+
+  /* nested loop wrapper */
+  .loop{
+    position:relative;
+    border:1px dashed var(--hairline);
+    border-radius:12px;
+    padding:16px 14px 4px;
+    margin:4px 0 16px;
+    background:var(--surface-2);
+  }
+  .loop-label{
+    position:absolute;
+    top:-11px;
+    left:14px;
+    background:var(--bg);
+    padding:0 8px;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+    color:var(--muted);
+  }
+  .loop .node{ background:var(--surface); }
+  .loop .node::before{ background:var(--hairline); }
+
+  .note{
+    font-size:12.8px;
+    color:var(--muted);
+    background:var(--accent-soft);
+    border-left:3px solid var(--accent);
+    padding:9px 13px;
+    border-radius:0 6px 6px 0;
+    margin:14px 0 20px;
+  }
+  .note.warn{
+    background:var(--accent2-soft);
+    border-left-color:var(--accent2);
+  }
+  .note code{ font-family:ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace; font-size:.92em; }
+
+  /* ---------- File map ---------- */
+  h2{
+    font-size:20px;
+    font-weight:700;
+    margin:52px 0 4px;
+    letter-spacing:-.005em;
+  }
+  .section-sub{ color:var(--muted); font-size:13.5px; margin:0 0 18px; }
+  .filemap{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+  }
+  .filemap th{
+    text-align:left;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+    color:var(--muted);
+    font-weight:600;
+    padding:0 12px 8px;
+    border-bottom:1px solid var(--hairline);
+  }
+  .filemap td{
+    padding:11px 12px;
+    border-bottom:1px solid var(--hairline);
+    vertical-align:top;
+  }
+  .filemap tr:last-child td{ border-bottom:none; }
+  .filemap td.path{ white-space:nowrap; color:var(--ink); font-weight:600; }
+  .filemap td.role{ color:var(--muted); }
+  .table-wrap{ overflow-x:auto; }
+
+  /* ---------- Outputs ---------- */
+  .outputs{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:14px;
+    margin-top:8px;
+  }
+  @media (max-width:640px){ .outputs{ grid-template-columns:1fr; } }
+  .out-card{
+    background:var(--surface);
+    border:1px solid var(--hairline);
+    border-radius:10px;
+    padding:14px 16px;
+    box-shadow:var(--shadow);
+  }
+  .out-card .k{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:700; margin-bottom:6px; }
+  .out-card .v{ font-size:13px; }
+
+  footer{
+    margin-top:56px;
+    padding-top:20px;
+    border-top:1px solid var(--hairline);
+    font-size:13px;
+    color:var(--muted);
+  }
+  footer .mono{ color:var(--ink); }
+</style>
+
+<div class="page">
+
+  <div class="eyebrow">SEAL — few-shot/ (ARC)</div>
+  <h1>Execution trace of <span class="mono">self-edit.py</span></h1>
+  <p class="lede">One process, two GPU-resident phases: an LLM proposes its own fine-tuning
+  recipe per task, then that recipe trains a throwaway LoRA adapter for the same task. No
+  server, no orchestration — top to bottom in a single Python interpreter.</p>
+
+  <div class="invocation mono">python <span class="cmd">self-edit.py</span> <span class="flag">--experiment_name</span>=iter1 <span class="flag">--challenge_file</span>=arc-agi_training_challenges.json <span class="flag">--solution_file</span>=arc-agi_training_solutions.json <span class="flag">--model_name</span>=meta-llama/Llama-3.2-1B-Instruct <span class="flag">--n_tasks</span>=12 <span class="flag">--n_self_edits_per_task</span>=15</div>
+  <p class="caption">Reference invocation, from few-shot/README.md § "Training on 12 Problems"</p>
+
+  <div class="legend">
+    <span><span class="dot" style="background:#5c6b74"></span>setup — runs once</span>
+    <span><span class="dot" style="background:var(--accent)"></span>phase 1 — vLLM inference</span>
+    <span><span class="dot" style="background:var(--accent2)"></span>phase 2 — LoRA training</span>
+  </div>
+
+  <!-- ================= SETUP ================= -->
+  <div class="phase" data-c="setup">
+    <div class="phase-head">
+      <span class="phase-num">SETUP</span>
+      <span class="phase-title">Parse args, load data, build formatters</span>
+      <span class="phase-sub mono">self-edit.py</span>
+    </div>
+    <div class="rail">
+
+      <div class="node">
+        <div class="node-loc mono">self-edit.py<span class="sep">:583</span></div>
+        <div class="node-call mono">__main__ → argparse.ArgumentParser().parse_args()</div>
+        <div class="node-desc">Reads the seven required flags shown above and calls <code>main(...)</code> with them.</div>
+      </div>
+
+      <div class="node">
+        <div class="node-loc mono">self-edit.py<span class="sep">:393</span></div>
+        <div class="node-call mono">main()</div>
+        <div class="node-desc">Builds a <code>LoraConfig(r=128, target_modules=[q_proj,v_proj,gate_proj,down_proj,up_proj])</code> (peft) and fixes training hyperparameters (<code>batch_size=2</code>, cosine LR schedule) used later in Phase 2.</div>
+      </div>
+
+      <div class="node">
+        <div class="node-loc mono">arclib/representers.py <span class="sep">·</span> arclib/messagers.py</div>
+        <div class="node-call mono">TextTaskRepresenter(TextExampleRepresenter(PythonListGridRepresenter())) → GPTTextMessageRepresenterV2(...)</div>
+        <div class="node-desc">Assembles the object that will later turn an ARC grid task into a chat-formatted prompt/completion pair — grids rendered as Python list literals.</div>
+      </div>
+
+      <div class="node">
+        <div class="node-loc mono">self-edit.py<span class="sep">:98</span></div>
+        <div class="node-call mono">read_tasks_from_single_file(challenge_file, solution_file)</div>
+        <div class="node-desc">Note: self-edit.py defines <em>its own</em> copy of this function, which shadows the identically-named one imported from <code>arclib.arc</code> at line 20 — the local definition wins. Loads the JSON challenges, splices in ground-truth outputs from <code>solution_file</code>, and returns a list of <code>Task</code> objects (arclib/arc.py).</div>
+      </div>
+
+      <div class="node">
+        <div class="node-loc mono">transformers</div>
+        <div class="node-call mono">AutoTokenizer.from_pretrained(model_name)</div>
+        <div class="node-desc">Loads the tokenizer for the base model (default: Llama-3.2-1B-Instruct).</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ================= PHASE 1 ================= -->
+  <div class="phase" data-c="p1">
+    <div class="phase-head">
+      <span class="phase-num">PHASE 1</span>
+      <span class="phase-title">The model writes its own training config</span>
+      <span class="phase-sub mono">self-edit.py :430–489</span>
+    </div>
+    <div class="rail">
+
+      <div class="node">
+        <div class="node-loc mono">vllm</div>
+        <div class="node-call mono">self_edit_model = LLM(model=model_name)</div>
+        <div class="node-desc">Loads the <em>same</em> base model into a vLLM engine purely for fast batched sampling — this instance never gets trained.</div>
+      </div>
+
+      <div class="loop">
+        <div class="loop-label">for i in range(n_tasks)</div>
+
+        <div class="node">
+          <div class="node-loc mono">self-edit.py<span class="sep">:368</span></div>
+          <div class="node-call mono">get_prompt(task, system_message, self_edit_prompt)</div>
+          <div class="node-desc">Serializes the task's train examples into raw grid text, appends the instructions from <code>utils/prompts.py</code>, and wraps it all in Llama-3 chat control tokens by hand.</div>
+        </div>
+
+        <div class="loop" style="margin-left:8px;">
+          <div class="loop-label">while len(configs) &lt; n_self_edits_per_task</div>
+
+          <div class="node">
+            <div class="node-loc mono">vllm</div>
+            <div class="node-call mono">self_edit_model.generate(prompt, sampling_params)</div>
+            <div class="node-desc">Samples at <code>temperature=0.8</code>. The completion is expected to be a JSON object choosing augmentation flags plus <code>learning_rate</code> / <code>num_train_epochs</code> / <code>strategy</code> — this <em>is</em> the "self-edit."</div>
+          </div>
+
+          <div class="node">
+            <div class="node-loc mono">json</div>
+            <div class="node-call mono">json.loads(response text)</div>
+            <div class="node-desc">Malformed completions are silently retried (<code>continue</code>). Valid, non-duplicate configs are appended to <code>task_configs[base_task_name]</code>.</div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="node">
+        <div class="node-loc mono">self-edit.py<span class="sep">:488</span></div>
+        <div class="node-call mono">del self_edit_model</div>
+        <div class="node-desc">Frees the GPU before the trainable model is instantiated in Phase 2.</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ================= PHASE 2 ================= -->
+  <div class="phase" data-c="p2">
+    <div class="phase-head">
+      <span class="phase-num">PHASE 2</span>
+      <span class="phase-title">Each config trains a throwaway LoRA adapter</span>
+      <span class="phase-sub mono">self-edit.py :492–579</span>
+    </div>
+    <div class="rail">
+
+      <div class="node">
+        <div class="node-loc mono">arclib/update_model.py</div>
+        <div class="node-call mono">ttt = TTT(model_name, lora_config)</div>
+        <div class="node-desc"><code>TTT.__init__</code> loads the tokenizer + <code>AutoModelForCausalLM</code> (bf16), wraps it with <code>peft.get_peft_model</code>, and snapshots the initial LoRA-A weights so every task can start from the same clean adapter.</div>
+      </div>
+
+      <div class="loop">
+        <div class="loop-label">for base_task_name, configs in task_configs.items()</div>
+
+        <div class="loop" style="margin-left:8px;">
+          <div class="loop-label">for config_data in configs</div>
+
+          <div class="node">
+            <div class="node-loc mono">self-edit.py<span class="sep">:144</span></div>
+            <div class="node-call mono">get_augmenters(use_basic, use_size, use_chain, use_repeat)</div>
+            <div class="node-desc">Translates the model's boolean flags into a concrete list of <code>arclib/augmenters.py</code> transforms — <code>Rotate</code>, <code>Flip</code>, <code>Reflect</code>, <code>IncreaseResolution</code>, <code>Chain</code>, <code>Repeat</code>, etc. An invalid config falls back to no augmentation and 0 epochs.</div>
+          </div>
+
+          <div class="node">
+            <div class="node-loc mono">self-edit.py<span class="sep">:341</span></div>
+            <div class="node-call mono">process_task(task, augmenters, representer, tokenizer, leave_n=[1,2])</div>
+            <div class="node-desc">
+              For each leave-<code>n</code>-out split, calls <code>get_formatted_data</code> →
+              <code>get_test_time_train_data</code> (builds leave-<i>n</i>-out example subsets, runs each through the augmenter list, then <code>PermuteColors</code> / <code>PermuteExamples</code>) followed by
+              <code>format_and_filter</code> (<code>representer.encode()</code> → <code>tokenizer.apply_chat_template</code> → <code>_tokenize_and_process</code>, which masks every token before the assistant turn with <code>-100</code>). Result is shuffled and capped at <code>Nmax=250</code> examples.
+            </div>
+          </div>
+
+          <div class="node">
+            <div class="node-loc mono">arclib/update_model.py</div>
+            <div class="node-call mono">ttt.update_model(task_text_list, output_dir, learning_rate, num_train_epochs, ...)</div>
+            <div class="node-desc">
+              <b>1.</b> <code>reset_lora()</code> — zeroes LoRA-B, restores the snapshotted LoRA-A, so this task starts from an untrained adapter.<br>
+              <b>2.</b> <code>_tokenize_and_process()</code> — batch-tokenizes, masks the prompt tokens (loss only on the completion, unless the config chose <code>train_using_all_tokens</code>).<br>
+              <b>3.</b> <code>_train_model()</code> — builds an HF <code>Dataset</code> / <code>TrainingArguments</code> / <code>Trainer</code> and calls <code>trainer.train()</code>.<br>
+              <b>4.</b> <code>model.save_pretrained()</code> + <code>tokenizer.save_pretrained()</code> — writes the adapter to <code class="mono">loras/self-edit/{experiment_name}/{task}/{i}/</code>.
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="node">
+        <div class="node-loc mono">self-edit.py<span class="sep">:573,576</span></div>
+        <div class="node-call mono">del ttt  →  json.dump(final_configs_and_indices, ...)</div>
+        <div class="node-desc">Frees the trainable model, then writes <code class="mono">loras/self-edit/{experiment_name}/final_configs_and_indices.json</code> — a manifest mapping each task to the configs that were actually trained. Process exits normally after the print on line 581.</div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="note warn">
+    <b>Scope note</b> — this trace covers only <span class="mono">self-edit.py</span>. Nothing here evaluates the
+    adapters; that is the separate <span class="mono">eval-self-edits.py</span> entry point, which loads the
+    <span class="mono">final_configs_and_indices.json</span> manifest and the saved LoRA directories this run produced.
+  </div>
+
+  <h2>Files touched</h2>
+  <p class="section-sub">Every module this run actually imports and executes code from.</p>
+  <div class="table-wrap">
+  <table class="filemap">
+    <tr><th>File</th><th>Role in this run</th></tr>
+    <tr><td class="path mono">self-edit.py</td><td class="role">Entry point — argument parsing, both phases, orchestration</td></tr>
+    <tr><td class="path mono">arclib/arc.py</td><td class="role"><code>Task</code> / <code>Example</code> dataclasses and (de)serialization</td></tr>
+    <tr><td class="path mono">arclib/representers.py</td><td class="role">Grid-to-text rendering (<code>TextTaskRepresenter</code>, <code>PythonListGridRepresenter</code>)</td></tr>
+    <tr><td class="path mono">arclib/messagers.py</td><td class="role"><code>GPTTextMessageRepresenterV2</code> — task → chat prompt/completion pair</td></tr>
+    <tr><td class="path mono">arclib/augmenters.py</td><td class="role">Grid augmentation transforms selected by the model's self-edit config</td></tr>
+    <tr><td class="path mono">arclib/update_model.py</td><td class="role"><code>TTT</code> class — the actual LoRA fine-tuning loop (Phase 2)</td></tr>
+    <tr><td class="path mono">utils/prompts.py</td><td class="role">Static strings: <code>system_message</code>, <code>self_edit_prompt</code></td></tr>
+  </table>
+  </div>
+
+  <h2>Artifacts on disk when it finishes</h2>
+  <div class="outputs">
+    <div class="out-card">
+      <div class="k">Per-task LoRA adapters</div>
+      <div class="v mono">loras/self-edit/{experiment_name}/{task}/{i}/</div>
+    </div>
+    <div class="out-card">
+      <div class="k">Run manifest</div>
+      <div class="v mono">loras/self-edit/{experiment_name}/final_configs_and_indices.json</div>
+    </div>
+  </div>
+
+  <footer>
+    Traced from <span class="mono">few-shot/self-edit.py</span> against the current state of the
+    <span class="mono">SEAL</span> repository (branch <span class="mono">main</span>).
+  </footer>
+
+</div>
+ArtifactC:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-SEAL\f31c9427-6df4-4e70-9770-096673ea8d51\scratchpad\self-edit-trace.html
+Published — Open artifact ↗
+Traced the full runtime and published it as a diagram: https://claude.ai/code/artifact/1bce86a5-211a-4302-979d-180482c41604
+
+Summary of the flow:
+
+Setup — main() parses args, builds a LoraConfig, assembles the grid→text formatter (TextTaskRepresenter → GPTTextMessageRepresenterV2), and loads tasks via a locally-defined read_tasks_from_single_file that shadows the identically-named import from arclib.arc.
+Phase 1 (inference) — a vLLM LLM instance samples, per task, a JSON "self-edit" config (which augmentations to use + a training strategy/LR/epochs) — this is the model choosing how to train itself. The vLLM model is then deleted to free GPU memory.
+Phase 2 (training) — a TTT object (arclib/update_model.py) loads the real trainable model with a PEFT LoRA wrapper. For every generated config: get_augmenters → process_task (leave-n-out splits, augmentation, tokenization with assistant-turn masking) build the training set, then ttt.update_model() resets the LoRA weights, tokenizes, runs an HF Trainer.train(), and saves the adapter to loras/self-edit/{experiment_name}/{task}/{i}/.
+The process writes a final_configs_and_indices.json manifest and exits — evaluation happens in a separate script (eval-self-edits.py), out of scope for this trace.
+c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\arclib\update_model.py
+Walk through one complete SEAL training episode using a concrete example.
+
+Start from a context, generate multiple self-edits, perform SFT, evaluate the adapted model, compute rewards, select successful self-edits, and update the policy. Explain every intermediate step in detail.
+Show less
+Read c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\eval-self-edits.py
+Read c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\BC-self-edit.py
+Read c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\arclib\eval.py
+Read c:\Users\LOQ\Desktop\Projects\SEAL\few-shot\arclib\voting.py
+Bash
+IN
+cd "c:/Users/LOQ/Desktop/Projects/SEAL/few-shot/data" && python -c "
+import json
+d = json.load(open('arc-agi_training_challenges_filtered_1B_training_set.json'))
+keys = list(d.keys())
+print(len(keys), keys[:5])
+k = keys[0]
+print(k)
+print(json.dumps(d[k], indent=1)[:1500])
+sol = json.load(open('arc-agi_training_solutions_filtered_1B_training_set.json'))
+print('solution', sol[k])
+"
+
+OUT
+12 ['44f52bb0', '4be741c5', '5582e5ca', '5614dbcf', '5bd6f4ac']
+44f52bb0
+{
+ "test": [
+  {
+   "input": [
+    [
+     2,
+     0,
+     2
+    ],
+    [
+     2,
+     2,
+     2
+    ],
+    [
+     2,
+     0,
+     2
+    ]
+   ]
+  },
+  {
+   "input": [
+    [
+     0,
+     0,
+     0
+    ],
+    [
+     2,
+     0,
+     0
+    ],
+    [
+     2,
+     0,
+     0
+    ]
+   ]
+  }
+ ],
+ "train": [
+  {
+   "input": [
+    [
+     2,
+     0,
+     2
+    ],
+    [
+     0,
+     2,
+     0
+    ],
+    [
+     2,
+     0,
+     2
+    ]
+   ],
+   "output": [
+    [
+     1
+    ]
+   ]
+  },
+  {
+   "input": [
+    [
+     2,
+     0,
+     0
+    ],
+    [
+     2,
+     0,
+     0
+    ],
+    [
+     0,
+     2,
+     0
+    ]
+   ],
+   "output": [
+    [
+     7
+    ]
+   ]
+  },
+  {
+   "input": [
+    [
+     2,
+     0,
+     2
+    ],
+    [
+     2,
+     0,
+     2
+    ],
+    [
+     2,
+     0,
+     2
+    ]
+   ],
+   "output": [
+    [
+     1
+    ]
+   ]
+  },
+  {
+   "input": [
+    [
+     0,
+     0,
+     0
+    ],
+    [
+     2,
+     0,
+     2
+    ],
+    [
+     0,
+     0,
+     0
+    ]
+   ],
+   "output": [
+    [
+     1
+    ]
+   ]
+  },
+  {
+   "input": [
+    [
+     2,
+     2,
+     0
+    ],
+    [
+     0,
+     2,
+     2
+    ],
+    [
+     0,
+     0,
+     0
+    ]
+   ],
+   "output": [
+    [
+     7
+    ]
+   ]
+  },
+  {
+   "input": [
+    [
+     2,
+     2,
+     0
+    ],
+    [
+     0,
+     2,
+     0
+    ],
+    [
+     0,
+     0,
+     0
+    ]
+   ],
+   "output": [
+    [
+     7
+    ]
+   ]
+  }
+ ]
+}
+solution [[[1]], [[7]]]
+Write C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-SEAL\f31c9427-6df4-4e70-9770-096673ea8d51\scratchpad\seal-episode.html
+480 lines
+<title>One SEAL Training Episode</title>
+<style>
+  :root{
+    --bg:#eef1f2; --surface:#ffffff; --surface-2:#e4e8e9;
+    --ink:#1b232b; --muted:#5c6b74; --hairline:#c9d1d3;
+    --accent:#1f7a72;      /* teal — generation / policy */
+    --accent-soft:#1f7a7214;
+    --accent2:#a86f22;     /* ochre — training / SFT */
+    --accent2-soft:#a86f2214;
+    --good:#2e8f5b; --good-soft:#2e8f5b16;
+    --bad:#c2413a;  --bad-soft:#c2413a16;
+    --code-bg:#f4f6f6; --code-ink:#2a343b;
+    --shadow: 0 1px 2px rgba(20,30,35,.06), 0 8px 24px rgba(20,30,35,.05);
+    --c0:#000; --c1:#0074D9; --c2:#FF4136; --c3:#2ECC40; --c4:#FFDC00;
+    --c5:#AAAAAA; --c6:#F012BE; --c7:#FF851B; --c8:#7FDBFF; --c9:#870C25;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#11161b; --surface:#161d23; --surface-2:#1d252c;
+      --ink:#e8ecee; --muted:#8b98a3; --hairline:#2a343c;
+      --accent:#57bab1; --accent-soft:#57bab11c;
+      --accent2:#d1a256; --accent2-soft:#d1a2561c;
+      --good:#5cbf8c; --good-soft:#5cbf8c1c; --bad:#e2837c; --bad-soft:#e2837c1c;
+      --code-bg:#10161b; --code-ink:#cfd8dd;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 28px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#11161b; --surface:#161d23; --surface-2:#1d252c; --ink:#e8ecee; --muted:#8b98a3;
+    --hairline:#2a343c; --accent:#57bab1; --accent-soft:#57bab11c; --accent2:#d1a256; --accent2-soft:#d1a2561c;
+    --good:#5cbf8c; --good-soft:#5cbf8c1c; --bad:#e2837c; --bad-soft:#e2837c1c;
+    --code-bg:#10161b; --code-ink:#cfd8dd; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 28px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --bg:#eef1f2; --surface:#ffffff; --surface-2:#e4e8e9; --ink:#1b232b; --muted:#5c6b74;
+    --hairline:#c9d1d3; --accent:#1f7a72; --accent-soft:#1f7a7214; --accent2:#a86f22; --accent2-soft:#a86f2214;
+    --good:#2e8f5b; --good-soft:#2e8f5b16; --bad:#c2413a; --bad-soft:#c2413a16;
+    --code-bg:#f4f6f6; --code-ink:#2a343b; --shadow: 0 1px 2px rgba(20,30,35,.06), 0 8px 24px rgba(20,30,35,.05);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55;
+  }
+  .mono{ font-family:ui-monospace,"Cascadia Code","SF Mono",Consolas,"Liberation Mono",monospace; }
+  .page{ max-width:920px; margin:0 auto; padding:56px 28px 90px; }
+
+  .eyebrow{ font-size:12.5px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--accent); }
+  h1{ font-size:clamp(26px,4vw,34px); font-weight:700; letter-spacing:-.01em; margin:10px 0 8px; text-wrap:balance; }
+  .lede{ color:var(--muted); font-size:15.5px; max-width:66ch; margin:0 0 36px; }
+
+  h2{ font-size:19px; font-weight:700; letter-spacing:-.005em; margin:0; }
+  .section-sub{ color:var(--muted); font-size:13.3px; margin:4px 0 0; max-width:66ch; }
+
+  /* ---- stage shell ---- */
+  .stage{ position:relative; margin:0 0 6px; padding-left:0; }
+  .stage + .stage{ margin-top:44px; }
+  .stage-head{ display:flex; align-items:flex-start; gap:14px; margin-bottom:16px; }
+  .stage-num{
+    flex:none; width:30px; height:30px; border-radius:8px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:13px; font-weight:700; color:var(--surface);
+    background:var(--stage-color, var(--muted));
+    font-variant-numeric:tabular-nums;
+  }
+  .stage[data-c="ctx"]     { --stage-color:#5c6b74; }
+  .stage[data-c="gen"]     { --stage-color:var(--accent); }
+  .stage[data-c="sft"]     { --stage-color:var(--accent2); }
+  .stage[data-c="eval"]    { --stage-color:#3f6fa8; }
+  .stage[data-c="reward"]  { --stage-color:var(--good); }
+  .stage[data-c="select"]  { --stage-color:var(--good); }
+  .stage[data-c="policy"]  { --stage-color:var(--accent); }
+
+  .stage-body{ padding-left:44px; }
+  .card{
+    background:var(--surface); border:1px solid var(--hairline); border-radius:10px;
+    box-shadow:var(--shadow); padding:16px 18px; margin-bottom:12px;
+  }
+  .card p{ margin:0 0 10px; font-size:13.8px; color:var(--ink); }
+  .card p:last-child{ margin-bottom:0; }
+  .card .loc{ font-size:11.5px; color:var(--muted); margin-bottom:8px; }
+  .card code{ font-family:ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace; font-size:.92em; background:var(--surface-2); padding:1px 5px; border-radius:4px; }
+  .card b{ font-weight:650; }
+  .card .muted{ color:var(--muted); font-size:13px; }
+
+  /* ---- ARC grids ---- */
+  .grid-row{ display:flex; flex-wrap:wrap; gap:18px; align-items:flex-end; margin:6px 0 4px; }
+  .grid-pair{ display:flex; align-items:center; gap:10px; }
+  .arc-grid{ display:grid; gap:1px; background:var(--hairline); border:1px solid var(--hairline); border-radius:3px; }
+  .arc-grid .cell{ width:15px; height:15px; }
+  .arrow{ color:var(--muted); font-size:14px; }
+  .grid-label{ font-size:10.5px; color:var(--muted); text-align:center; margin-top:5px; letter-spacing:.02em; }
+  .grid-block{ display:flex; flex-direction:column; align-items:center; }
+  .out-1{ color:var(--good); font-weight:700; }
+  .out-7{ color:var(--accent2); font-weight:700; }
+
+  /* ---- prompt / completion block ---- */
+  .chatblock{
+    background:var(--code-bg); border:1px solid var(--hairline); border-radius:8px;
+    padding:12px 14px; font-size:12px; color:var(--code-ink); overflow-x:auto; margin:8px 0;
+  }
+  .chatblock .tag{ color:var(--muted); }
+  .chatblock .user{ color:var(--ink); }
+  .chatblock .assistant{ color:var(--accent2); }
+  .chatblock pre{ margin:0; white-space:pre-wrap; font-family:inherit; }
+
+  /* ---- self-edit config cards ---- */
+  .edits{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:10px 0 4px; }
+  @media (max-width:760px){ .edits{ grid-template-columns:1fr; } }
+  .edit-card{
+    border:1px solid var(--hairline); border-radius:10px; padding:12px 14px;
+    background:var(--surface); position:relative;
+  }
+  .edit-card .id{ font-size:11px; font-weight:700; letter-spacing:.04em; color:var(--muted); text-transform:uppercase; margin-bottom:6px; }
+  .edit-card ul{ margin:0; padding-left:16px; font-size:12.3px; color:var(--ink); }
+  .edit-card li{ margin-bottom:2px; }
+  .edit-card .verdict{
+    margin-top:10px; font-size:11.5px; font-weight:700; padding:3px 8px; border-radius:5px;
+    display:inline-block;
+  }
+  .verdict.pass{ background:var(--good-soft); color:var(--good); }
+  .verdict.fail{ background:var(--bad-soft); color:var(--bad); }
+
+  .note{ font-size:12.8px; color:var(--muted); background:var(--accent-soft); border-left:3px solid var(--accent); padding:9px 13px; border-radius:0 6px 6px 0; margin:10px 0 4px; }
+  .note code{ font-family:ui-monospace,"Cascadia Code","SF Mono",Consolas,monospace; font-size:.92em; }
+
+  /* ---- reward table ---- */
+  .rtable{ width:100%; border-collapse:collapse; font-size:13px; margin-top:4px; }
+  .rtable th{ text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:600; padding:0 10px 8px; border-bottom:1px solid var(--hairline); }
+  .rtable td{ padding:9px 10px; border-bottom:1px solid var(--hairline); font-variant-numeric:tabular-nums; }
+  .rtable tr:last-child td{ border-bottom:none; }
+  .pill{ font-size:11.5px; font-weight:700; padding:2px 8px; border-radius:99px; display:inline-block; }
+  .pill.pass{ background:var(--good-soft); color:var(--good); }
+  .pill.fail{ background:var(--bad-soft); color:var(--bad); }
+  .table-wrap{ overflow-x:auto; }
+
+  /* ---- loop closure ---- */
+  .loopback{
+    margin-top:52px; border:1px dashed var(--hairline); border-radius:12px; padding:20px 22px;
+    background:var(--surface-2);
+  }
+  .loopback h3{ margin:0 0 8px; font-size:15px; font-weight:700; }
+  .loopback p{ margin:0; font-size:13.5px; color:var(--muted); max-width:66ch; }
+
+  footer{ margin-top:52px; padding-top:20px; border-top:1px solid var(--hairline); font-size:13px; color:var(--muted); }
+  footer .mono{ color:var(--ink); }
+</style>
+
+<div class="page">
+
+  <div class="eyebrow">SEAL — few-shot/ARC · one ReST-EM iteration</div>
+  <h1>One complete SEAL training episode</h1>
+  <p class="lede">Context in, policy update out. This walks the whole loop — generate self-edits,
+  fine-tune a throwaway adapter per self-edit, evaluate each adapter, score it, keep the winners,
+  and use them as supervised targets to update the self-edit-generating policy itself — using one
+  real task from the repo's training set as the running example.</p>
+
+  <!-- ============ THE TASK ============ -->
+  <div class="stage" data-c="ctx">
+    <div class="stage-head">
+      <div class="stage-num">0</div>
+      <div>
+        <h2>The context: task <span class="mono">44f52bb0</span></h2>
+        <p class="section-sub">few-shot/data/arc-agi_training_challenges_filtered_1B_training_set.json</p>
+      </div>
+    </div>
+    <div class="stage-body">
+      <div class="card">
+        <p>Six train pairs are given as the task's only supervision; two held-out test grids
+        need an output the model never sees. (Nobody tells the model the rule — shown here only
+        so the walkthrough makes sense: each 3×3 grid maps to <span class="out-1">1</span> if it's
+        left–right mirror-symmetric, <span class="out-7">7</span> if it isn't.)</p>
+
+        <div class="grid-row">
+          <div class="grid-pair">
+            <div class="grid-block">
+              <div class="arc-grid" style="grid-template-columns:repeat(3,15px)">
+                <div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c0)"></div><div class="cell" style="background:var(--c2)"></div>
+                <div class="cell" style="background:var(--c0)"></div><div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c0)"></div>
+                <div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c0)"></div><div class="cell" style="background:var(--c2)"></div>
+              </div>
+              <div class="grid-label">train 1</div>
+            </div>
+            <span class="arrow">→</span>
+            <div class="grid-block">
+              <div class="arc-grid" style="grid-template-columns:15px"><div class="cell" style="background:var(--c1)"></div></div>
+              <div class="grid-label out-1">1</div>
+            </div>
+          </div>
+
+          <div class="grid-pair">
+            <div class="grid-block">
+              <div class="arc-grid" style="grid-template-columns:repeat(3,15px)">
+                <div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c0)"></div><div class="cell" style="background:var(--c0)"></div>
+                <div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c0)"></div><div class="cell" style="background:var(--c0)"></div>
+                <div class="cell" style="background:var(--c0)"></div><div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c0)"></div>
+              </div>
+              <div class="grid-label">train 2</div>
+            </div>
+            <span class="arrow">→</span>
+            <div class="grid-block">
+              <div class="arc-grid" style="grid-template-columns:15px"><div class="cell" style="background:var(--c7)"></div></div>
+              <div class="grid-label out-7">7</div>
+            </div>
+          </div>
+
+          <div class="grid-pair">
+            <div class="grid-block">
+              <div class="arc-grid" style="grid-template-columns:repeat(3,15px)">
+                <div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c0)"></div>
+                <div class="cell" style="background:var(--c0)"></div><div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c2)"></div>
+                <div class="cell" style="background:var(--c0)"></div><div class="cell" style="background:var(--c0)"></div><div class="cell" style="background:var(--c0)"></div>
+              </div>
+              <div class="grid-label">train 5</div>
+            </div>
+            <span class="arrow">→</span>
+            <div class="grid-block">
+              <div class="arc-grid" style="grid-template-columns:15px"><div class="cell" style="background:var(--c7)"></div></div>
+              <div class="grid-label out-7">7</div>
+            </div>
+          </div>
+
+          <div class="grid-pair">
+            <div class="grid-block">
+              <div class="arc-grid" style="grid-template-columns:repeat(3,15px)">
+                <div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c0)"></div><div class="cell" style="background:var(--c2)"></div>
+                <div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c2)"></div>
+                <div class="cell" style="background:var(--c2)"></div><div class="cell" style="background:var(--c0)"></div><div class="cell" style="background:var(--c2)"></div>
+              </div>
+              <div class="grid-label">test 0 (held out)</div>
+            </div>
+            <span class="arrow">→</span>
+            <div class="grid-block">
+              <div class="arc-grid" style="grid-template-columns:15px"><div class="cell" style="background:var(--surface-2); border:1px dashed var(--hairline)"></div></div>
+              <div class="grid-label">?</div>
+            </div>
+          </div>
+        </div>
+        <p class="muted">4 of 6 train pairs and 1 of 2 test grids shown. Ground truth for test 0 is <code>[[1]]</code> — withheld from every stage below except the final reward check.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 1. GENERATE SELF-EDITS ============ -->
+  <div class="stage" data-c="gen">
+    <div class="stage-head">
+      <div class="stage-num">1</div>
+      <div>
+        <h2>Generate multiple self-edits</h2>
+        <p class="section-sub"><span class="mono">get_prompt()</span> · self-edit.py:368 &nbsp;→&nbsp; <span class="mono">self_edit_model.generate()</span> · self-edit.py:459 (vLLM, temperature 0.8)</p>
+      </div>
+    </div>
+    <div class="stage-body">
+      <div class="card">
+        <p><code>get_prompt()</code> serializes the six train pairs as raw grid text, appends the
+        fixed meta-instruction from <code>utils/prompts.py</code>, and hand-wraps it in Llama-3
+        chat tokens:</p>
+        <div class="chatblock mono">
+<pre><span class="tag">&lt;|begin_of_text|&gt;&lt;|start_header_id|&gt;system&lt;|end_header_id|&gt;</span>
+
+<span class="user">You are a helpful assistant that provide the correct output for the given task immediately.</span><span class="tag">&lt;|eot_id|&gt;&lt;|start_header_id|&gt;user&lt;|end_header_id|&gt;</span>
+
+<span class="user">Input:
+2 0 2
+0 2 0
+2 0 2
+
+Output:
+1
+... (5 more train pairs) ...
+------
+
+You are configuring a model training pipeline by selecting from predefined tools. [...]
+Respond with a valid JSON object.</span><span class="tag">&lt;|eot_id|&gt;&lt;|start_header_id|&gt;assistant&lt;|end_header_id|&gt;</span></pre>
+        </div>
+        <p>This same prompt is sampled <b>n_self_edits_per_task</b> times (3, for this walkthrough)
+        at <code>temperature=0.8</code>, so three different completions come back — three different
+        <i>self-edits</i>. Each is parsed as JSON (<code>json.loads</code>, self-edit.py:462);
+        anything that fails to parse is silently retried.</p>
+      </div>
+
+      <div class="edits">
+        <div class="edit-card">
+          <div class="id">self-edit 0</div>
+          <ul>
+            <li>basic augmentations: <b>on</b></li>
+            <li>size augmentations: off</li>
+            <li>chain augmentations: off</li>
+            <li>repeat augmentations: off</li>
+            <li>strategy: <code>output_tokens</code></li>
+            <li>lr: 1e-4 · epochs: 3</li>
+          </ul>
+        </div>
+        <div class="edit-card">
+          <div class="id">self-edit 1</div>
+          <ul>
+            <li>basic augmentations: off</li>
+            <li>size augmentations: off</li>
+            <li>chain augmentations: off</li>
+            <li>repeat augmentations: off</li>
+            <li>strategy: <code>all_tokens</code></li>
+            <li>lr: 5e-5 · epochs: 8</li>
+          </ul>
+        </div>
+        <div class="edit-card">
+          <div class="id">self-edit 2</div>
+          <ul>
+            <li>basic augmentations: <b>on</b></li>
+            <li>size augmentations: <b>on</b></li>
+            <li>chain augmentations: <b>on</b></li>
+            <li>repeat augmentations: off</li>
+            <li>strategy: <code>output_tokens</code></li>
+            <li>lr: 2e-4 · epochs: 5</li>
+          </ul>
+        </div>
+      </div>
+      <div class="note">Every prompt, raw completion, and parsed config is kept in
+        <code>task_configs["44f52bb0"]</code> — this is what later becomes
+        <code class="mono">final_configs_and_indices.json</code> (self-edit.py:576), the record
+        Step 6 reads back to find out <i>what the model said</i> for whichever self-edit turns out to work.</div>
+    </div>
+  </div>
+
+  <!-- ============ 2. SFT ============ -->
+  <div class="stage" data-c="sft">
+    <div class="stage-head">
+      <div class="stage-num">2</div>
+      <div>
+        <h2>Perform SFT — one throwaway adapter per self-edit</h2>
+        <p class="section-sub"><span class="mono">process_task()</span> · self-edit.py:341 &nbsp;→&nbsp; <span class="mono">ttt.update_model()</span> · arclib/update_model.py:74</p>
+      </div>
+    </div>
+    <div class="stage-body">
+      <div class="card">
+        <p>For <b>self-edit 0</b>: its booleans select <code>get_augmenters(include_basic=True, …)</code>
+        (self-edit.py:509) → 11 basic transforms (rotate, flip, reflect, transpose, translate).
+        <code>process_task</code> then holds out each of the 6 train pairs in turn
+        (leave-1-out and leave-2-out), runs every remaining combination through those 11
+        transforms plus color/example permutation, and keeps up to <code>Nmax=250</code>
+        synthetic (input → output) pairs — each rendered to chat text by the same
+        <code>GPTTextMessageRepresenterV2</code> from the setup phase.</p>
+        <p><code>ttt.update_model()</code> then, for this self-edit alone: resets the LoRA
+        adapter to its untrained initial state (<code>reset_lora()</code>), tokenizes the ~250
+        examples with loss masked to completion tokens only (because the strategy is
+        <code>output_tokens</code>), and runs an HF <code>Trainer</code> for
+        <b>3 epochs at lr 1e-4</b>. The result is saved to
+        <code class="mono">loras/self-edit/iter1/44f52bb0/0/</code>.</p>
+        <p class="muted">The same happens independently for self-edit 1 (→ <code class="mono">…/44f52bb0/1/</code>) and self-edit 2 (→ <code class="mono">…/44f52bb0/2/</code>) — three separate LoRA adapters, same base weights, same task, different self-chosen recipes.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 3. EVALUATE ============ -->
+  <div class="stage" data-c="eval">
+    <div class="stage-head">
+      <div class="stage-num">3</div>
+      <div>
+        <h2>Evaluate each adapted model</h2>
+        <p class="section-sub">eval-self-edits.py:249–340 (separate process, run per <span class="mono">lora_edit_idx</span>)</p>
+      </div>
+    </div>
+    <div class="stage-body">
+      <div class="card">
+        <p>For adapter index <b>0</b>: <code>get_preprocessed_tasks</code> turns the withheld
+        <b>test 0</b> grid into several augmented phrasings (rotations/flips of the same query),
+        each sent to a vLLM engine with <code>LoRARequest</code> pointed at
+        <code class="mono">…/44f52bb0/0/</code> (eval-self-edits.py:238–268). Every raw completion
+        is decoded back through the formatter and <i>un</i>-augmented with the matching inverse
+        transform (<code>inverter_fn</code>, eval-self-edits.py:294–326), then
+        <code>vote()</code> (arclib/voting.py:72) picks the two most-agreed-on grids across all
+        the augmented votes as <code>attempt_1</code> / <code>attempt_2</code>.</p>
+        <p>This repeats independently for adapter <b>1</b> and adapter <b>2</b> — three separate
+        submissions, one per self-edit — each written via
+        <code>make_submission()</code> (arclib/arc.py:239) to that run's <code class="mono">submission.json</code>.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 4. REWARD ============ -->
+  <div class="stage" data-c="reward">
+    <div class="stage-head">
+      <div class="stage-num">4</div>
+      <div>
+        <h2>Compute the reward</h2>
+        <p class="section-sub"><span class="mono">evaluate()</span> · arclib/eval.py:74 &nbsp;→&nbsp; <span class="mono">accuracy()</span> · arclib/eval.py:54</p>
+      </div>
+    </div>
+    <div class="stage-body">
+      <div class="card">
+        <p><code>accuracy(task, attempts)</code> is the entire reward function: it checks whether
+        the withheld ground truth — <code>[[1]]</code> for test 0 — appears anywhere in
+        <code>{attempt_1, attempt_2}</code>. Binary, per task, per self-edit. Run three times
+        (once per adapter) it produces <code class="mono">final_results.json</code>
+        (eval-self-edits.py:376–380), keyed by <code>lora_edit_idx</code>.</p>
+        <div class="table-wrap">
+        <table class="rtable">
+          <tr><th>self-edit</th><th>attempt_1</th><th>attempt_2</th><th>reward</th></tr>
+          <tr><td class="mono">0</td><td class="mono">[[1]]</td><td class="mono">[[7]]</td><td><span class="pill pass">correct</span></td></tr>
+          <tr><td class="mono">1</td><td class="mono">[[7]]</td><td class="mono">[[7]]</td><td><span class="pill fail">wrong</span></td></tr>
+          <tr><td class="mono">2</td><td class="mono">[[1]]</td><td class="mono">[[1]]</td><td><span class="pill pass">correct</span></td></tr>
+        </table>
+        </div>
+        <p class="muted">Self-edit 1's recipe (no augmentation, 8 epochs on raw pairs) overfit the six literal train grids without learning the symmetry rule — it guesses the majority train label, <code>7</code>, and misses. Self-edits 0 and 2 generalize to test&nbsp;0.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 5. SELECT ============ -->
+  <div class="stage" data-c="select">
+    <div class="stage-head">
+      <div class="stage-num">5</div>
+      <div>
+        <h2>Select the successful self-edits</h2>
+        <p class="section-sub">BC-self-edit.py:64–76</p>
+      </div>
+    </div>
+    <div class="stage-body">
+      <div class="card">
+        <p>For every <code>(sample_idx, task_idx)</code> where
+        <code>results[sample_idx]['correct'][task_idx]</code> is true, BC-self-edit.py looks up
+        that exact <code>task_id</code> in <code class="mono">final_configs_and_indices.json</code>
+        and pulls the original <code>prompt</code> (the Step&nbsp;1 context) and <code>response</code>
+        (the raw JSON the model generated) for that <code>sample_idx</code>. Self-edit&nbsp;1 is
+        discarded entirely — its prompt/response pair never enters training data. Self-edits 0 and
+        2 survive as <code>correct_prompts_responses</code>.</p>
+        <p class="muted">This is the whole selection mechanism: no gradient, no advantage estimate — just a hard keep/drop filter on reward, applied per task across every task in the run, then pooled into one dataset.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 6. UPDATE POLICY ============ -->
+  <div class="stage" data-c="policy">
+    <div class="stage-head">
+      <div class="stage-num">6</div>
+      <div>
+        <h2>Update the policy</h2>
+        <p class="section-sub">BC-self-edit.py:78–185 — behavior cloning on the survivors (ReST-EM)</p>
+      </div>
+    </div>
+    <div class="stage-body">
+      <div class="card">
+        <p>Each surviving pair is concatenated back into one training string —
+        <code>prompt + response + "&lt;|eot_id|&gt;"</code> (BC-self-edit.py:80) — so the model
+        is trained to reproduce the <i>same context → self-edit JSON</i> mapping it already
+        produced, but now only for the self-edits that actually paid off downstream. Labels before
+        the last assistant header are masked to <code>-100</code> (BC-self-edit.py:100–110), so
+        the loss lands purely on the JSON completion, exactly like Step&nbsp;2 but one level up —
+        the target here is a <i>self-edit</i>, not a grid.</p>
+        <p>A fresh LoRA (<code>r=16</code>) is trained on this pooled dataset across all
+        <code>n_tasks</code>, then <code>merge_and_unload()</code> folds it back into full
+        precision weights, saved to <code class="mono">RL_trained_model</code>
+        (BC-self-edit.py:154–180). The self-edit–<i>generating</i> model has been updated —
+        not the grid-solving adapters, which were always disposable.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="loopback">
+    <h3>The loop closes here</h3>
+    <p><code class="mono">RL_trained_model</code> is not a checkpoint on a shelf — per
+    few-shot/README.md § "SEAL RL Iteration 1", it becomes <code class="mono">--model_name</code>
+    for the <i>next</i> call to <code class="mono">self-edit.py</code>. Step&nbsp;1 runs again with
+    a policy that now generates self-edits shaped more like #0 and #2 — the recipes that were
+    shown, empirically, to produce test-time adapters that actually generalize.</p>
+  </div>
+
+  <footer>
+    Traced against <span class="mono">few-shot/self-edit.py</span>, <span class="mono">eval-self-edits.py</span>,
+    <span class="mono">BC-self-edit.py</span>, <span class="mono">arclib/eval.py</span>, and
+    <span class="mono">arclib/voting.py</span> in the current <span class="mono">SEAL</span> repository.
+    Example task: <span class="mono">44f52bb0</span>, few-shot/data/arc-agi_training_challenges_filtered_1B_training_set.json.
+    Self-edit texts, LoRA hyperparameters, and reward outcomes above are illustrative — sampled from
+    the model at <code class="mono">temperature=0.8</code>, they vary run to run; the mechanism they
+    move through does not.
+  </footer>
+
+</div>
+ArtifactC:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-SEAL\f31c9427-6df4-4e70-9770-096673ea8d51\scratchpad\seal-episode.html
+Published — Open artifact ↗
+Published the full episode walkthrough: https://claude.ai/code/artifact/e91c91a7-2406-46c6-b4d6-6eb46221cac2
+
+It traces one complete ReST-EM iteration using a real task from the repo (44f52bb0, a left-right-symmetry classifier) across all four scripts:
+
+Context — the 6 train pairs + held-out test grid, exactly as loaded from the ARC JSON.
+Generate self-edits (self-edit.py:368,459) — get_prompt() builds the chat prompt from the task; the self-edit model is sampled 3× at temperature 0.8, producing 3 different JSON training recipes.
+SFT (self-edit.py:341, arclib/update_model.py:74) — each recipe's augmentation flags build a synthetic leave-n-out dataset, and ttt.update_model() trains a fresh, disposable LoRA adapter per self-edit.
+Evaluate (eval-self-edits.py:249-340) — each adapter is loaded via vLLM LoRARequest, queried on the withheld test grid through augmented rephrasings, and vote() aggregates the predictions.
+Reward (arclib/eval.py:54,74) — accuracy() is a binary check: did the ground truth land in the two submitted attempts. One self-edit's overfit recipe fails; two generalize.
+Select (BC-self-edit.py:64-76) — only the (prompt, response) pairs behind correct adapters are kept.
+Update the policy (BC-self-edit.py:78-185) — those survivors become SFT targets for the self-edit-generating model itself, merged into RL_trained_model.
+The closing note ties it back to the README: RL_trained_model becomes next iteration's --model_name, closing the loop.
+
+Answer briefly:
+If a model/server is running and accepting requests, how can it simultaneously make the changes on it, i.e. update parameters?
+Grep "class.*Server|def handle|zmq|recv|send|while True" (in c:\Users\LOQ\Desktop\Projects\SEAL\general-knowledge\src)
+7 lines of output
+Grep "while True|recv|send|def main|socket" (in c:\Users\LOQ\Desktop\Projects\SEAL\general-knowledge\src\inner\TTT_server.py)
+10 lines of output
+It doesn't do both truly simultaneously — it's a synchronous req/reply loop, not a concurrent service.
+
+TTT_server.py (general-knowledge/src/inner/TTT_server.py:145-370) opens a ZMQ REP socket and blocks in while True: msg = sock.recv_json() → train/eval → sock.send_json(reply). REP sockets are strictly synchronous: it can't recv a new request until it has send'd the reply to the current one. So while it's updating the LoRA weights for request A, it's simply not listening — request B just blocks/queues at the socket layer until A's reply goes out.
+
+So "accepting requests" and "updating parameters" aren't concurrent operations sharing the model — they're serialized: one request fully owns the model (reset adapter → train → eval → reply) before the next is even read off the wire.
+
+Answer briefly:
+How is it exactly changing the model? Is it versioning?
+Read c:\Users\LOQ\Desktop\Projects\SEAL\general-knowledge\src\inner\TTT_server.py
+No versioning — it's a fresh, disposable LoRA every request, discarded afterward.
+
+The base weights never change. Each request wraps them in a brand-new get_peft_model(base_model, lora_cfg) (line 296) — a new LoRA adapter attached to the same shared base.
+That adapter trains (trainer.train()), gets saved to a per-step temp dir, loaded into vLLM for eval, then unload_adapter() + shutil.rmtree(tmp_dir) (lines 339-341) — deleted after the reply is sent.
+Next request repeats from scratch: new LoraConfig, new adapter, base model untouched throughout.
+So it's not versioning (no lineage of saved checkpoints kept per request) — it's reset-and-discard: the base model is a fixed foundation, and "updating parameters" means bolting on and then throwing away a small adapter per request, purely to measure adapter_gain (accuracy delta), not to persist any change.
+
+Answer briefly:
+how is it that the base model is not changing? Isnt following the flow:
+We generate self-edits, create disposable LoRA for each SE, train the model (LoRA) based on the SE, pick the best-one, discard the rest, use the best one to update the original/base model...then repeat
+Show less
+Grep "prompt|response|completion|adapter_gain|correct" ]" (in c:\Users\LOQ\Desktop\Projects\SEAL\general-knowledge\src\EM\build_SFT_dataset.py)
+10 lines of output
+That's the key correction: the "best" LoRA's weights are never used to update anything — they're deleted. What survives is the text of the best self-edit.
+
+The actual loop is:
+
+Generate self-edits (text completions describing training data/strategy) from the policy model.
+For each, TTT_server trains a disposable LoRA, evaluates it, reports back adapter_gain as a reward — then deletes that LoRA (shutil.rmtree, unload_adapter).
+build_SFT_dataset.py ranks completions by that reward metric (adapter_mean) and keeps the top-k {prompt, completion} pairs (line 62-66) — i.e., "here's the context, here's the self-edit text that scored well."
+train_SFT.sh does ordinary supervised fine-tuning of the policy model (the one that writes self-edits) on those winning (prompt → completion) pairs.
+So "update the base model" doesn't mean merge the winning LoRA into it — the LoRA that produced the winning score is thrown away along with the losers. It means: distill the winning behavior (the self-edit text that led to a good adapter) back into the policy via a fresh SFT pass, the same way BC-self-edit.py does in few-shot/. Two different models are involved — the disposable "answerer" that TTT_server resets every request, and the persistent "self-edit generator" that actually gets retrained — and only the latter accumulates change across rounds.
+
+How exactly is this "inferencing" the model?
+Read c:\Users\LOQ\Desktop\Projects\SEAL\general-knowledge\src\utils.py
+Two separate model instances are involved, and "inference" happens entirely on the second one via HTTP, not inside TTT_server.py itself.
+
+Training happens locally in TTT_server.py's own process: base_model (loaded once via AutoModelForCausalLM.from_pretrained) + a fresh peft LoRA wrapper, trained with HF Trainer, then lora_model.save_pretrained(adapter_path) — written to disk, never used to generate text itself.
+Inference happens on a separately-running vLLM OpenAI-compatible API server (started independently, its URL passed in as --vllm_api_url). utils.py's generate() just POSTs to {vllm_api_url}/v1/completions (utils.py:97-102) with model=<name> and gets back completions over HTTP — that server does the actual forward passes.
+The two are stitched together via vLLM's dynamic LoRA endpoints: load_adapter() POSTs the saved adapter path to /v1/load_lora_adapter (utils.py:89-90), registering it under a name (e.g. inner_TTT_3); generate() is then called with model=adapter_name to run inference through that adapter; unload_adapter() POSTs to /v1/unload_lora_adapter afterward.
+Baseline accuracy uses the identical generate() call but with model=args.model — the un-adapted base, served by that same vLLM instance.
+So: HF/Trainer only ever trains, on-disk adapter files are the handoff, and vLLM is the only thing that ever "runs" the model to produce text — for both the baseline and the adapted case.
+
+Does it use a stored model "version" during inferencing?
+No — there's no version history at all, just one fixed base checkpoint plus a same-named, overwritten temp adapter.
+
+The base model vLLM serves is whatever checkpoint path was passed at vLLM server startup (outside this script) — loaded once into GPU memory and never reloaded or swapped during the whole run. Every baseline inference call just references it by that fixed name/path.
+The adapter isn't versioned either — it's referenced by a throwaway name derived from the step counter (tmp_tag = f"inner_TTT_{step}", TTT_server.py:242) and a temp dir (models/tmp_{port}_{tmp_tag}). It's load_lora_adapter'd into vLLM right before its eval calls, then unload_lora_adapter'd and shutil.rmtree'd immediately after (TTT_server.py:339-341) — gone before the next request even starts.
+So there's no persistent "v1, v2, v3..." of the model being tracked or selected between — just one unchanging base checkpoint in vLLM's memory, and a same-slot scratch adapter that gets created, used for exactly one request's worth of inference calls, and deleted. The step number in the tmp-dir name is only there so concurrent/successive runs on the same port don't collide on disk, not to preserve history.
+
+"Inference happens on a separately-running vLLM OpenAI-compatible API server (started independently, its URL passed in as --vllm_api_url). utils.py's generate() just POSTs to {vllm_api_url}/v1/completions (utils.py:97-102) with model=<name> and gets back completions over HTTP — that server does the actual forward passes."
+
+What do u mean? Which llm are we exactly trying to improve? Are we not using that improved/fine-tuned model during inferencing?
+Show less
+Good question — I conflated two different models in that explanation. Let me separate them cleanly.
+
+Yes, the fine-tuned (adapter) model is used for inference — that's the whole point of the inner loop. When TTT_server calls generate(..., answer_model_ref=adapter_name, ...) (TTT_server.py:323-330), those completions really do come from vLLM running the LoRA-adapted weights, not the base. adapter_texts/adapter_accuracy are genuine outputs of the improved model.
+
+The catch is what that inference is for. It's not serving a user — it's a measurement: "if we actually kept this self-edit, would the model get better at these questions?" Once that yes/no (adapter_gain) is recorded, the adapter itself is deleted. Its job was to produce a reward number, not to be a deliverable.
+
+So there are two different things you could mean by "the model we're improving":
+
+Loop	Model	What happens to it
+Inner (TTT_server.py)	the QA "answerer" (e.g. Qwen2.5-7B)	Gets a real LoRA, gets real inference run on it, gets scored — then discarded every request. Never persists.
+Outer (build_SFT_dataset.py → train_SFT.sh)	the self-edit generator — the model that writes the synthetic training text fed into the inner loop	Gets ordinary SFT, gradient updates saved to a real checkpoint on disk. This is the model that actually accumulates improvement across the whole run.
+Concretely: the outer driver (query_server.py/CPT.py) samples several candidate self-edits from the generator for an article, sends each through TTT_server to get an adapter_gain, then build_SFT_dataset.py keeps the top-scoring {prompt, completion} pairs and train_SFT.sh fine-tunes the generator on them. Next round, the generator (now slightly better at writing self-edits that produce high adapter_gain) produces the candidates, and the cycle repeats — same structure as RL_trained_model in the few-shot/ARC pipeline we walked through earlier.
+
+So: the model you interact with afterward, that actually got better and whose improvement sticks, is the self-edit generator — not the disposable LoRA answerer that briefly existed just to grade one self-edit.
+
+"Gets ordinary SFT, gradient updates saved to a real checkpoint on disk. This is the model that actually accumulates improvement across the whole run."
+
+Give more about this
+Show less
+Read c:\Users\LOQ\Desktop\Projects\SEAL\general-knowledge\scripts\train_SFT.sh
+Read c:\Users\LOQ\Desktop\Projects\SEAL\general-knowledge\scripts\continual_self_edits.sh
+Read c:\Users\LOQ\Desktop\Projects\SEAL\general-knowledge\src\EM\train_SFT.py
+Read c:\Users\LOQ\Desktop\Projects\SEAL\general-knowledge\src\EM\build_SFT_dataset.py
+Here's the concrete mechanics of that outer-loop update — it's a real, compounding checkpoint lineage, not a metaphor.
+
+1. Where the training examples come from
+query_server.py samples several candidate self-edits per article from the current model, sends each one through TTT_server (the inner loop we've been discussing) to get an adapter_mean score, and writes everything — every candidate completion plus its score — to a run_*.json file (general-knowledge/results/query_server/...).
+
+2. Filtering to the winners
+build_SFT_dataset.py reads that file and, per article, keeps only the top-k completions ranked by adapter_mean (build_SFT_dataset.py:20-30) — with the default k_best=1, literally just the single self-edit that produced the best downstream QA accuracy in the inner loop. Output is a flat JSONL of {"prompt": ..., "completion": ...} rows — one file, e.g. sft_best1of5_iter0.jsonl.
+
+3. The actual training run
+train_SFT.py (invoked by train_SFT.sh via accelerate launch across 2 GPUs with DeepSpeed ZeRO-3) loads a base checkpoint, wraps it in a new LoRA config (r=64, alpha=128 — different hyperparameters than the inner loop's disposable one), and runs SFTTrainer.train() on that filtered dataset for real: 2 epochs, lr 3e-4, full backprop, no reward signal involved anymore — it's just "reproduce this prompt→completion pair," ordinary supervised fine-tuning.
+
+4. The critical step — merge, not adapter
+
+
+peft_model = trainer.model
+merged_model = peft_model.merge_and_unload()   # train_SFT.py:84-85
+merged_model.save_pretrained(args.output_dir)
+Unlike the inner loop, this LoRA gets merged directly into the dense weights and saved as a complete standalone checkpoint (models/iter1/ — full config.json + weight shards + tokenizer, not an adapter folder). There's no "load this adapter on top of the base" step afterward; models/iter1 is the new base model.
+
+5. Why this is what "accumulates"
+train_SFT.sh:13 spells it out in a comment: MODEL_NAME should be *"the (n-1)'th RL checkpoint... this script trains the n'th checkpoint... the 0'th checkpoint is the base model."So round 2 doesn't start from the original Qwen2.5-7B again — it starts frommodels/iter1, the merged output of round 1. That same checkpoint is then what gets loaded into vLLM to *both* answer questions **and** generate the next batch of candidate self-edits (continual_self_edits.sh:15: MODEL_NAME="Qwen/Qwen2.5-7B" # ... use the last RL checkpoint`).
+
+So the "generator" and the "answerer" aren't actually two different models — they're the same weights at any given round. What's disposable is only the per-request LoRA inside TTT_server, used purely to score one candidate self-edit. What's permanent is this checkpoint chain: iter0 (base) → iter1 → iter2 → ..., each one produced by real SFT on the best self-edits the previous checkpoint was able to generate — exactly the same iterative-improvement structure as RL_trained_model in the few-shot/ARC pipeline.
+
+Answer briefly:
+"models/iter1" Where r these checkpoints saved?
+Wherever the script's working directory is when it runs — train_SFT.sh:10 does cd ~/SEAL first, and OUTPUT_DIR="models/iter1" is a relative path (train_SFT.sh:15), so it resolves to ~/SEAL/models/iter1/ (i.e. <repo-root>/models/iter1/).
+
+That's a plain local directory, not a registry — just wherever mkdir -p "${OUTPUT_DIR}" (line 16) creates it and merged_model.save_pretrained(args.output_dir) writes the checkpoint. It's on you to point the next round's MODEL_NAME at that same path (per the comment on train_SFT.sh:13) — nothing in the pipeline auto-discovers or tracks it.
+
+Answer briefly:
+Consider we have completed 3 iterations, so now there is a base model, model/iter1, model/iter2, and model/iter3. Now a new request has arrived. Which model will be chosen for this request and where is it decided/implemented in the code?
+Show less
+Read c:\Users\LOQ\Desktop\Projects\SEAL\general-knowledge\scripts\TTT_server.sh
+Read c:\Users\LOQ\Desktop\Projects\SEAL\general-knowledge\scripts\query_server.sh
+There's no selection logic in the code at all — it's a hardcoded string you edit by hand.
+
+vllm serve "${MODEL_NAME}" (TTT_server.sh:37) loads whichever path is literally written in MODEL_NAME="Qwen/Qwen2.5-7B" at TTT_server.sh:13 — the comment there even says "HF model name or path to RL checkpoint (e.g. models/iter1)", i.e. after iteration 3 you'd manually change that line to models/iter3 and relaunch the server.
+
+So: you decide, not the code. There is no runtime router, no "latest checkpoint" lookup, no version registry — a new request just gets whatever model vLLM was started with. If a run is currently pointed at models/iter2, every request goes to iter2 until someone kills the job, edits the shell variable, and restarts TTT_server.sh/vllm serve against models/iter3.
+==========================================================SEAL Paper Code base ============================================================

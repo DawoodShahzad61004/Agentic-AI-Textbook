@@ -1,0 +1,1 @@
+{"nodes": [{"id": "chat19_python_logging", "label": "Python Named Logger", "file_type": "code", "source_file": "Chats/Chat 19 (June 15).txt", "source_location": "logging.getLogger(__name__)", "source_url": null, "captured_at": null, "author": null, "contributor": null}], "edges": [], "hyperedges": []}

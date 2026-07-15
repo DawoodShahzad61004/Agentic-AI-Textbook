@@ -1,0 +1,111 @@
+Bug 1 — Thumbdown feedback is injected into the prompt, but the agent ignores it. The "self-learning from thumbdowns" loop produces zero behavior change.
+The system did find the thumbdown record and did inject it. But the LLM's first response (the three retrieval queries) is byte-for-byte identical to the thumbdown one's.
+Root cause. The injection is structurally correct but operationally inert. Three contributing factors:
+The instructions in _build_system_prompt only tell the model what to avoid, not what to seek. The block in agent_query reads: "AVOID re-using the same query reformulations… AVOID grounding your answer in the same chunks… Try genuinely different angles." It never says "the user's specific feedback below is the priority signal — generate at least one query that directly targets the missing content." So the LLM sees the feedback text as a passive avoidance hint, not as an active retrieval target.
+_PROCESS_INSTRUCTIONS is appended last with the comment "PROCESS goes LAST — closest to the user message". That puts the avoid-these-old-queries instruction far from the user message, and the process steps nearest it. Recency biases the model toward the process steps over the thumbdown context.
+The "blocked variants" list is empty on Q83 even though the prior failure exists. Look at how failed_variants_store is written: in _handle_retrieve_documents_call, a variant is only added to newly_failed when retrieval returns "No relevant..." or when validate-retrieval drops every chunk. 
+Fix:
+When a thumbdown is recorded, add all variants from that run to failed_variants_store[norm], not just the ones that returned zero chunks. The user has just told you these reformulations led to a bad answer — that's the definition of a failed variant.
+In _build_system_prompt, when prior_thumbdowns is non-empty, prepend the user_feedback as an explicit positive instruction near the user message, e.g.: "PRIORITY — the user has provided specific feedback about what was missing. You MUST generate at least one retrieve_documents query that directly targets the topics as per the feedback
+Bug 2 — check_answer_quality has no access to the thumbdown history, so it green-lights the re-asked answer even when it's still missing the user-flagged content.
+Root cause. make_check_answer_quality in tools.py takes only (answer, context, query). There is no prior_thumbdowns parameter, and the orchestrator never passes the user's prior feedback in. So the judge has no idea what "good" should look like for this specific question and rubber-stamps any reasonably-grounded answer. The result is that the system appears to have learned (it injected context, it generated a longer answer) but the JUDGE phase can't detect that the user's actual complaint wasn't addressed — meaning the loop will not retry retrieval with different angles, which would be the natural escape hatch when Bug 1 fails.
+Fix. Plumb prior_thumbdowns (or at least the user_feedback strings) through to check_answer_quality, and have the grounding prompt explicitly check: "The user previously flagged an answer to this same question as bad with this feedback: '…'. Does the new answer address that specific feedback? If not, return INSUFFICIENT." When INSUFFICIENT is returned for this reason, the orchestrator should reset to RETRIEVE with the unused query angles, which is already the wired-up code path for INSUFFICIENT verdicts.
+
+Show less
+15 May
+I'll analyze all three files carefully before implementing the fixes.
+
+
+Viewed 4 files
+Viewed 4 files
+Now I have a thorough understanding of both bugs. Let me implement the fixes:
+
+Bug 1 has three sub-fixes:
+
+In _handle_retrieve_documents_call: add ALL variants (not just zero-chunk ones) to newly_failed when a thumbdown exists for this query
+In _build_system_prompt: restructure the thumbdown block to be an active positive instruction near the user message, ahead of _PROCESS_INSTRUCTIONS
+In main(): when thumbdowns exist, also pre-populate failed_variants_store with their variants
+Bug 2: Plumb prior_thumbdowns through run_agent → check_answer_quality, update make_check_answer_quality in tools.py to accept and use it, and surface a thumbdown-specific INSUFFICIENT reason that feeds the retry loop.
+
+
+Copy files to working directory
+Copy files to working directory
+Fix 1a — tools.py: plumb prior_thumbdowns into make_check_answer_quality
+
+Edited 3 files
+Edited 3 files
+Now add the _extract_thumbdown_feedback helper at module level, just before make_check_answer_quality:
+
+
+Add _extract_thumbdown_feedback helper before make_check_answer_quality
+Add _extract_thumbdown_feedback helper before make_check_answer_quality
+Now fix agent_query.py. Starting with Bug 1a: seed failed_variants_store from thumbdowns at query time, and record ALL variants (not just zero-chunk ones) as failed when thumbdowns exist.
+
+First, fix _handle_retrieve_documents_call to mark all variants as failed when the run is thumbdown-flagged. This requires passing prior_thumbdowns into run_agent's inner scope — it's already there as a closure variable. We just need to add the logic at the end of a successful retrieval:
+
+
+In _handle_retrieve_documents_call: mark every variant as newly_failed when prior thumbdowns exist for this query, so the whole prior search space is blocked
+In _handle_retrieve_documents_call: mark every variant as newly_failed when prior thumbdowns exist for this query, so the whole prior search space is blocked
+Now fix Bug 1b: restructure _build_system_prompt so the thumbdown feedback becomes an active positive instruction placed immediately before the user message (i.e. after _PROCESS_INSTRUCTIONS), not buried in the middle as a passive avoidance hint:
+
+
+Restructure _build_system_prompt: split thumbdown block into (a) a passive avoid-block near _ROLE_AND_RULES and (b) an active PRIORITY block appended last, just before the user message
+Restructure _build_system_prompt: split thumbdown block into (a) a passive avoid-block near _ROLE_AND_RULES and (b) an active PRIORITY block appended last, just before the user message
+Now fix Bug 1c: pre-populate failed_variants_store from thumbdown records in main() before run_agent is called, so the blocked variants list is non-empty on the very first retry:
+
+
+Pre-populate blocked variants from thumbdown history before passing to run_agent
+Pre-populate blocked variants from thumbdown history before passing to run_agent
+Now fix Bug 2: plumb prior_thumbdowns through run_agent into the JUDGE phase call to check_answer_quality:
+
+
+Pass prior_thumbdowns to check_answer_quality in the JUDGE phase
+Pass prior_thumbdowns to check_answer_quality in the JUDGE phase
+Now let's verify the final state of both files looks exactly right at all the changed locations:
+
+
+Verify all changed lines are present in both files
+Verify all changed lines are present in both files
+Everything's wired up. Copy the fixed files to output:
+
+
+Ran a command, read a file
+Ran a command, read a file
+Here's a precise account of every change made and the reasoning behind each one.
+
+Bug 1 — Three changes in agent_query.py
+1a. Pre-seed blocked from thumbdown variants in main() (lines ~1024–1032)
+Before: blocked = failed_variants_store.get(norm, []) — a read from a file that only contained variants which returned zero chunks from retrieval.
+
+After: After loading from the file, the code iterates every prior_thumbdown record and adds each of its variant queries to blocked if not already present.
+
+Why this fixes it: failed_variants_store was written by _handle_retrieve_documents_call only when retrieval returned "No relevant..." or the judge dropped every chunk. Q83's variants returned some chunks — they just led to a bad answer. The user said so. So the file was empty for that query, and blocked was []. Now, thumbdown records are the authoritative source of "we already know these queries produced a bad result," and they populate the blocked list regardless of chunk count.
+
+1b. Mark all thumbdown-run variants as newly_failed in _handle_retrieve_documents_call (lines ~517–519)
+Before: A variant was appended to newly_failed only when retrieval returned nothing or the judge dropped all chunks.
+
+After: At the end of a successful retrieval, if prior_thumbdowns is non-empty for this run, the query is added to newly_failed unconditionally (unless already there from an earlier failure).
+
+Why this fixes it: This feeds back into failed_variants_store at the end of the run. Even if the current retry also fails to satisfy the user, the new variants it tried won't appear in the blocked list for the next retry — unless we record them now. Combined with 1a, this means each retry progressively eliminates more of the search space.
+
+1c. Restructure _build_system_prompt — split passive history from active priority (lines ~101–185)
+Before: A single USER-FLAGGED PRIOR FAILURE block listing what to avoid was inserted between _ROLE_AND_RULES and _PROCESS_INSTRUCTIONS. The user's feedback text appeared inside that block with no special weight. _PROCESS_INSTRUCTIONS was appended last.
+
+After: The history/avoidance block stays near _ROLE_AND_RULES. Then _PROCESS_INSTRUCTIONS is appended. Then, if and only if there are thumbdowns with non-empty user_feedback strings, a new PRIORITY — USER FEEDBACK MUST BE ADDRESSED block is appended last — closest to the user message.
+
+Why this fixes it: Two factors were making the injection inert. First, "avoid X" without "seek Y" gives the model no positive retrieval target. The new block is phrased as a mandatory objective: "you MUST generate at least one query that directly targets the topics described in this feedback." Second, the recency effect in transformer attention means instructions nearest the user message have the strongest influence on the immediate next generation (the retrieval queries). Placing the active directive last exploits this rather than fighting it.
+
+Bug 2 — Changes across tools.py
+2a. New GROUNDING_PROMPT_WITH_THUMBDOWN prompt constant
+A second grading prompt that adds a third evaluation criterion: "Does the new answer specifically address the gap the user flagged in their prior feedback? If not, return INSUFFICIENT." The {thumbdown_feedback} placeholder is filled from all prior thumbdowns' user_feedback strings.
+
+2b. _extract_thumbdown_feedback helper
+Collects and concatenates all non-empty user_feedback strings from the thumbdown list. Returns "" when there's nothing, so the code path is identical to the non-thumbdown case.
+
+2c. check_answer_quality signature extended with prior_thumbdowns=None
+When prior_thumbdowns contains at least one record with feedback, GROUNDING_PROMPT_WITH_THUMBDOWN is used and the judge is tagged CAQ-JUDGE-TD in logs. When there's no feedback, the original GROUNDING_PROMPT and CAQ-JUDGE tag are used — no change in behaviour for ordinary queries.
+
+2d. Call site in JUDGE phase (agent_query.py line ~797)
+prior_thumbdowns=prior_thumbdowns added to the check_answer_quality(...) call. prior_thumbdowns is already in scope as a parameter of run_agent, so no additional plumbing is needed.
+
+Why this fixes it: The judge previously had no idea what "good" meant for this specific question beyond generic grounding. Now, if the user said "the answer didn't mention X," the judge will return INSUFFICIENT if X is still absent — which triggers the existing retry-with-new-queries path that was already wired up but never activated for this failure mode.

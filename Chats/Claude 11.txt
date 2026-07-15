@@ -1,0 +1,234 @@
+Let me read the debug file and the relevant code sections carefully before diagnosing anything.Viewed 2 filesViewed 2 filesNow I have a complete picture of all the bugs. Let me catalogue every problem before touching a line of code.
+Bug 1 — Scanner LLM produces intra-chunk groups, which the judge then receives as valid input.
+Chunk 0 in window [0:3] is the NAC-merged chunk: it contains sentences from two originally separate chunks, now stitched together. The scanner correctly sees that several sentences in chunk 0 all describe what an ASD is, and groups them — but they're all at chunk_index=0. Rule 5 in _DC_SCAN_PROMPT says this is invalid, but the scanner ignores it because the merged chunk looks like one document. The structural validator in _deduplicate_compression must reject any group where all members share the same chunk_index before passing anything to the judge.
+Bug 2 — The judge receives the malformed group and produces 7 verdicts for 1 group, one per member, instead of 1 verdict for the group.
+The judge prompt says "one object per proposed group" but the LLM treated each member as a separate entity to judge. This is a prompt misunderstanding caused by the group being malformed (7 members, 5 of which are from the same chunk). The judge iterated over members rather than groups. This is a secondary consequence of Bug 1 — fix Bug 1 and this never reaches the judge.
+**Bug 3 — The judge response contains ````jsonfences and prose after the array, so_strip_code_fencesfails and the greedy regex[[\s\S]*]succeeds but returns the full 7-item array. Sinceverdict_mapmaps bygroup_index, and all 7 items have group_index: 0, only the last one survives — which happens to be CONFIRMED. So a wrongly-confirmed group slips through.** This is the direct cause of the actual removal (chunk 1: INSTALLED cleaned version ✓). The fix: reject in the structural validator (Bug 1 fix), but also harden the judge response parser to strip trailing prose after the closing ]`.
+Bug 4 — validate_redundancy receives valid_groups as list[list[dict]] but the judge prompt calls _REDUNDANCY_JUDGE_PROMPT.format(groups_block=groups_block) where groups_block is built from groups: list[list[dict]] — correct. But the judge's output uses group_index referencing the position in valid_groups, not in flagged. After structural filtering, valid_groups may be a subset of flagged, so group_index 0 in the judge's output might not match valid_groups[0]. Currently it always does because only valid groups are passed, but the indexing assumption is fragile.
+The fix: the groups block in the prompt must label groups by their index in valid_groups (0, 1, 2…), and the mapping back uses those same indices. This is already correct as implemented — valid_groups is indexed 0..N-1 and the prompt labels them Group 0, Group 1… No change needed here, but the cross-chunk guard (Bug 1) must happen before valid_groups is built.
+Bug 5 — Window [3:6] judge parse fails because the LLM wraps its output in ```json fences. _strip_code_fences in _safe_json_parse strips one leading/trailing fence, but here the raw response from validate_redundancy is parsed with a different path that only does raw.replace("```json", "").replace("```python", "").replace("```", ""). This does strip the fences in validate_redundancy — but the parse failure logged says "failed to parse JSON". Looking at the raw:
+```json\n[\n  {...}\n]\n```\n
+```
+After the three replaces the string becomes `\n[\n  {...}\n]\n` which *should* parse. The real issue is the prose that follows — `"Explanation:\n..."` — which makes the full string unparseable as JSON. The outer `re.search(r"\[[\s\S]*\]", cleaned)` captures everything up to the last `]` including the prose inside backtick-fenced explanation sections. Need to strip trailing non-JSON prose after the closing `]`.
+
+Now fix everything:Viewed a file, edited a fileViewed a file, edited a fileNow fix the JSON parser in validate_redundancy to truncate trailing prose after the closing ]:Viewed 2 files, edited a fileViewed 2 files, edited a fileNow fix the verdict_map build to handle the duplicate group_index case: when the LLM emits multiple items for the same group_index, the last one wins — which is exactly the behaviour that let a CONFIRMED slip through. Add explicit deduplication that takes the first (most confident) verdict per group, and then add a second sanity check: a group_index returned by the judge that is >= len(groups) is nonsensical and must be dropped.Harden verdict_map build: deduplicate on group_index (keep first), drop out-of-range indicesHarden verdict_map build: deduplicate on group_index (keep first), drop out-of-range indicesNow verify both files look correct end-to-end:Ran 2 commandsRan 2 commandsAll three fixes are in place. Here's a precise account of every bug found and what was done.
+
+Root causes and fixes
+Bug 1 — Scanner produces intra-chunk groups; structural validator let them through (agent_query.py)
+What happened: Chunk 0 in window [0:3] was the NAC-merged chunk — two originally separate source chunks joined into one. It therefore contained multiple sentences all about what an ASD is. The scanner LLM correctly noticed they were semantically related, but incorrectly grouped them within chunk 0 (five members all with chunk_index=0, plus one from chunk 1 and one from chunk 2). Rule 5 of _DC_SCAN_PROMPT explicitly prohibits this, but the scanner ignored it.
+Fix: After building clean_members, the structural validator now computes unique_chunk_indices = {m["chunk_index"] for m in clean_members}. If len(unique_chunk_indices) < 2, the group is dropped with an explanatory log line. No group whose members all originate from the same chunk can ever reach the judge.
+
+Bug 2 — Judge receives the malformed 7-member group and iterates over members instead of groups (validators.py)
+What happened: Because Bug 1 let a 7-member group through, the judge saw a group with 5 members from chunk 0, 1 from chunk 1, 1 from chunk 2. The judge reasoned about each member individually rather than the group as a whole, emitting 7 verdict objects all with group_index: 0. The last one was CONFIRMED, which the old verdict_map build recorded (last-write wins), bypassing the 6 correct REJECTED verdicts before it.
+This bug is fully prevented by Bug 1's fix, but two independent hardening measures were added anyway:
+Fix A — First verdict wins: verdict_map now only records the first valid verdict for each group_index. If the LLM emits 7 items for group 0, only the first is kept. Since the first verdict in the observed response was REJECTED, this alone would have blocked the erroneous install.
+Fix B — Out-of-range index guard: Any group_index that is < 0 or >= len(groups) is silently dropped. This prevents hallucinated group indices from polluting the verdict map.
+
+Bug 3 — Trailing prose after the closing ] broke the JSON parser, then the greedy regex captured too much (validators.py)
+What happened: The LLM appended an "Explanation:" block after the JSON array. This made json.loads(cleaned) fail. The fallback re.search(r"\[[\s\S]*\]", cleaned) is greedy — it matches from the first [ to the last ] in the entire string, which included the prose section and returned a malformed span for window [3:6], causing the "failed to parse JSON" log and silently skipping all three valid REJECTED verdicts.
+Fix: The greedy regex is replaced with a bracket-counting extraction. Starting from the first [, the code increments a depth counter on [ and decrements on ], stopping when depth returns to 0. This finds the exact closing ] of the outermost array regardless of what follows it, making the parser immune to trailing prose, explanation sections, or any other LLM commentary appended after the valid JSON.
+
+Looking at the debug output, the redundancy judge is incorrectly rejecting genuinely redundant groups. The problem is clear:
+
+Group 1: "An Adjustable Speed Drive is an electronic or electromechanical system used to control the speed, torque, and direction..." vs "Adjustable Speed Drives provide precise control over motor speed and torque" — these ARE about the same subject (ASDs in general), yet the judge says "Different subjects: motor speed control vs motor speed and torque."
+Group 2: Same issue — the judge is treating minor wording differences as "different subjects."
+
+The root cause is the judge prompt's Rule 3 ("Different subjects = REJECTED") is being misapplied. The judge is treating slight variations in how the subject is described as if they were different entities, even when both sentences clearly refer to the same thing (ASDs).
+Here's the fix — tighten Rule 3 with a concrete example of when subjects ARE the same, and add a clarifying Rule 0 about the scope of "same subject":Viewed 2 filesViewed 2 filesThe issue is clear. Rule 3 only gives an example of named individuals (Dawood/Umair), so the model pattern-matches "different wording" → "different subjects." I need to:
+
+Clarify Rule 3 to specify it means named distinct entities, not the same class described differently
+Strengthen Rule 1 with an explicit "same technology class = same subject" example
+Add a pre-check step that forces the model to identify the subject before judging
+Fix the redundancy judge prompt to prevent misidentifying same-subject sentences as different subjectsFix the redundancy judge prompt to prevent misidentifying same-subject sentences as different subjectsNow let me verify the change looks right and check the DC scanner prompt for the same pattern (it also feeds into this pipeline):Verify the updated prompt in contextVerify the updated prompt in contextGood. Now let me also copy the fixed file to outputs so you can download it:Ran a command, read a fileRan a command, read a fileHere's what was wrong and what changed:
+Root cause: The judge LLM was misapplying Rule 3 ("Different subjects = REJECTED"). The original rule only showed named-person examples (Dawood/Umair), so the model over-generalized — treating "ASD" vs "Adjustable Speed Drives" vs "these drives" as different subjects, when they're all just different names for the same technology class.
+Three specific fixes in _REDUNDANCY_JUDGE_PROMPT:
+
+Added a STEP 0 "subject identification" primer — forces the model to first identify the real-world entity before applying any rule, and explicitly shows that "ASD", "Adjustable Speed Drive", "an ASD" all map to the same subject.
+Rewrote Rule 3 from "Different subjects = REJECTED" to "Different named entities = REJECTED" — with a CRITICAL note clarifying it only applies to genuinely distinct entities (different people, different companies), not to the same entity described with different words. Added a positive example showing ASD/Adjustable Speed Drives as the same subject.
+Added a second GOOD example to Rule 1 that mirrors the exact pattern from your debug output — "An ASD is an electronic system used to control motor speed, torque, and direction" vs "Adjustable Speed Drives provide precise control over motor speed and torque" — so the model sees a concrete precedent for confirming that pattern.
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────
+  [DC] Running Deduplication Compression after NAC...
+──────────────────────────────────────────────────────────────────────
+  [DC] Deduplication Compression — 4 chunk(s), window=3
+──────────────────────────────────────────────────────────────────────
+  [DC] scanning window [0:3] (3 chunk(s))
+  [DC] 1 redundancy group(s) identified in this window:
+    chunk_index=0  sentence="An Adjustable Speed Drive is a system designed to vary the speed of an electric motor by controlling electrical input pa"
+    chunk_index=0  sentence="An Adjustable Speed Drive is a system designed to vary the speed of an electric motor by controlling electrical input pa"
+    chunk_index=0  sentence="An Adjustable Speed Drive is a system designed to vary the speed of an electric motor by controlling electrical input pa"
+    chunk_index=0  sentence="The primary purpose of an Adjustable Speed Drive is to match motor speed with the actual requirements of the process or "
+    chunk_index=0  sentence="An Adjustable Speed Drive is an electronic or electromechanical system used to control the speed, torque, and direction "
+    chunk_index=0  sentence="Adjustable Speed Drives are considered one of the most significant technological advancements in industrial automation b"
+    chunk_index=0  sentence="By adjusting motor speed according to load requirements, industries can optimize performance while minimizing electricit"
+    chunk_index=1  sentence="Modern Adjustable Speed Drives replaced these mechanical approaches with electronic control systems that provide greater"
+    chunk_index=2  sentence="The Adjustable Speed Drive also controls acceleration and deceleration rates. Instead of starting abruptly, the motor ca"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-REDUNDANCY] judging 1 group(s) across 3 chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-REDUNDANCY] failed to parse JSON — treating all groups as REJECTED
+  raw: Here's the output in the specified format:
+```json
+[
+  {
+    "group_index": 0,
+    "verdict": "REJECTED",
+    "reason": "Different named entities: 'An Adjustable Speed Drive is a system designed to vary the speed of an electric motor by controlling electrical input parameters such as voltage, frequency, or current [Source: ..\\data\\Adjustable Speed Drive.txt.]" and 'The primary purpose of an Adj
+  [DC] no groups confirmed as genuinely redundant — skipping window
+  [DC] done — 0 redundant passage(s) removed across 4 chunk(s)
+──────────────────────────────────────────────────────────────────────
+
+Show more
+15:15
+Claude responded: Looking at the debug output and your code, I can see two bugs:
+Looking at the debug output and your code, I can see two bugs:
+
+The DC scanner LLM is grouping sentences from the same chunk (all chunk_index=0), which your structural validator correctly filters — but only after wasting a judge call.
+The judge LLM wraps its response in markdown code fences, and your bracket-counting parser in validate_redundancy fails to extract the JSON because the truncated reason string contains an unmatched [ from [Source: ...], confusing the depth counter.
+Let me look at the debug file to confirm and check for other patterns.
+
+
+Viewed 2 files
+Viewed 2 files
+Now I have the full picture. There are three distinct bugs:
+
+Scanner LLM groups sentences all from chunk_index=0 — the merged chunk from NAC has inline [Source: ...] tags with backslashes, which confuse the LLM into treating each cited sentence as a separate "version" from a different source. It's hallucinating intra-chunk redundancy.
+The judge LLM's JSON is valid (lines 106-121 show clean JSON), but the validate_redundancy bracket-counter fails because the [Source: ...] inside the sentence strings contain [ characters that throw off the depth counting — it finds the closing ] of a source citation rather than the outer array.
+dc_debug.txt is writing embedding arrays — the accumulated_chunks list being written to the debug file includes numpy embedding vectors, causing massive log bloat.
+Here are the fixes for all three:
+
+
+Check the truncated redundancy judge response
+Check the truncated redundancy judge response
+Now I have the full picture. Here's a precise summary of all the bugs and the fixes:
+
+Root causes:
+
+Scanner over-groups — the NAC-merged chunk has inline [Source: ...] tags, so the scanner LLM sees what looks like "the same sentence from multiple sources" and lumps them all into one giant group (all chunk_index=0). Your structural validator correctly kills it, but you waste a judge call.
+Bracket-counter breaks on [Source: ...] — the depth-counter in validate_redundancy finds the [ inside [Source: ...] inside a sentence string and miscounts, so it extracts a truncated/broken JSON fragment instead of the full array. The judge actually returns valid JSON with code fences, but the extractor mangles it.
+dc_debug.txt logs raw numpy arrays — writing str(result) where result contains chunks with embedding numpy arrays produces megabytes of floats.
+Fixes:
+
+Bug 1 (scanner): Strip [Source: ...] inline citations from chunk content before sending to the DC scanner prompt. They're noise for deduplication and actively mislead the LLM.
+Bug 2 (parser): Replace the hand-rolled bracket-counter with a proper approach: strip fences first, then try json.loads, then use re.search with a non-greedy/DOTALL match on \[.*\] — but the real fix is to use Python's json decoder in streaming/incremental mode, or simply find the last ] in the string after the first [. The cleanest fix: use json.loads after fence-stripping (which works if the LLM output is otherwise clean), and fall back to finding everything between the first [ and the last ].
+Bug 3 (debug log): Exclude embedding keys when serialising chunks to dc_debug.txt.
+
+Read agent_query.py lines around the DC functions to find exact edit points
+Read agent_query.py lines around the DC functions to find exact edit points
+Now I'll create the fixed agent_query.py. There are three targeted changes:
+
+
+Viewed 2 files
+Viewed 2 files
+Now I have all three locations. Let me also check the validate_redundancy bracket-counter in validators.py:
+
+
+Viewed 2 files
+Viewed 2 files
+Now I see the bracket-counter bug clearly. It counts [ and ] inside JSON string values (like [Source: ...]), which throws off the depth. The fix is to use a proper JSON-aware scan that ignores brackets inside strings. The simplest correct fix: find the first [, then find the last ] in the whole string — since this is a top-level array, the outermost ] is always the last one.
+
+Let me now make all three fixes:
+
+
+Copy project files to working dir for editing
+Copy project files to working dir for editing
+Fix 1: Strip [Source: ...] from chunk content before building the DC scanner prompt (in agent_query.py):
+
+
+Strip inline [Source: ...] citations from chunk content before feeding to the DC scanner LLM, to prevent it from treating citation tags as separate-source markers
+Strip inline [Source: ...] citations from chunk content before feeding to the DC scanner LLM, to prevent it from treating citation tags as separate-source markers
+Fix 2: Fix the debug log to exclude numpy embedding arrays (in agent_query.py):
+
+
+Exclude embedding arrays from dc_debug.txt final result log to prevent megabytes of float output
+Exclude embedding arrays from dc_debug.txt final result log to prevent megabytes of float output
+Fix 3: Replace the broken bracket-counter with a first-[ / last-] extractor (in validators.py):
+
+
+Replace the bracket-counting JSON extractor with a first-[/last-] approach that is immune to brackets inside JSON string values (e.g. [Source: ...] tags)
+Replace the bracket-counting JSON extractor with a first-[/last-] approach that is immune to brackets inside JSON string values (e.g. [Source: ...] tags)
+Now copy the fixed files to outputs:
+
+
+Ran a command, read a file
+Ran a command, read a file
+Three bugs fixed across two files:
+
+Bug 1 — Scanner LLM groups intra-chunk sentences (agent_query.py, _deduplicate_compression)
+
+The NAC-merged chunk has inline [Source: filename] tags appended to each sentence. The scanner LLM reads these as evidence that each sentence comes from a different source, so it groups multiple sentences all from chunk_index=0 together into one giant "redundancy group". Your structural validator correctly rejects it (cross-chunk guard), but you waste a judge LLM call every time.
+
+Fix: Strip [Source: ...] tags from chunk content with a regex before building the DC scanner prompt. The source is already declared in the --- chunk N (source: ...) --- header, so nothing is lost.
+
+Bug 2 — JSON parser breaks on [Source: ...] inside strings (validators.py, validate_redundancy)
+
+The judge LLM returned perfectly valid JSON wrapped in ```json ``` fences. The fence-stripping worked, and json.loads on Step 1 should have succeeded — but it didn't because the judge's reason strings contained unescaped [Source: ...] patterns with backslash paths, which Python's JSON parser rejected. The fallback bracket-counter then found the first [ inside a reason string value and stopped at the matching ] inside [Source: ...], extracting a broken fragment.
+
+Fix: Replace the depth-counting loop with cleaned[first_'[' : last_']' + 1]. Since the outermost structure is a JSON array, the first [ is always the array open and the last ] is always the array close — this is immune to any brackets inside string values.
+
+Bug 3 — dc_debug.txt logs raw numpy embedding arrays (agent_query.py, _deduplicate_compression)
+
+str(result) on the final chunk list serialises the embedding numpy arrays as thousands of floats, producing hundreds of KB per run.
+
+Fix: Build a loggable copy that excludes the "embedding" key and serialise it with json.dumps.
+
+
+Add the layer of LLM-Based Compression after the DC layer. It should be compressed  Query-focused and Instruction-guided.16:15Claude responded: Now I have a clear picture of the codebase.Read the agent_query.py to understand the DC layer integration pointRead the agent_query.py to understand the DC layer integration pointNow I have a clear picture of the codebase. Let me implement the LLM-Based Compression (LBC) layer that runs after DC, is query-focused and instruction-guided.
+The plan:
+
+Add _LBC_PROMPT — instructs the LLM to compress each chunk by retaining only sentences relevant to the query and stripping filler
+Add _llm_based_compression() function that runs after _deduplicate_compression()
+Wire it into run_agent() in the final-answer path
+Add a validate_lbc step in validators.py to guard against over-compression
+Viewed 3 filesViewed 3 filesNow I have everything I need. Let me implement the LBC layer. The approach:
+
+_LBC_COMPRESS_PROMPT — query-focused, instruction-guided: tells the LLM the original query + optional compression instructions, asks it to rewrite each chunk keeping only query-relevant sentences, outputting JSON with content + dropped_reason
+_llm_based_compression() — iterates chunks, calls LLM per chunk, validates the result isn't over-compressed (min retention ratio guard), falls back to original on failure
+validate_lbc in validators.py — faithfulness check: ensures compressed chunk introduces no fabrications and only strips genuinely irrelevant content
+Wire into run_agent() after DC
+Viewed 2 filesViewed 2 filesNow I'll write both files. First, append validate_lbc to validators.py, then add the LBC layer to agent_query.py.Ran a command, edited a fileRan a command, edited a fileNow add the LBC layer to agent_query.py. First update the import, then add the prompt constant + function, then wire it in.Edited 2 filesEdited 2 filesNow add the LBC prompt constant and function just before _format_context_for_llm:Edited 2 files, viewed a fileEdited 2 files, viewed a fileNow wire LBC into run_agent() after the DC call in the final-answer block:Wire LBC layer after DC in the final-answer return block of run_agentWire LBC layer after DC in the final-answer return block of run_agentNow verify the final-answer block looks correct:Viewed 2 filesViewed 2 filesEverything looks correct. Now copy both files to outputs:Ran a command, read a fileRan a command, read a fileHere's a summary of every change made and the reasoning behind each decision.
+
+What was added
+validators.py — validate_lbc()
+A new LBCCheckResult TypedDict and validate_lbc() function were appended. The judge prompt (_LBC_JUDGE_PROMPT) gives the judge three pieces of information — the original chunk, the compressed chunk, and the user query — and asks it to rule on four verdicts:
+VerdictMeaningSAFENo fabrications, no relevant facts dropped — compression is safe to installOVER_COMPRESSEDOne or more query-relevant facts were strippedFABRICATEDThe compressed output contains a claim not in the originalUNKNOWNParse failure or malformed response — treated as unsafe
+The judge rules are carefully worded to match the style of the existing validators: paraphrase = present, structural differences ≠ facts, only query-relevant facts count as "lost."
+
+agent_query.py — three additions
+1. LBC_MIN_RETENTION_RATIO = 0.35
+A module-level constant. If the compressed text is less than 35% the length of the original, the result is rejected before the judge is even called. This prevents runaway compression when the LLM strips too aggressively.
+2. _LBC_COMPRESS_PROMPT + _LBC_DEFAULT_INSTRUCTIONS
+The compressor prompt tells the LLM exactly what to do, with four explicit instruction lines:
+
+Strip pure metadata (page numbers, titles, headers)
+Strip document-structure sentences (e.g. "This section describes…")
+Strip sentences that repeat facts already in other chunks
+Keep everything with named entities, numbers, definitions, or causal links bearing on the query
+
+The __IRRELEVANT__ sentinel lets the LLM signal that an entire chunk contributes nothing to the query — those chunks are dropped entirely rather than kept as noise.
+3. _llm_based_compression(query, chunks, llm, judge_llm, ...)
+The main function. Per-chunk flow:
+LLM compresses chunk
+    ↓
+Parse JSON {"compressed": ..., "dropped_count": ..., "reason": ...}
+    ↓
+"__IRRELEVANT__"? → drop chunk
+    ↓
+retention < 0.35? → keep original (over-compression guard)
+    ↓
+No change? → keep as-is (skip judge call)
+    ↓
+validate_lbc(judge_llm) → SAFE / OVER_COMPRESSED / FABRICATED / UNKNOWN
+    ↓
+SAFE → install compressed version
+anything else → keep original
+All failures (parse errors, LLM timeouts, bad verdicts) fall back to the original — the layer is strictly additive and never loses data.
+4. Wiring in run_agent()
+The LBC call is inserted in the final-answer block, immediately after DC and before the return:
+NAC → DC → LBC → return answer
+It receives query (the original user question) so every compression decision is anchored to what the user actually asked, not a retrieval variant.

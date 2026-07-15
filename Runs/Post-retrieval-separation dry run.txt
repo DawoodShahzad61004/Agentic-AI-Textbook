@@ -1,0 +1,639 @@
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\agent_query.py
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████| 103/103 [00:00<00:00, 64750.20it/s]
+BertModel LOAD REPORT from: sentence-transformers/all-MiniLM-L6-v2
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+Model 'all-MiniLM-L6-v2' loaded on cuda. Embedding dimension: 384
+GPU: NVIDIA GeForce RTX 5050 Laptop GPU
+Vector store initialized: collection='documents', path='../data/vector_store'
+Existing documents in collection: 237
+[SelfLearner] learned_qa collection has 374 entries.
+
+=== Agentic RAG — Self-Learning Query Interface ===
+Self-learning triggers every 5 successful interactions.
+
+Commands: 'bad' to flag last answer | 'stats' for learning stats | 'learn' to force distillation | 'quit' to exit
+
+Your question: what can you tell me about ASD?
+
+══════════════════════════════════════════════════════════════════════
+  STEP 1 — USER QUERY RECEIVED
+══════════════════════════════════════════════════════════════════════
+  Input : "what can you tell me about ASD?"
+  Length: 31 chars
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  [PHASE: RETRIEVE]  Iteration 1/6
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS (these are the ONLY tools available to you):
+- retrieve_documents(query): searches documents and learned QA separately.
+- compress_context(): i...
+
+  [1] role=user
+      content: what can you tell me about ASD?
+
+  Tool schemas: ['retrieve_documents', 'compress_context']
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 1]
+══════════════════════════════════════════════════════════════════════
+  Tokens: 1158 prompt + 59 completion
+  content (0 chars): 
+
+  tool_calls (4):
+    → retrieve_documents  args={"query": "ASD information"}
+    → retrieve_documents  args={"query": "autism spectrum disorder symptoms"}
+    → retrieve_documents  args={"query": "ASD causes"}
+    → compress_context  args={}
+══════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "ASD information"
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY -> EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "ASD information"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.040807, 0.023887, -0.052767, 0.060911, -0.009597, 0.005886, 0.082206, -0.002935]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying collections separately - documents top_k=5, learned_qa top_l=5, score_threshold=0.5
+
+  Ranked 3 result(s) from documents after within-collection dedup/threshold filter:
+    documents[0] - score: 0.5662  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i...
+    documents[1] - score: 0.5367  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and th...
+    documents[2] - score: 0.5077  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: Insurance mandates requiring commercial plans to cover services for ASD along with improved awareness have likely contri...
+
+  Ranked 5 result(s) from learned_qa after within-collection dedup/threshold filter:
+    learned_qa[0] - score: 0.5669  [learned_qa]
+            preview: Q: What are the key characteristics of ASD in the context of engineering and technology? A: ASD is characterized by chal...
+    learned_qa[1] - score: 0.5642  [learned_qa]
+            preview: Q: How has the diagnostic criteria for ASD evolved in the field of engineering and technology? A: The Diagnostic and Sta...
+    learned_qa[2] - score: 0.5423  [learned_qa]
+            preview: Q: What are the primary characteristics of ASD? A: ASD is a neurodevelopmental condition characterized by differences in...
+    learned_qa[3] - score: 0.5399  [learned_qa]
+            preview: Q: What is the current state of ASD prevalence and identification in the United States? A: According to the Centers for ...
+    learned_qa[4] - score: 0.5378  [learned_qa]
+            preview: Q: What are some key characteristics of ASD? A: Individuals with ASD may have restricted interests and repetitive behavi...
+
+──────────────────────────────────────────────────────────────────────
+  RETRIEVED (unfiltered) — retrieve_documents("ASD information")
+  documents=3 | learned_qa=5 | 3468 chars total - pending separate relevance checks
+──────────────────────────────────────────────────────────────────────
+[LEARNED QA RESULTS - HIGH PRIORITY]
+[Source: learned_qa, score: 0.567]
+Q: What are the key characteristics of ASD in the context of engineering and technology?
+A: ASD is characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. These characteristics can impact individuals' ability to interact with and navigate technological systems, highlighting the need for more accessible and inclusive design.
+
+[Source: learned_qa, score: 0.564]
+Q: How has the diagnostic criteria for ASD evolved in the field of engineering and technology?
+A: The Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) updated the diagnostic criteria for ASD in 2013, providing a more accurate and comprehensive understanding of the condition. This update acknowledges the complexity and diversity of ASD, emphasizing the need for more nuanced and individualized approaches in engineering and technology.
+
+[Source: learned_qa, score: 0.542]
+Q: What are the primary characteristics of ASD?
+A: ASD is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing. Individuals with ASD may experience difficulties with verbal and nonverbal communication, changes in routine, social interactions, emotional regulation, and sensory processing.
+
+[Source: learned_qa, score: 0.540]
+Q: What is the current state of ASD prevalence and identification in the United States?
+A: According to the Centers for Disease Control and Prevention, the prevalence of ASD among children aged 8 years has been increasing, but disparities in diagnosis and access to services persist. Surveillance data suggest some progress in identification across racial and ethnic groups, but significant inequities remain in timing, pathway, quality of diagnosis, and access to services.
+
+[Source: learned_qa, score: 0.538]
+Q: What are some key characteristics of ASD?
+A: Individuals with ASD may have restricted interests and repetitive behaviors, which can manifest in various ways, such as a strong focus on specific topics or a need for routine and predictability. It is essential to recognize that ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[DOCUMENT RESULTS - SECONDARY]
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.566]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.537]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors (1). In 2013, the Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) (Table 1) (1,2).
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.508]
+Insurance mandates requiring commercial plans to cover services for ASD along with improved awareness have likely contributed to the increase in ASD prevalence estimates as well as the increased diagnosis of milder cases of ASD in
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] judging 5 chunk(s) for query: "what can you tell me about ASD?"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] failed to fix malformed LLM output.
+  [VALIDATE-RETRIEVAL] verdict=PASS  relevant=3/5
+  [VALIDATE-RETRIEVAL] reason: The retrieved chunks provide relevant information about ASD characteristics and diagnostic criteria, but some chunks are not directly related to the context of engineering and technology.
+    ✓ chunk 0: Mentions ASD characteristics in the context of engineering and technology.
+    ✓ chunk 1: Discusses the evolution of diagnostic criteria for ASD.
+    ✗ chunk 2: Provides a general description of ASD characteristics, but does not relate to engineering and technology.
+    ✗ chunk 3: Discusses ASD prevalence and identification in the United States, but does not relate to the question's focus on enginee
+    ✓ chunk 4: Mentions ASD characteristics, including restricted interests and repetitive behaviors.
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL:learned_qa] kept 3/5 chunk(s).
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] judging 3 chunk(s) for query: "what can you tell me about ASD?"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] failed to fix malformed LLM output.
+  [VALIDATE-RETRIEVAL] verdict=PASS  relevant=2/3
+  [VALIDATE-RETRIEVAL] reason: The retrieved chunks provide a comprehensive overview of ASD, including its definition, diagnostic criteria, and updates to the DSM-5, making it plausible to support an answer to the original question
+    ✓ chunk 0: Provides a general definition of ASD.
+    ✓ chunk 1: Offers specific diagnostic criteria and updates to the DSM-5.
+    ✗ chunk 2: Mentions insurance mandates and increased diagnosis, but does not provide direct information about ASD.
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL:documents] kept 2/3 chunk(s).
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 2 chunks from sources: ['C:\\Users\\LOQ\\Desktop\\Projects\\RAG-work\\data\\json\\asd_information.json', '..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf']
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing [Source: C:/Users/LOQ/Desktop/Projects/RAG-work/data/json/asd_information.json]. Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].", "sources": ["C:/Users/LOQ/Desktop/Projects/RAG-work/data/json/asd_information.json", "../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf"], "merged_from": 2}
+  [CHUNK MERGE] success — 836 chars, 3 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 2 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] successfully fixed malformed LLM output.
+  [VALIDATE-MERGE] verdict=UNFAITHFUL  fabricated=2  dropped=2
+  [VALIDATE-MERGE] reason: The merged chunk is faithful to the source chunks, preserving all substantive facts and not inventing any new ones.
+    fabricated: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and senso
+    fabricated: Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and r
+    dropped:    The Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) and the update from the previous 4th edition (DSM-IV) were used as sources.
+    dropped:    The year 2013 is the year the DSM-5 was published.
+──────────────────────────────────────────────────────────────────────
+  [MERGE:documents] invalid attempt 1/3
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 2 chunks from sources: ['C:\\Users\\LOQ\\Desktop\\Projects\\RAG-work\\data\\json\\asd_information.json', '..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf']
+  [CHUNK MERGE] retry with judge feedback (690 chars)
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. In 2013, the Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].", "sources": ["../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf"], "merged_from": 2}
+  [CHUNK MERGE] success — 583 chars, 2 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 2 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] successfully fixed malformed LLM output.
+  [VALIDATE-MERGE] verdict=FAITHFUL  fabricated=0  dropped=0
+  [VALIDATE-MERGE] reason: The merged chunk is faithful to the source chunks, preserving all substantive facts and not inventing any new ones.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=1/5 | documents=1 | learned_qa=3
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "autism spectrum disorder symptoms"
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY -> EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "autism spectrum disorder symptoms"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [0.028068, -0.06043, -0.010019, 0.063252, 0.026623, 0.000212, 0.085911, 0.003621]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying collections separately - documents top_k=5, learned_qa top_l=5, score_threshold=0.5
+
+  Ranked 5 result(s) from documents after within-collection dedup/threshold filter:
+    documents[0] - score: 0.7670  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: symptoms among 4- and 8-year-old children with autism spectrum disorder in selected areas of the United States in 2010. ...
+    documents[1] - score: 0.6380  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restrict...
+    documents[2] - score: 0.6194  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and th...
+    documents[3] - score: 0.6128  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: 11. de Giambattista C, Ventura P, Trerotoli P, et al. Subtyping the autism spectrum disorder: comparison of children wit...
+    documents[4] - score: 0.6117  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: 12. Mazurek MO, Lu F, Symecko H, et al. A prospective study of the concordance of DSM-IV and DSM-5 diagnostic criteria f...
+
+  Ranked 5 result(s) from learned_qa after within-collection dedup/threshold filter:
+    learned_qa[0] - score: 0.7664  [learned_qa]
+            preview: Q: What are some common characteristics and co-occurring conditions associated with Autism Spectrum Disorder (ASD)? A: I...
+    learned_qa[1] - score: 0.7614  [learned_qa]
+            preview: Q: What are some common characteristics and challenges experienced by individuals with Autism Spectrum Disorder (ASD)? A...
+    learned_qa[2] - score: 0.7104  [learned_qa]
+            preview: Q: What are some common difficulties experienced by individuals with Autism Spectrum Disorder (ASD)? A: Patients with AS...
+    learned_qa[3] - score: 0.7019  [learned_qa]
+            preview: Q: What are some common co-occurring conditions experienced by individuals with Autism Spectrum Disorder? A: Many ASD pa...
+    learned_qa[4] - score: 0.6992  [learned_qa]
+            preview: Q: What are the key characteristics of Autism Spectrum Disorder? A: Autism Spectrum Disorder is a neurodevelopmental dis...
+
+──────────────────────────────────────────────────────────────────────
+  RETRIEVED (unfiltered) — retrieve_documents("autism spectrum disorder symptoms")
+  documents=5 | learned_qa=5 | 4136 chars total - pending separate relevance checks
+──────────────────────────────────────────────────────────────────────
+[LEARNED QA RESULTS - HIGH PRIORITY]
+[Source: learned_qa, score: 0.766]
+Q: What are some common characteristics and co-occurring conditions associated with Autism Spectrum Disorder (ASD)?
+A: Individuals with ASD may experience difficulties with verbal and nonverbal communication, changes in routine, social interactions, emotional regulation, and sensory processing. Some individuals may avoid eye contact, display repetitive movements, or become overwhelmed by noise, lights, or touch. Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues.
+
+[Source: learned_qa, score: 0.761]
+Q: What are some common characteristics and challenges experienced by individuals with Autism Spectrum Disorder (ASD)?
+A: Individuals with ASD may experience difficulties with verbal and nonverbal communication, changes in routine, social interactions, emotional regulation, and sensory processing. They may also exhibit repetitive movements, avoid eye contact, or become overwhelmed by noise, lights, or touch. Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues.
+
+[Source: learned_qa, score: 0.710]
+Q: What are some common difficulties experienced by individuals with Autism Spectrum Disorder (ASD)?
+A: Patients with ASD may experience difficulties with verbal and nonverbal communication, changes in routine, social interactions, emotional regulation, and sensory processing. Some individuals may avoid eye contact, display repetitive movements, or become overwhelmed by noise, lights, or touch.
+
+[Source: learned_qa, score: 0.702]
+Q: What are some common co-occurring conditions experienced by individuals with Autism Spectrum Disorder?
+A: Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues.
+
+[Source: learned_qa, score: 0.699]
+Q: What are the key characteristics of Autism Spectrum Disorder?
+A: Autism Spectrum Disorder is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors. It is also associated with differences in sensory processing. These characteristics can vary significantly between individuals.
+
+[DOCUMENT RESULTS - SECONDARY]
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.767]
+symptoms among 4- and 8-year-old children with autism spectrum disorder in selected areas of the United States in 2010. J Autism Dev Disord 2018;48:2663-76.
+
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.638]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.619]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors (1). In 2013, the Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) (Table 1) (1,2).
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.613]
+11. de Giambattista C, Ventura P, Trerotoli P, et al. Subtyping the autism spectrum disorder: comparison of children with high functioning autism and asperger syndrome. J Autism Dev Disord 2019;49:138-50.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.612]
+12. Mazurek MO, Lu F, Symecko H, et al. A prospective study of the concordance of DSM-IV and DSM-5 diagnostic criteria for autism spectrum disorder. J Autism Dev Disord 2017;47:2783-94.
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] judging 5 chunk(s) for query: "what can you tell me about ASD?"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] failed to fix malformed LLM output.
+  [VALIDATE-RETRIEVAL] verdict=PASS  relevant=5/5
+  [VALIDATE-RETRIEVAL] reason: The retrieved chunks collectively provide a comprehensive overview of ASD, covering its characteristics, co-occurring conditions, and key features.
+    ✓ chunk 0: Provides information on common characteristics and co-occurring conditions associated with ASD.
+    ✓ chunk 1: Repeats information on common characteristics and co-occurring conditions associated with ASD.
+    ✓ chunk 2: Lists common difficulties experienced by individuals with ASD.
+    ✓ chunk 3: Mentions common co-occurring conditions experienced by individuals with ASD.
+    ✓ chunk 4: Describes the key characteristics of Autism Spectrum Disorder.
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL:learned_qa] kept 5/5 chunk(s).
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] judging 5 chunk(s) for query: "what can you tell me about ASD?"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] RateLimitError — HTTP 429: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.1-8b-instant` in organization `org_01kpzxk122fm2akawhpn357gh0` service tier `on_demand` on tokens per minute (TPM): Limit 6000, Used 4927, Requested 1239. Please try again in 1.66s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+  [VALIDATE-RETRIEVAL] rate limited; retrying after 2.18s (attempt 2/3)
+  [VALIDATE-RETRIEVAL] failed to fix malformed LLM output.
+  [VALIDATE-RETRIEVAL] verdict=PASS  relevant=2/5
+  [VALIDATE-RETRIEVAL] reason: The retrieved chunks provide a clear definition of ASD, its characteristics, and diagnostic criteria, making it plausible to support an answer to the original question.
+    ✗ chunk 0: Does not provide general information about ASD
+    ✓ chunk 1: Provides a clear definition of ASD and its characteristics
+    ✓ chunk 2: Provides a definition of ASD and its diagnostic criteria
+    ✗ chunk 3: Discusses subtyping of ASD but does not provide general information
+    ✗ chunk 4: Discusses concordance of diagnostic criteria but does not provide general information
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL:documents] kept 2/5 chunk(s).
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 4 chunks from sources: ['learned_qa', 'learned_qa', 'learned_qa', 'learned_qa']
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Individuals with ASD may experience difficulties with verbal and nonverbal communication, changes in routine, social interactions, emotional regulation, and sensory processing [Source: learned_qa] [Source: learned_qa] [Source: learned_qa]. They may also exhibit repetitive movements, avoid eye contact, or become overwhelmed by noise, lights, or touch [Source: learned_qa] [Source: learned_qa]. Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues [Source: learned_qa] [Source: learned_qa].", "sources": ["learned_qa", "learned_qa", "learned_qa", "learned_qa", "learned_qa", "learned_qa"], "merged_from": 6}
+  [CHUNK MERGE] success — 567 chars, 6 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 4 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALUE-VERIFY] RateLimitError — HTTP 429: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.1-8b-instant` in organization `org_01kpzxk122fm2akawhpn357gh0` service tier `on_demand` on tokens per minute (TPM): Limit 6000, Used 4764, Requested 1246. Please try again in 100ms. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+  [VALUE-VERIFY] rate limited; retrying after 1.03s (attempt 2/3)
+  [VALIDATE-MERGE] successfully fixed malformed LLM output.
+  [VALIDATE-MERGE] verdict=FAITHFUL  fabricated=0  dropped=0
+  [VALIDATE-MERGE] reason: The MERGED CHUNK is faithful to the SOURCE CHUNKS, preserving all substantive facts and not inventing any new ones.
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 2 chunks from sources: ['..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, ..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf', '..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf']
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. In 2013, the Diagnostic and Statistical Manual of Mental Disorders\u20145th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].", "sources": ["../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf"], "merged_from": 2}
+  [CHUNK MERGE] success — 583 chars, 2 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 2 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] successfully fixed malformed LLM output.
+  [VALIDATE-MERGE] verdict=UNFAITHFUL  fabricated=2  dropped=0
+  [VALIDATE-MERGE] reason: The merged chunk is faithful to the source chunks, preserving all substantive facts and not inventing any new ones.
+    fabricated: {'claim': 'Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted inte
+    fabricated: {'claim': 'In 2013, the Diagnostic and Statistical Manual of Mental Disorders–5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from t
+──────────────────────────────────────────────────────────────────────
+  [MERGE:documents] invalid attempt 1/3
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 2 chunks from sources: ['..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, ..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf', '..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf']
+  [CHUNK MERGE] retry with judge feedback (759 chars)
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. In 2013, the Diagnostic and Statistical Manual of Mental Disorders–5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].", "sources": ["../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf"], "merged_from": 2}
+  [CHUNK MERGE] success — 583 chars, 2 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 2 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] successfully fixed malformed LLM output.
+  [VALIDATE-MERGE] verdict=UNFAITHFUL  fabricated=2  dropped=0
+  [VALIDATE-MERGE] reason: The merged chunk is faithful to the source chunks, preserving all substantive facts and not inventing any new ones.
+    fabricated: {'claim': 'Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted inte
+    fabricated: {'claim': 'In 2013, the Diagnostic and Statistical Manual of Mental Disorders–5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from t
+──────────────────────────────────────────────────────────────────────
+  [MERGE:documents] invalid attempt 2/3
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 2 chunks from sources: ['..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, ..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf', '..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf']
+  [CHUNK MERGE] retry with judge feedback (759 chars)
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. In 2013, the Diagnostic and Statistical Manual of Mental Disorders–5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].", "sources": ["../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf"], "merged_from": 2}
+  [CHUNK MERGE] success — 583 chars, 2 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 2 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] successfully fixed malformed LLM output.
+  [VALIDATE-MERGE] verdict=UNFAITHFUL  fabricated=2  dropped=0
+  [VALIDATE-MERGE] reason: The merged chunk is faithful to the source chunks, preserving all substantive facts and not inventing any new ones.
+    fabricated: {'claim': 'Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted inte
+    fabricated: {'claim': 'In 2013, the Diagnostic and Statistical Manual of Mental Disorders–5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from t
+──────────────────────────────────────────────────────────────────────
+  [MERGE:documents] invalid attempt 3/3
+
+  [AGENT STATE] total_retrievals=2/5 | documents=3 | learned_qa=5
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "ASD causes"
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY -> EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "ASD causes"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.081951, -0.043668, 0.051449, 0.086989, 0.029677, -0.015942, 0.028332, 0.035954]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying collections separately - documents top_k=5, learned_qa top_l=5, score_threshold=0.5
+
+  Ranked 5 result(s) from documents after within-collection dedup/threshold filter:
+    documents[0] - score: 0.6781  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. O...
+    documents[1] - score: 0.6324  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: Ultimately, research continues to reveal factors that correlate with ASD risk, but no causal determinations have been ma...
+    documents[2] - score: 0.6071  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i...
+    documents[3] - score: 0.6059  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: Other risk factors for ASD include increased parental age and prematurity (33-35). This could be due to the theory that ...
+    documents[4] - score: 0.5924  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: Insurance mandates requiring commercial plans to cover services for ASD along with improved awareness have likely contri...
+
+  Ranked 5 result(s) from learned_qa after within-collection dedup/threshold filter:
+    learned_qa[0] - score: 0.7570  [learned_qa]
+            preview: Q: What is currently known about the causes of ASD? A: Ultimately, research continues to reveal factors that correlate w...
+    learned_qa[1] - score: 0.7539  [learned_qa]
+            preview: Q: What are the potential causes of ASD? A: ASD is a neurobiological disorder influenced by both genetic and environment...
+    learned_qa[2] - score: 0.7383  [learned_qa]
+            preview: Q: What is the current state of understanding ASD causes? A: Ultimately, research continues to reveal factors that corre...
+    learned_qa[3] - score: 0.6739  [learned_qa]
+            preview: Q: What are the primary influences on the development of ASD? A: ASD is a neurobiological disorder influenced by both ge...
+    learned_qa[4] - score: 0.6469  [learned_qa]
+            preview: Q: What are the main factors influencing ASD development? A: ASD is a neurobiological disorder influenced by both geneti...
+
+──────────────────────────────────────────────────────────────────────
+  RETRIEVED (unfiltered) — retrieve_documents("ASD causes")
+  documents=5 | learned_qa=5 | 3769 chars total - pending separate relevance checks
+──────────────────────────────────────────────────────────────────────
+[LEARNED QA RESULTS - HIGH PRIORITY]
+[Source: learned_qa, score: 0.757]
+Q: What is currently known about the causes of ASD?
+A: Ultimately, research continues to reveal factors that correlate with ASD risk, but no causal determinations have been made. This leaves much room for discovery with investigators continuing to elucidate new variants conveying genetic risk, or new environmental correlates that require further study.
+
+[Source: learned_qa, score: 0.754]
+Q: What are the potential causes of ASD?
+A: ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: learned_qa, score: 0.738]
+Q: What is the current state of understanding ASD causes?
+A: Ultimately, research continues to reveal factors that correlate with ASD risk, but no causal determinations have been made. This leaves much room for discovery with investigators continuing to elucidate new variants conveying genetic risk, or new environmental correlates that require further study.
+
+[Source: learned_qa, score: 0.674]
+Q: What are the primary influences on the development of ASD?
+A: ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: learned_qa, score: 0.647]
+Q: What are the main factors influencing ASD development?
+A: ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[DOCUMENT RESULTS - SECONDARY]
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.678]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.632]
+Ultimately, research continues to reveal factors that correlate with ASD risk, but no causal determinations have been made. This leaves much room for discovery with investigators continuing to elucidate new variants conveying genetic risk, or new environmental correlates that require further study (52).
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.607]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.606]
+Other risk factors for ASD include increased parental age and prematurity (33-35). This could be due to the theory that older gametes have a higher probability of carrying mutations which could result in additional obstetrical
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.592]
+Insurance mandates requiring commercial plans to cover services for ASD along with improved awareness have likely contributed to the increase in ASD prevalence estimates as well as the increased diagnosis of milder cases of ASD in
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] judging 5 chunk(s) for query: "what can you tell me about ASD?"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] failed to fix malformed LLM output.
+  [VALIDATE-RETRIEVAL] verdict=PASS  relevant=5/5
+  [VALIDATE-RETRIEVAL] reason: The retrieved chunks collectively provide a comprehensive understanding of the potential causes of ASD, highlighting the complex interplay of genetic and environmental factors.
+    ✓ chunk 0: Mentions factors that correlate with ASD risk
+    ✓ chunk 1: Describes genetic and environmental factors influencing ASD development
+    ✓ chunk 2: Mentions factors that correlate with ASD risk
+    ✓ chunk 3: Describes genetic and environmental factors influencing ASD development
+    ✓ chunk 4: Describes genetic and environmental factors influencing ASD development
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL:learned_qa] kept 5/5 chunk(s).
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] judging 5 chunk(s) for query: "what can you tell me about ASD?"
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL] failed to fix malformed LLM output.
+  [VALIDATE-RETRIEVAL] verdict=PASS  relevant=5/5
+  [VALIDATE-RETRIEVAL] reason: The retrieved chunks provide a comprehensive overview of ASD, including its definition, risk factors, and epidemiology, making it possible to answer the original user question.
+    ✓ chunk 0: ASD is a neurobiological disorder influenced by genetic and environmental factors.
+    ✓ chunk 1: Research continues to reveal factors that correlate with ASD risk.
+    ✓ chunk 2: ASD is characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+    ✓ chunk 3: Increased parental age and prematurity are risk factors for ASD.
+    ✓ chunk 4: Insurance mandates and increased awareness have contributed to the increase in ASD prevalence estimates.
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-RETRIEVAL:documents] kept 5/5 chunk(s).
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 2 chunks from sources: ['learned_qa', 'learned_qa']
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Ultimately, research continues to reveal factors that correlate with ASD risk, but no causal determinations have been made [Source: learned_qa] [Source: learned_qa]. This leaves much room for discovery with investigators continuing to elucidate new variants conveying genetic risk, or new environmental correlates that require further study [Source: learned_qa] [Source: learned_qa].", "sources": ["learned_qa", "learned_qa"], "merged_from": 2}
+  [CHUNK MERGE] success — 383 chars, 2 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 2 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] successfully fixed malformed LLM output.
+  [VALIDATE-MERGE] verdict=FAITHFUL  fabricated=0  dropped=0
+  [VALIDATE-MERGE] reason: The MERGED CHUNK is faithful to the SOURCE CHUNKS, preserving all substantive facts and not inventing any new ones.
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 3 chunks from sources: ['learned_qa', 'learned_qa', 'learned_qa']
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain [Source: learned_qa] [Source: learned_qa] [Source: learned_qa]. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated [Source: learned_qa] [Source: learned_qa] [Source: learned_qa].", "sources": ["learned_qa", "learned_qa", "learned_qa"], "merged_from": 3}
+  [CHUNK MERGE] success — 401 chars, 3 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 3 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] successfully fixed malformed LLM output.
+  [VALIDATE-MERGE] verdict=FAITHFUL  fabricated=0  dropped=0
+  [VALIDATE-MERGE] reason: The MERGED CHUNK is faithful to the SOURCE CHUNKS, preserving all substantive facts and not inventing any new ones.
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] consolidating 3 chunks from sources: ['..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, ..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf', '..\\data\\pdfs\\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf', 'C:\\Users\\LOQ\\Desktop\\Projects\\RAG-work\\data\\json\\asd_information.json']
+──────────────────────────────────────────────────────────────────────
+  [CHUNK MERGE] LLM response on attempt 1:
+{"content": "Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf] [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. In 2013, the Diagnostic and Statistical Manual of Mental Disorders\u20145th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf] [Source: ../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing [Source: C:/Users/LOQ/Desktop/Projects/RAG-work/data/json/asd_information.json].", "sources": ["../data/pdfs/Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf", "C:/Users/LOQ/Desktop/Projects/RAG-work/data/json/asd_information.json"], "merged_from": 3}
+  [CHUNK MERGE] success — 1058 chars, 2 source(s)
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] judging merge of 3 source chunk(s)
+──────────────────────────────────────────────────────────────────────
+  [VALIDATE-MERGE] successfully fixed malformed LLM output.
+  [VALIDATE-MERGE] verdict=FAITHFUL  fabricated=0  dropped=0
+  [VALIDATE-MERGE] reason: The MERGED CHUNK is faithful to the SOURCE CHUNKS, preserving all substantive facts and not inventing any new ones.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=3/5 | documents=6 | learned_qa=7
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: compress_context
+──────────────────────────────────────────────────────────────────────
+  args: {}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  TOOL CALL — compress_context
+──────────────────────────────────────────────────────────────────────
+  document chunks   : 6
+  learned QA chunks : 7
+  query             : "what can you tell me about ASD?"
+  [COMPRESS:learned_qa] approx tokens: 738 (threshold: 500)
+  [COMPRESS] all compression stages disabled — skipping pipeline
+  [COMPRESS:documents] approx tokens: 594 (threshold: 500)
+  [COMPRESS] all compression stages disabled — skipping pipeline
+  [COMPRESS] scrubbed 3 prior retrieve_documents tool-result message(s) from chat history (replaced with placeholder)
+  [COMPRESS] returning 6759 chars (13 chunks) as compress_context tool result
+──────────────────────────────────────────────────────────────────────
+  [PHASE] LLM called compress_context — transitioning to ANSWER.
+
+══════════════════════════════════════════════════════════════════════
+  [PHASE: DRAFT]  Invoking LLM with NO tool schemas to produce answer draft.
+  context: 6478 chars | documents=6 | learned_qa=7
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  DRAFT ANSWER  (2933 chars)
+══════════════════════════════════════════════════════════════════════
+Autism Spectrum Disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: learned_qa]. It is essential to recognize that ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals [Source: learned_qa]. Individuals with ASD may experience difficulties with verbal and nonverbal communication, changes in routine, social interactions, emotional regulation, and sensory processing [Source: learned_qa]. They may also exhibit repetitive movements, avoid eye contact, or become overwhelmed by noise, lights, or touch [Source: learned_qa].
+
+Research continues to reveal factors that correlate with ASD risk, but no causal determinations have been mad...
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  [PHASE: JUDGE]  Running check_answer_quality as plain function.
+══════════════════════════════════════════════════════════════════════
+  [CAQ-JUDGE] verdict: OK
+  [JUDGE] verdict: OK
+  [JUDGE] final_quality = OK
+
+══════════════════════════════════════════════════════════════════════
+  [PHASE: FINAL]  Invoking LLM with NO tool schemas using the draft.
+══════════════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════
+  FINAL ANSWER
+══════════════════════════════════════════════════════════════════════
+Autism Spectrum Disorder (ASD) is a complex neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: learned_qa]. It is essential to recognize that ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals [Source: learned_qa]. Individuals with ASD may experience difficulties with verbal and nonverbal communication, changes in routine, social interactions, emotional regulation, and sensory processing [Source: learned_qa]. These challenges can impact their ability to interact with and navigate technological systems, highlighting the need for more accessible and inclusive design [Source: learned_qa].
+
+Research has identified various factors that correlate with ASD risk, but no causal determinations have been made [Source: learned_qa]. This leaves much room for discovery, with investigators continuing to elucidate new variants conveying genetic risk or new environmental correlates that require further study [Source: learned_qa]. ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain [Source: learned_qa]. The Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) updated the diagnostic criteria for ASD in 2013, providing a more accurate and comprehensive understanding of the condition [Source: learned_qa].
+
+Individuals with ASD may have restricted interests and repetitive behaviors, which can manifest in various ways, such as a strong focus on specific topics or a need for routine and predictability [Source: learned_qa]. These characteristics can vary significantly between individuals, emphasizing the need for more nuanced and individualized approaches [Source: learned_qa]. Increased parental age and prematurity have been identified as potential risk factors for ASD [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Furthermore, improved awareness and insurance mandates requiring commercial plans to cover services for ASD have likely contributed to the increase in ASD prevalence estimates [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+
+In conclusion, ASD is a complex neurodevelopmental disorder that requires a comprehensive understanding of its characteristics, causes, and diagnostic criteria. By recognizing the diversity and complexity of ASD, we can work towards providing more effective support and services for individuals with ASD and their families.
+══════════════════════════════════════════════════════════════════════
+  Iterations used : 3 / 6
+  Quality signal  : OK
+  Tokens (total)  : 6249 prompt + 1070 completion = 7319 total
+  Sources searched:
+    • "ASD information"
+      preview: [LEARNED QA RESULTS - HIGH PRIORITY]
+[Source: learned_qa, score: 0.567]
+Q: What are the key characte...
+    • "autism spectrum disorder symptoms"
+      preview: [LEARNED QA RESULTS - HIGH PRIORITY]
+[Source: learned_qa, score: 0.766]
+Q: What are some common char...
+    • "ASD causes"
+      preview: [LEARNED QA RESULTS - HIGH PRIORITY]
+[Source: learned_qa, score: 0.757]
+Q: What is currently known a...
+══════════════════════════════════════════════════════════════════════
+Your question: 

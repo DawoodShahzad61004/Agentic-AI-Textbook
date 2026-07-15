@@ -1,0 +1,3021 @@
+I need to integrate MongoDB in this project. I want all the things currently done with json/jsonl files to be done with MongoDB. How can I do this?
+
+I’ll map this to your current project structure: where JSON/JSONL is used now, what MongoDB collections should replace it, and what code should change first.
+
+Thought for 11s
+
+Yes. Do it by replacing file-backed stores with store classes backed by MongoDB.
+
+Your JSON/JSONL usage is mainly:
+
+interactions.jsonl → feedback_interactions
+user_thumbdowns.json → user_thumbdowns
+failed_variants.json → failed_variants
+timing .debug.json → optional timing_runs
+tabular-to-json ingestion temp files → avoid writing temp JSON; convert rows directly into Documents
+
+Your Chroma vector DB should probably stay as Chroma for now. It stores embeddings/documents separately already via VectorStore and learned QA via Chroma collections.
+
+Recommended approach
+1. Add MongoDB dependency
+pymongo
+
+or async:
+
+motor
+
+For your current mostly sync code, use pymongo.
+
+2. Add config values
+
+In config.py, replace file paths with Mongo config:
+
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "rag_app")
+
+COLL_INTERACTIONS = "feedback_interactions"
+COLL_THUMBDOWNS = "user_thumbdowns"
+COLL_FAILED_VARIANTS = "failed_variants"
+COLL_TIMING = "timing_runs"
+
+Currently those paths are hardcoded as:
+
+FAILED_VARIANTS_PATH = Path("../data/feedback/failed_variants.json")
+FEEDBACK_PATH = Path("../data/feedback/interactions.jsonl")
+USER_THUMBDOWNS_PATH = Path("../data/feedback/user_thumbdowns.json")
+
+3. Create one Mongo client file
+
+Create mongo_store.py:
+
+from pymongo import MongoClient, ASCENDING
+from config import MONGO_URI, MONGO_DB_NAME
+
+_client = MongoClient(MONGO_URI)
+db = _client[MONGO_DB_NAME]
+
+def init_indexes():
+    db.feedback_interactions.create_index([("ts", ASCENDING)])
+    db.feedback_interactions.create_index([("quality", ASCENDING)])
+    db.feedback_interactions.create_index([("request_id", ASCENDING)])
+    db.user_thumbdowns.create_index([("normalized_query", ASCENDING)])
+    db.failed_variants.create_index([("normalized_query", ASCENDING)], unique=True)
+
+Call init_indexes() inside FastAPI lifespan.
+
+4. Rewrite FeedbackStore
+
+Your current FeedbackStore.log() appends one JSON line to interactions.jsonl, and load_all() rereads the whole file every time. Replace that with Mongo inserts/queries.
+
+from datetime import datetime, timezone
+from mongo_store import db
+from config import MIN_FEEDBACK_LEN
+
+class FeedbackStore:
+    def __init__(self):
+        self.interactions = db.feedback_interactions
+        self.thumbdowns = db.user_thumbdowns
+
+    def log(self, query, answer, sources, quality,
+            document_retrieved_chunks=None,
+            learned_qa_retrieved_chunks=None,
+            retrieved_chunks=None,
+            request_id=""):
+
+        record = {
+            "ts": datetime.now(timezone.utc),
+            "request_id": request_id,
+            "query": query,
+            "normalized_query": self._normalize_query(query),
+            "answer": answer,
+            "quality": quality,
+            "sources": sources,
+            "document_chunks": self._stored_chunks(document_retrieved_chunks),
+            "learned_qa_chunks": self._stored_chunks(learned_qa_retrieved_chunks),
+        }
+        self.interactions.insert_one(record)
+
+    def load_all(self):
+        return list(self.interactions.find({}, {"_id": 0}).sort("ts", 1))
+
+    def count(self):
+        return self.interactions.count_documents({})
+
+    def count_good(self):
+        return self.interactions.count_documents({"quality": "OK"})
+
+    def load_good(self, limit=None):
+        cursor = self.interactions.find({"quality": "OK"}, {"_id": 0}).sort("ts", -1)
+        if limit:
+            cursor = cursor.limit(limit)
+        return list(reversed(list(cursor)))
+
+    def mark_last_bad(self, feedback="", variants=None):
+        last = self.interactions.find_one(sort=[("ts", -1)])
+        if not last:
+            return False
+
+        self.interactions.update_one(
+            {"_id": last["_id"]},
+            {"$set": {"quality": "USER_THUMBSDOWN"}}
+        )
+
+        feedback_clean = (feedback or "").strip()
+        if feedback_clean and len(feedback_clean) >= MIN_FEEDBACK_LEN:
+            self.thumbdowns.insert_one({
+                "ts": datetime.now(timezone.utc),
+                "original_query": last.get("query", ""),
+                "normalized_query": self._normalize_query(last.get("query", "")),
+                "bad_answer": last.get("answer", ""),
+                "user_feedback": feedback_clean,
+                "variants": variants or [],
+                "request_id": last.get("request_id", ""),
+            })
+        return True
+
+    def find_thumbdowns_for_query(self, query):
+        return list(self.thumbdowns.find(
+            {"normalized_query": self._normalize_query(query)},
+            {"_id": 0}
+        ).sort("ts", -1))
+
+    @staticmethod
+    def _normalize_query(q):
+        return q.lower().strip()
+5. Replace failed variants file helpers
+
+You currently load/save failed_variants.json in both agent_query.py and api.py. Replace with:
+
+from mongo_store import db
+
+failed_variants = db.failed_variants
+
+def load_failed_variants_for_query(norm_query: str) -> list[str]:
+    doc = failed_variants.find_one({"normalized_query": norm_query})
+    return doc.get("variants", []) if doc else []
+
+def add_failed_variants(norm_query: str, variants: list[str]) -> None:
+    failed_variants.update_one(
+        {"normalized_query": norm_query},
+        {"$addToSet": {"variants": {"$each": variants}}},
+        upsert=True,
+    )
+
+Then in api.py, instead of loading the whole store into _ctx["failed_variants_store"], query Mongo per request.
+
+6. Replace timing JSON output
+
+timing_tracker.py currently keeps in-memory phase lists and flushes them to a JSON file. You can change _write() to update Mongo instead:
+
+from mongo_store import db
+
+_run_id = None
+
+def initialize(run_id: str):
+    global _data, _run_id
+    with _lock:
+        _run_id = run_id
+        _data = {c: [] for c in CATEGORIES}
+        _write()
+
+def _write():
+    if _run_id is None:
+        return
+    db.timing_runs.update_one(
+        {"run_id": _run_id},
+        {"$set": {"run_id": _run_id, "data": _data}},
+        upsert=True,
+    )
+7. Change ingestion tabular conversion
+
+ingest.py currently converts CSV/Excel into physical JSON files before loading them. Better: create Documents directly from rows and avoid temp JSON completely.
+
+from langchain_core.documents import Document
+
+def _convert_tabular_to_documents(p: Path) -> list[Document]:
+    df = pd.read_csv(p) if p.suffix.lower() == ".csv" else pd.read_excel(p)
+    df = df.fillna("")
+    docs = []
+    for i, row in df.iterrows():
+        docs.append(Document(
+            page_content=json.dumps(row.to_dict(), ensure_ascii=False),
+            metadata={"source": str(p), "row": int(i)}
+        ))
+    return docs
+Important design decision
+
+Do not replace Chroma with MongoDB unless you specifically want MongoDB Atlas Vector Search. Your current retrieval depends on Chroma collections and cosine embeddings. MongoDB should replace your metadata/history/feedback JSON stores, not necessarily your vector store.
+
+Best migration order:
+
+FeedbackStore
+failed_variants
+timing_tracker
+ingestion temp JSON
+only then consider MongoDB Atlas Vector Search for embeddings.
+
+Dont Change Anything, Just Plan and Discuss:
+
+I need to integrate MongoDB in the project inside "app/" folder. I want all the things currently done with json/jsonl files to be done with MongoDB. Currently, JSON/JSONL usage is:
+-> interactions.jsonl → feedback_interactions
+-> user_thumbdowns.json → user_thumbdowns
+-> failed_variants.json → failed_variants
+
+No need to change anything with the ingestion part.
+Show less
+Let me explore the project structure to understand how these files are currently used before planning.
+
+Agent:Explore JSON/JSONL file usage in app/ folder
+IN
+Search the project at c:\Users\LOQ\Desktop\Projects\RAG-work\app\ for all usages of these three files:
+1. interactions.jsonl
+2. user_thumbdowns.json
+3. failed_variants.json
+
+For each file, find:
+- Where it's read from
+- Where it's written to
+- What data structure is stored in it
+- What operations are performed (append, read-all, filter, update, delete)
+
+Also look for any config files or constants that define these file paths. Be thorough — check all .py files in app/ and subdirectories. Report the file path and line numbers for each usage.
+Here's the full picture and my plan:
+
+Current State
+Three files in ../data/feedback/, all managed through feedback_store.py and helper functions in agent_query.py / api.py:
+
+File	Collection Name	Access Pattern
+interactions.jsonl	feedback_interactions	append per interaction, read-all for analytics, update last record's quality
+user_thumbdowns.json	user_thumbdowns	append new entry, lookup by normalized_query
+failed_variants.json	failed_variants	loaded into memory at startup as a dict, lookup by key, append new variants, save on every change
+Proposed Plan
+1. New app/db.py module
+A single place for the MongoClient and collection accessors. The URI comes from an env var (e.g. MONGODB_URI), added to config.py. All three collections live on the same database (e.g. rag_db).
+
+2. feedback_interactions collection
+This is the cleanest migration:
+
+log() → insert_one(doc)
+load_all() → find({})
+load_good() → find({"quality": "OK"})
+mark_last_bad() — currently rewrites the whole file to change the last record. With MongoDB: find_one(sort=[("ts", -1)]) → update_one({"_id": ...}, {"$set": {"quality": "USER_THUMBSDOWN"}}). Atomic, no race condition.
+3. user_thumbdowns collection
+Each thumbdown entry becomes one document. The load-modify-save pattern disappears:
+
+_append_thumbdown() → insert_one(doc)
+find_thumbdowns_for_query() → find({"normalized_query": query})
+4. failed_variants collection
+Two valid approaches — worth discussing:
+
+Option A — Keep in-memory dict, use MongoDB as persistence
+Minimal code change. Load entire collection into a dict at startup ({doc["normalized_query"]: doc["variants"] for doc in find({})}), mutate in memory, write back with replace_one(..., upsert=True) on change. Behavior is identical to today.
+
+Option B — Per-query DB lookups (no in-memory dict)
+Cleaner. Lookup becomes find_one({"normalized_query": norm}). Append becomes update_one(..., {"$addToSet": {"variants": {"$each": fresh}}}, upsert=True). The in-memory failed_variants_store dict in agent_query.py and api.py is removed entirely.
+
+I'd recommend Option B — the dict is small but it currently means two copies of the data exist simultaneously, and both api.py and agent_query.py maintain their own separate in-memory copies (potential divergence in a multi-worker setup). MongoDB removes that problem.
+
+Files That Change
+File	What changes
+config.py	Add MONGODB_URI, DB_NAME, remove the three Path constants
+app/db.py	New file — MongoClient, get_db(), collection accessors
+feedback_store.py	Replace all file I/O with collection calls
+agent_query.py	Replace _load_failed_variants / _save_failed_variants + in-memory dict with DB calls
+api.py	Same as agent_query.py for failed_variants
+No changes to ingestion, no changes to the data structures themselves (documents match existing JSON shapes), no changes to callers of feedback_store methods — the public API stays the same.
+
+One Open Question
+Option A or B for failed_variants? Option B is cleaner and fixes the multi-worker divergence issue, but it does remove the startup preload pattern. If latency on per-query DB lookups is a concern (unlikely for a feedback store), Option A is safe. What's your preference?
+
+Implement this Proposed Plan to the app/ project.
+Maintain the logging which is currently present, and add more with new code.
+For the failed_variants, I choose option B - Per-query DB lookups (no in-memory dict).
+Make the change in code as minimal as possible
+Let me read all the relevant files before making any changes.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\config.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py (lines 2-81)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 41-110)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py (lines 81-240)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 1091-1250)
+Now let me check agent_query.py imports and the rest of api.py:
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 2-45)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py (lines 238-277)
+Now I have everything I need. Let me also check for an .env file:
+
+Globpattern: "**/.env*"
+Found 1 file
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\.env
+Let me read the FeedbackStore instantiation in agent_query.py:
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 1041-1095)
+Let me check the requirements file before implementing:
+
+Globpattern: "requirements*.txt"
+Found 3 files
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\requirements.txt
+pymongo is not listed. Now I have everything. Let me implement all changes.
+
+Update Todos
+
+Create app/db.py with MongoDB client and collection accessors
+
+Edit config.py: remove 3 file path constants
+
+Rewrite feedback_store.py to use MongoDB
+
+Edit agent_query.py: remove file-based failed_variants, add DB calls
+
+Edit api.py: remove file-based failed_variants, add DB calls
+
+Add MONGODB_URI and MONGODB_DB_NAME to .env and pymongo to requirements.txt
+Write c:\Users\LOQ\Desktop\Projects\RAG-work\app\db.py
+53 lines
+import logging
+import os
+
+from pymongo import MongoClient, ASCENDING
+
+logger = logging.getLogger(__name__)
+
+_client: MongoClient | None = None
+_indexes_ensured = False
+
+
+def get_client() -> MongoClient:
+    global _client
+    if _client is None:
+        uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+        _client = MongoClient(uri)
+        # Log without exposing credentials in the URI
+        display = uri.split("@")[-1] if "@" in uri else uri
+        logger.info("MongoDB client initialized (host=%s)", display)
+    return _client
+
+
+def get_db():
+    db_name = os.getenv("MONGODB_DB_NAME", "rag_db")
+    return get_client()[db_name]
+
+
+def _ensure_indexes() -> None:
+    global _indexes_ensured
+    if _indexes_ensured:
+        return
+    db = get_db()
+    db["feedback_interactions"].create_index([("ts", ASCENDING)])
+    db["user_thumbdowns"].create_index([("normalized_query", ASCENDING)])
+    db["failed_variants"].create_index([("normalized_query", ASCENDING)], unique=True)
+    _indexes_ensured = True
+    logger.info("MongoDB indexes ensured.")
+
+
+def interactions_col():
+    _ensure_indexes()
+    return get_db()["feedback_interactions"]
+
+
+def thumbdowns_col():
+    _ensure_indexes()
+    return get_db()["user_thumbdowns"]
+
+
+def failed_variants_col():
+    _ensure_indexes()
+    return get_db()["failed_variants"]
+Update Todos
+
+Create app/db.py with MongoDB client and collection accessors
+
+Edit config.py: remove 3 file path constants
+
+Rewrite feedback_store.py to use MongoDB
+
+Edit agent_query.py: remove file-based failed_variants, add DB calls
+
+Edit api.py: remove file-based failed_variants, add DB calls
+
+Add MONGODB_URI and MONGODB_DB_NAME to .env and pymongo to requirements.txt
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\config.py
+Removed 3 lines
+Update Todos
+
+Create app/db.py with MongoDB client and collection accessors
+
+Edit config.py: remove 3 file path constants
+
+Rewrite feedback_store.py to use MongoDB
+
+Edit agent_query.py: remove file-based failed_variants, add DB calls
+
+Edit api.py: remove file-based failed_variants, add DB calls
+
+Add MONGODB_URI and MONGODB_DB_NAME to .env and pymongo to requirements.txt
+Write c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+200 lines
+import logging
+from datetime import datetime, timezone
+
+from pymongo import DESCENDING
+
+from db import interactions_col, thumbdowns_col
+from config import MIN_FEEDBACK_LEN
+
+logger = logging.getLogger(__name__)
+
+# Re-exported so callers can do: from feedback_store import MIN_FEEDBACK_LEN
+__all__ = ["FeedbackStore", "MIN_FEEDBACK_LEN"]
+
+
+class FeedbackStore:
+    def __init__(self):
+        self._interactions = interactions_col()
+        self._thumbdowns = thumbdowns_col()
+
+    @staticmethod
+    def _stored_chunks(chunks: list[dict] | None) -> list[dict]:
+        return [
+            {
+                "content": chunk.get("content", ""),
+                "source": chunk.get(
+                    "source",
+                    (chunk.get("metadata") or {}).get("source", "?"),
+                ),
+            }
+            for chunk in (chunks or [])[:3]
+            if chunk.get("content")
+        ]
+
+    @staticmethod
+    def _split_legacy_chunks(chunks: list[dict] | None) -> tuple[list[dict], list[dict]]:
+        documents: list[dict] = []
+        learned_qa: list[dict] = []
+        for chunk in chunks or []:
+            source = chunk.get(
+                "source",
+                (chunk.get("metadata") or {}).get("source", "?"),
+            )
+            target = learned_qa if source == "learned_qa" else documents
+            target.append(chunk)
+        return documents, learned_qa
+
+    # ── Write ────────────────────────────────────────────────────────────────
+
+    def log(
+        self,
+        query: str,
+        answer: str,
+        sources: list[dict],
+        quality: str,           # "OK" | "INSUFFICIENT" | "USER_THUMBSDOWN"
+        document_retrieved_chunks: list[dict] | None = None,
+        learned_qa_retrieved_chunks: list[dict] | None = None,
+        retrieved_chunks: list[dict] | None = None,
+        request_id: str = "",
+    ) -> None:
+        if (
+            retrieved_chunks is not None
+            and document_retrieved_chunks is None
+            and learned_qa_retrieved_chunks is None
+        ):
+            document_retrieved_chunks, learned_qa_retrieved_chunks = (
+                self._split_legacy_chunks(retrieved_chunks)
+            )
+
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "request_id": request_id,
+            "query": query,
+            "answer": answer,
+            "quality": quality,
+            "sources": sources,
+            "document_chunks": self._stored_chunks(document_retrieved_chunks),
+            "learned_qa_chunks": self._stored_chunks(learned_qa_retrieved_chunks),
+        }
+        self._interactions.insert_one(record)
+        logger.debug(
+            "Interaction logged to MongoDB: request_id=%s quality=%s",
+            request_id, quality,
+        )
+
+    # ── Read ─────────────────────────────────────────────────────────────────
+
+    def load_all(self) -> list[dict]:
+        return [
+            {k: v for k, v in doc.items() if k != "_id"}
+            for doc in self._interactions.find({})
+        ]
+
+    def count(self) -> int:
+        return self._interactions.count_documents({})
+
+    def count_good(self) -> int:
+        return self._interactions.count_documents({"quality": "OK"})
+
+    def load_good(self, limit: int | None = None) -> list[dict]:
+        if limit:
+            # Fetch last `limit` records in chronological order
+            docs = list(
+                self._interactions.find({"quality": "OK"}, {"_id": 0})
+                .sort("ts", DESCENDING).limit(limit)
+            )
+            return list(reversed(docs))
+        return list(self._interactions.find({"quality": "OK"}, {"_id": 0}))
+
+    # ── User feedback ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _normalize_query(q: str) -> str:
+        return q.lower().strip()
+
+    def mark_last_bad(
+        self,
+        feedback: str = "",
+        variants: list[dict] | None = None,
+    ) -> bool:
+        """
+        Update the last interaction's quality to USER_THUMBSDOWN.
+
+        If `feedback` meets the minimum-length threshold, also persist a
+        structured thumbdown entry with the query variants and retrieved chunks.
+        """
+        last = self._interactions.find_one(sort=[("ts", DESCENDING)])
+        if not last:
+            return False
+
+        self._interactions.update_one(
+            {"_id": last["_id"]},
+            {"$set": {"quality": "USER_THUMBSDOWN"}},
+        )
+        logger.info(
+            "Interaction marked USER_THUMBSDOWN in MongoDB: request_id=%s",
+            last.get("request_id", ""),
+        )
+
+        feedback_clean = (feedback or "").strip()
+        if feedback_clean and len(feedback_clean) >= MIN_FEEDBACK_LEN:
+            self._append_thumbdown(
+                original_query=last.get("query", ""),
+                bad_answer=last.get("answer", ""),
+                feedback=feedback_clean,
+                variants=variants or [],
+                request_id=last.get("request_id", ""),
+            )
+        return True
+
+    def _append_thumbdown(
+        self,
+        original_query: str,
+        bad_answer: str,
+        feedback: str,
+        variants: list[dict],
+        request_id: str = "",
+    ) -> None:
+        normalized = self._normalize_query(original_query)
+        doc = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "request_id": request_id,
+            "original_query": original_query,
+            "normalized_query": normalized,
+            "bad_answer": bad_answer,
+            "user_feedback": feedback,
+            "variants": [
+                {
+                    "query": v.get("query", ""),
+                    "document_chunks": [
+                        {
+                            "content": (c.get("content") or "")[:1000],
+                            "source": c.get("source", "?"),
+                        }
+                        for c in (v.get("document_chunks") or v.get("chunks") or [])
+                    ],
+                    "learned_qa_chunks": [
+                        {
+                            "content": (c.get("content") or "")[:1000],
+                            "source": c.get("source", "?"),
+                        }
+                        for c in (v.get("learned_qa_chunks") or [])
+                    ],
+                }
+                for v in variants
+            ],
+        }
+        self._thumbdowns.insert_one(doc)
+        logger.info(
+            "Thumbdown persisted to MongoDB: request_id=%s normalized_query=%r",
+            request_id, normalized,
+        )
+
+    def find_thumbdowns_for_query(self, query: str) -> list[dict]:
+        """Return all prior thumbdown entries whose normalized query matches `query`."""
+        norm = self._normalize_query(query)
+        return [
+            {k: v for k, v in doc.items() if k != "_id"}
+            for doc in self._thumbdowns.find({"normalized_query": norm})
+        ]
+Update Todos
+
+Create app/db.py with MongoDB client and collection accessors
+
+Edit config.py: remove 3 file path constants
+
+Rewrite feedback_store.py to use MongoDB
+
+Edit agent_query.py: remove file-based failed_variants, add DB calls
+
+Edit api.py: remove file-based failed_variants, add DB calls
+
+Add MONGODB_URI and MONGODB_DB_NAME to .env and pymongo to requirements.txt
+Now editing agent_query.py — three targeted changes:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Removed 14 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Removed 1 line
+Now replace the blocked-variants lookup and the thumbdown expansion block:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Added 6 lines
+Now replace the save-failed-variants block:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Added 7 lines
+Update Todos
+
+Create app/db.py with MongoDB client and collection accessors
+
+Edit config.py: remove 3 file path constants
+
+Rewrite feedback_store.py to use MongoDB
+
+Edit agent_query.py: remove file-based failed_variants, add DB calls
+
+Edit api.py: remove file-based failed_variants, add DB calls
+
+Add MONGODB_URI and MONGODB_DB_NAME to .env and pymongo to requirements.txt
+Now api.py — four targeted edits:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py
+Removed 16 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py
+Removed 1 line
+Now replace the blocked-variants lookup and the save block in the /query handler:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py
+Added 3 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py
+Added 8 lines
+Update Todos
+
+Create app/db.py with MongoDB client and collection accessors
+
+Edit config.py: remove 3 file path constants
+
+Rewrite feedback_store.py to use MongoDB
+
+Edit agent_query.py: remove file-based failed_variants, add DB calls
+
+Edit api.py: remove file-based failed_variants, add DB calls
+
+Add MONGODB_URI and MONGODB_DB_NAME to .env and pymongo to requirements.txt
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\.env
+Added 3 lines
+Now add pymongo to requirements.txt. The file is UTF-16 LE encoded (note the spaced-out characters in the read output), so I'll append via PowerShell to avoid encoding issues:
+
+PowerShell Append pymongo to requirements.txt with matching UTF-16 encoding
+IN
+Add-Content -Path "c:\Users\LOQ\Desktop\Projects\RAG-work\app\requirements.txt" -Value "pymongo==4.10.1" -Encoding Unicode
+
+OUT
+(PowerShell completed with no output)
+Update Todos
+
+Create app/db.py with MongoDB client and collection accessors
+
+Edit config.py: remove 3 file path constants
+
+Rewrite feedback_store.py to use MongoDB
+
+Edit agent_query.py: remove file-based failed_variants, add DB calls
+
+Edit api.py: remove file-based failed_variants, add DB calls
+
+Add MONGODB_URI and MONGODB_DB_NAME to .env and pymongo to requirements.txt
+All done. Here's a summary of every change made:
+
+New file: app/db.py
+Single MongoClient (lazy, singleton), _ensure_indexes() called once on first collection access, and three collection accessors: interactions_col(), thumbdowns_col(), failed_variants_col().
+
+app/config.py
+Removed FAILED_VARIANTS_PATH, FEEDBACK_PATH, USER_THUMBDOWNS_PATH.
+
+app/feedback_store.py
+Full replacement of file I/O with MongoDB:
+
+log() → insert_one()
+load_all() / load_good() / count() / count_good() → find() / count_documents()
+mark_last_bad() → find_one(sort=[("ts", DESCENDING)]) + update_one($set)
+_append_thumbdown() → insert_one()
+find_thumbdowns_for_query() → find({"normalized_query": norm})
+All _id fields stripped from returned dicts to keep the public API identical.
+
+app/agent_query.py
+Removed FAILED_VARIANTS_PATH import and both helper functions
+Removed failed_variants_store = _load_failed_variants() at startup
+Replaced in-memory dict lookup with fv_col.find_one({"normalized_query": norm})
+Replaced dict extend + file save with fv_col.update_one(..., $addToSet, upsert=True)
+app/api.py
+Same pattern as agent_query.py — removed both helper functions, removed "failed_variants_store" from _ctx, replaced all dict operations with per-request DB calls.
+
+.env + app/requirements.txt
+Added MONGODB_URI, MONGODB_DB_NAME, and pymongo==4.10.1.
+
+c:\Users\LOQ\Desktop\Projects\RAG-work\app\requirements.txt
+pymongo==4.17.0 wouldnt this have been better?
+Answer briefly:
+pymongo==4.17.0 wouldnt this have been better?
+Yes — 4.17.0 is the latest stable release and would be better. I used 4.10.1 as a conservative known-good version, but there's no reason not to use the newest. Want me to update it?
+
+c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py
+Answer briefly:
+Now tell me what do i need to do regarding MongoDB's own setup to run this app
+Two options:
+
+Option A — Local MongoDB (simplest)
+
+Install MongoDB Community Server from mongodb.com (or via winget install MongoDB.Server)
+Start the service: net start MongoDB (it auto-starts on install by default on Windows)
+That's it — the default MONGODB_URI=mongodb://localhost:27017 in your .env will work as-is
+Option B — MongoDB Atlas (cloud, free tier)
+
+Create a free cluster at cloud.mongodb.com
+Whitelist your IP under Network Access
+Create a database user under Database Access
+Get the connection string (looks like mongodb+srv://user:pass@cluster.mongodb.net/) and set it in .env:
+
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/
+Then install the driver:
+
+
+pip install pymongo==4.17.0
+The app will create the rag_db database and all three collections automatically on first write — no manual schema setup needed.
+
+c:\Users\LOQ\Desktop\Projects\RAG-work\app\db.py
+Answer briefly:
+How does the http://localhost:8000/feedback/bad API operates?
+Looking at api.py:228-235 and feedback_store.py:
+
+Request: POST /feedback/bad with optional body {"feedback": "your reason"}
+
+What happens:
+
+Grabs last_result from _ctx (the most recent query's result, stored in memory)
+Calls feedback_store.mark_last_bad(feedback, variants)
+Inside mark_last_bad:
+Finds the last document in feedback_interactions (by ts descending)
+Updates its quality field from "OK" or "INSUFFICIENT" → "USER_THUMBSDOWN" via update_one
+If feedback is ≥ 10 chars, inserts a full thumbdown document into user_thumbdowns containing the original query, bad answer, user's text, and all LLM query variants with their retrieved chunks
+Returns {"status": "flagged", "persisted": true/false} — persisted: true means the thumbdown was also saved to user_thumbdowns
+Key behavior: It always flags the last interaction — there's no way to target a specific one. If no query has been run yet in the current session, it returns 404.
+
+Change this...
+The API should give the requestID that needs to be marked as bad. Instead of RAM, it should be searched in the MongoDB and then modified.
+Let me read the current state of the three files I need to change.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py (lines 119-148)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py (lines 187-236)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py (lines 236-245)
+Four targeted changes across three files. Starting with adding request_id index to db.py:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\db.py
+Added 1 line
+Now add variants to log() and add the new mark_bad() method in feedback_store.py:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Added 1 line
+Now add mark_bad() right after mark_last_bad():
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Added 24 lines
+Now update api.py — four edits:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py
+Removed 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py
+Removed 2 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py
+Removed 1 line
+Done. Here's what changed:
+
+app/db.py — Added a unique index on request_id in feedback_interactions for fast lookup.
+
+app/feedback_store.py
+
+log() — added variants param; stored in the interaction document so they're available later without RAM
+mark_bad(request_id, feedback) — new method: find_one({"request_id": ...}) → update_one($set quality) → pulls variants from the stored doc to build the thumbdown entry
+app/api.py
+
+FeedbackRequest — added required request_id: str field
+/feedback/bad — now calls mark_bad(request_id, feedback); no longer touches _ctx at all
+Removed "last_result" from _ctx and the _ctx["last_result"] = result assignment
+log() call — now passes variants=result.get("variants", []) so they're persisted at query time
+New request format:
+
+
+POST /feedback/bad
+{"request_id": "uuid-from-query-response", "feedback": "optional reason"}
+c:\Users\LOQ\Desktop\Projects\RAG-work\API_ENDPOINTS.txt
+Update the API_ENDPOINTS.txt
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\API_ENDPOINTS.txt
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\API_ENDPOINTS.txt
+Added 3 lines
+Spell-check warnings only — "thumbdown/thumbdowns" is domain terminology, not a real error. No fix needed.
+
+c:\Users\LOQ\Desktop\Projects\RAG-work\.env
+Answer briefly:
+the user_thumbdowns and the failed_variants are retrieved from the MongoDB right?
+Yes. Both are read from MongoDB on every request:
+
+user_thumbdowns — queried in /query via feedback_store.find_thumbdowns_for_query() → find({"normalized_query": norm})
+failed_variants — queried in /query via fv_col.find_one({"normalized_query": norm})
+No in-memory caching for either — every request hits MongoDB fresh.
+
+
+Use the plan made to integrate MongoDB for feedback files in the app project and check if this plan needs any modification to be implemented on the app_workflow project
+Let me start by checking the memory files and project structure to understand the existing plan and both projects.
+
+Read C:\Users\LOQ\.claude\projects\c--Users-LOQ-Desktop-Projects-RAG-work\memory\MEMORY.md
+Globpattern: "**/*.{py,md,txt,json}"
+Found 101 files
+Let me look at the project files more specifically, excluding the venv.
+
+Globpattern: "app/**/*.py"
+Found 24 files
+Globpattern: "app_workflow/**/*.py"
+Found 37 files
+Now let me read the key files to understand the plan and both projects' feedback/db implementations.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\db.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py
+Now let me read the configs and API files for both projects.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\config.py, c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\config.py
+Let me also read the API and routes files to understand the full picture.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\routes.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\api.py
+Let me check the app/api.py and also the services.py file in app_workflow.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\api.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\services.py
+Let me also check the command nodes and the graph to understand where failed_variants and feedback are called.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\commands.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\generate_answer.py
+Let me check the user_input node and query_variants to see how failed_variants are loaded.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\user_input.py, c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\query_variants.py
+Let me check the requirements files for both apps.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\requirements.txt
+Globpattern: "app_workflow/requirements*.txt"
+Found 1 file
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\requirements.txt
+Let me check the .env file to understand the MongoDB configuration.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\.env
+I now have a complete picture. Here is the full analysis.
+
+What the plan already did in app
+The app project is fully migrated:
+
+app/db.py — MongoDB client with 3 collections: feedback_interactions, user_thumbdowns, failed_variants
+app/feedback_store.py — uses MongoDB (no more JSON files); has log, load_all, count, count_good, load_good, mark_last_bad, mark_bad, _append_thumbdown, find_thumbdowns_for_query
+app/api.py — reads/writes failed_variants directly via failed_variants_col() inline in /query
+What app_workflow still uses (JSON files)
+app_workflow/services/feedback_store.py — all three stores (interactions.jsonl, user_thumbdowns.json, failed_variants.json) are file-based
+app_workflow/config.py — declares FEEDBACK_PATH, USER_THUMBDOWNS_PATH, FAILED_VARIANTS_PATH
+app_workflow/services/services.py — passes all three paths to FeedbackStore()
+Required modifications to the plan for app_workflow
+The original plan applies directly, but with 3 differences specific to how app_workflow is structured:
+
+1. failed_variants must stay in FeedbackStore, not in the API
+In app, failed variants are managed inline in app/api.py:191-200 using failed_variants_col() directly. In app_workflow, they go through feedback_store.load_failed_variants() and feedback_store.save_failed_variants() in nodes/user_input.py and nodes/generate_answer.py. The new app_workflow/services/feedback_store.py must keep both methods, backed by MongoDB's failed_variants collection instead of a JSON file.
+
+2. Pass request_id and variants to feedback_store.log() in generate_answer.py
+app_workflow/nodes/generate_answer.py:47-54 calls feedback_store.log() but omits request_id and variants. These exist in the state (state.get("request_id") and state.get("variants_with_chunks")). The MongoDB-backed log() in app/feedback_store.py stores both — they should be filled in here too.
+
+3. pymongo is missing from app_workflow/requirements.txt
+app/requirements.txt has pymongo==4.17.0 at the end, but app_workflow/requirements.txt does not. It needs to be added.
+
+Complete change list for app_workflow
+File	Change
+app_workflow/services/db.py (new)	Create — identical to app/db.py
+app_workflow/services/feedback_store.py	Rewrite — MongoDB-backed like app/feedback_store.py, but keep load_failed_variants() + save_failed_variants() methods using failed_variants_col(); remove all file-path constructor args
+app_workflow/config.py	Remove FEEDBACK_PATH, USER_THUMBDOWNS_PATH, FAILED_VARIANTS_PATH
+app_workflow/services/services.py	Remove file-path imports + constructor args; FeedbackStore() takes no arguments
+app_workflow/nodes/generate_answer.py	Add request_id=state.get("request_id", "") and variants=state.get("variants_with_chunks") or [] to the feedback_store.log() call
+app_workflow/requirements.txt	Add pymongo==4.17.0
+No changes needed to nodes/user_input.py, nodes/commands.py, or api.py — their public API calls (load_failed_variants, find_thumbdowns_for_query, mark_last_bad, count, count_good) are already identical to what the MongoDB version exposes.
+
+Do you want me to implement all of these changes now?
+
+Yes
+Update Todos
+
+Create app_workflow/services/db.py (MongoDB client module)
+
+Rewrite app_workflow/services/feedback_store.py to use MongoDB
+
+Remove file path constants from app_workflow/config.py
+
+Update app_workflow/services/services.py to remove file paths
+
+Add request_id and variants to feedback_store.log() in generate_answer.py
+
+Add pymongo to app_workflow/requirements.txt
+Write c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\db.py
+53 lines
+import logging
+import os
+
+from pymongo import MongoClient, ASCENDING
+
+logger = logging.getLogger(__name__)
+
+_client: MongoClient | None = None
+_indexes_ensured = False
+
+
+def get_client() -> MongoClient:
+    global _client
+    if _client is None:
+        uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+        _client = MongoClient(uri)
+        display = uri.split("@")[-1] if "@" in uri else uri
+        logger.info("MongoDB client initialized (host=%s)", display)
+    return _client
+
+
+def get_db():
+    db_name = os.getenv("MONGODB_DB_NAME", "rag_db")
+    return get_client()[db_name]
+
+
+def _ensure_indexes() -> None:
+    global _indexes_ensured
+    if _indexes_ensured:
+        return
+    db = get_db()
+    db["feedback_interactions"].create_index([("ts", ASCENDING)])
+    db["feedback_interactions"].create_index([("request_id", ASCENDING)], unique=True, sparse=True)
+    db["user_thumbdowns"].create_index([("normalized_query", ASCENDING)])
+    db["failed_variants"].create_index([("normalized_query", ASCENDING)], unique=True)
+    _indexes_ensured = True
+    logger.info("MongoDB indexes ensured.")
+
+
+def interactions_col():
+    _ensure_indexes()
+    return get_db()["feedback_interactions"]
+
+
+def thumbdowns_col():
+    _ensure_indexes()
+    return get_db()["user_thumbdowns"]
+
+
+def failed_variants_col():
+    _ensure_indexes()
+    return get_db()["failed_variants"]
+Let me check the main.py to understand the CLI flow before writing the new feedback_store.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\main.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\state.py
+Update Todos
+
+Create app_workflow/services/db.py (MongoDB client module)
+
+Rewrite app_workflow/services/feedback_store.py to use MongoDB
+
+Remove file path constants from app_workflow/config.py
+
+Update app_workflow/services/services.py to remove file paths
+
+Add request_id and variants to feedback_store.log() in generate_answer.py
+
+Add pymongo to app_workflow/requirements.txt
+The CLI path (main.py) never sets request_id, so I'll make the request_id field optional in the MongoDB document (only stored when non-empty) to avoid unique index conflicts. Now writing the new feedback_store:
+
+Write c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py
+219 lines
+import logging
+from datetime import datetime, timezone
+
+from pymongo import DESCENDING
+
+from app_workflow.services.db import interactions_col, thumbdowns_col, failed_variants_col
+from app_workflow.config import MIN_FEEDBACK_LEN
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["FeedbackStore", "MIN_FEEDBACK_LEN"]
+
+
+class FeedbackStore:
+    def __init__(self):
+        self._interactions = interactions_col()
+        self._thumbdowns = thumbdowns_col()
+        self._failed_variants = failed_variants_col()
+
+    @staticmethod
+    def _stored_chunks(chunks: list[dict] | None) -> list[dict]:
+        return [
+            {
+                "content": chunk.get("content", ""),
+                "source": chunk.get(
+                    "source",
+                    (chunk.get("metadata") or {}).get("source", "?"),
+                ),
+            }
+            for chunk in (chunks or [])[:3]
+            if chunk.get("content")
+        ]
+
+    @staticmethod
+    def _split_legacy_chunks(chunks: list[dict] | None) -> tuple[list[dict], list[dict]]:
+        documents: list[dict] = []
+        learned_qa: list[dict] = []
+        for chunk in chunks or []:
+            source = chunk.get(
+                "source",
+                (chunk.get("metadata") or {}).get("source", "?"),
+            )
+            target = learned_qa if source == "learned_qa" else documents
+            target.append(chunk)
+        return documents, learned_qa
+
+    # ── Write ────────────────────────────────────────────────────────────────
+
+    def log(
+        self,
+        query: str,
+        answer: str,
+        sources: list[dict],
+        quality: str,           # "OK" | "INSUFFICIENT" | "USER_THUMBSDOWN"
+        document_retrieved_chunks: list[dict] | None = None,
+        learned_qa_retrieved_chunks: list[dict] | None = None,
+        retrieved_chunks: list[dict] | None = None,
+        request_id: str = "",
+        variants: list[dict] | None = None,
+    ) -> None:
+        if (
+            retrieved_chunks is not None
+            and document_retrieved_chunks is None
+            and learned_qa_retrieved_chunks is None
+        ):
+            document_retrieved_chunks, learned_qa_retrieved_chunks = (
+                self._split_legacy_chunks(retrieved_chunks)
+            )
+
+        record: dict = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "query": query,
+            "answer": answer,
+            "quality": quality,
+            "sources": sources,
+            "document_chunks": self._stored_chunks(document_retrieved_chunks),
+            "learned_qa_chunks": self._stored_chunks(learned_qa_retrieved_chunks),
+            "variants": variants or [],
+        }
+        # Only store request_id when set so the sparse unique index is not violated
+        # by multiple CLI-path records that would all have the same empty string.
+        if request_id:
+            record["request_id"] = request_id
+
+        self._interactions.insert_one(record)
+        logger.debug(
+            "Interaction logged to MongoDB: request_id=%s quality=%s",
+            request_id, quality,
+        )
+
+    # ── Read ─────────────────────────────────────────────────────────────────
+
+    def load_all(self) -> list[dict]:
+        return [
+            {k: v for k, v in doc.items() if k != "_id"}
+            for doc in self._interactions.find({})
+        ]
+
+    def count(self) -> int:
+        return self._interactions.count_documents({})
+
+    def count_good(self) -> int:
+        return self._interactions.count_documents({"quality": "OK"})
+
+    def load_good(self, limit: int | None = None) -> list[dict]:
+        if limit:
+            docs = list(
+                self._interactions.find({"quality": "OK"}, {"_id": 0})
+                .sort("ts", DESCENDING).limit(limit)
+            )
+            return list(reversed(docs))
+        return list(self._interactions.find({"quality": "OK"}, {"_id": 0}))
+
+    # ── User feedback ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _normalize_query(q: str) -> str:
+        return q.lower().strip()
+
+    def mark_last_bad(
+        self,
+        feedback: str = "",
+        variants: list[dict] | None = None,
+    ) -> bool:
+        last = self._interactions.find_one(sort=[("ts", DESCENDING)])
+        if not last:
+            return False
+
+        self._interactions.update_one(
+            {"_id": last["_id"]},
+            {"$set": {"quality": "USER_THUMBSDOWN"}},
+        )
+        logger.info(
+            "Interaction marked USER_THUMBSDOWN in MongoDB: request_id=%s",
+            last.get("request_id", ""),
+        )
+
+        feedback_clean = (feedback or "").strip()
+        if feedback_clean and len(feedback_clean) >= MIN_FEEDBACK_LEN:
+            self._append_thumbdown(
+                original_query=last.get("query", ""),
+                bad_answer=last.get("answer", ""),
+                feedback=feedback_clean,
+                variants=variants or [],
+                request_id=last.get("request_id", ""),
+            )
+        return True
+
+    def _append_thumbdown(
+        self,
+        original_query: str,
+        bad_answer: str,
+        feedback: str,
+        variants: list[dict],
+        request_id: str = "",
+    ) -> None:
+        normalized = self._normalize_query(original_query)
+        doc = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "request_id": request_id,
+            "original_query": original_query,
+            "normalized_query": normalized,
+            "bad_answer": bad_answer,
+            "user_feedback": feedback,
+            "variants": [
+                {
+                    "query": v.get("query", ""),
+                    "document_chunks": [
+                        {
+                            "content": (c.get("content") or "")[:1000],
+                            "source": c.get("source", "?"),
+                        }
+                        for c in (v.get("document_chunks") or v.get("chunks") or [])
+                    ],
+                    "learned_qa_chunks": [
+                        {
+                            "content": (c.get("content") or "")[:1000],
+                            "source": c.get("source", "?"),
+                        }
+                        for c in (v.get("learned_qa_chunks") or [])
+                    ],
+                }
+                for v in variants
+            ],
+        }
+        self._thumbdowns.insert_one(doc)
+        logger.info(
+            "Thumbdown persisted to MongoDB: request_id=%s normalized_query=%r",
+            request_id, normalized,
+        )
+
+    def find_thumbdowns_for_query(self, query: str) -> list[dict]:
+        norm = self._normalize_query(query)
+        return [
+            {k: v for k, v in doc.items() if k != "_id"}
+            for doc in self._thumbdowns.find({"normalized_query": norm})
+        ]
+
+    # ── Failed variants ───────────────────────────────────────────────────────
+
+    def load_failed_variants(self, query: str) -> list[str]:
+        norm = self._normalize_query(query)
+        doc = self._failed_variants.find_one({"normalized_query": norm})
+        return list(doc["variants"]) if doc else []
+
+    def save_failed_variants(self, query: str, variants: list[str]) -> None:
+        if not variants:
+            return
+        norm = self._normalize_query(query)
+        self._failed_variants.update_one(
+            {"normalized_query": norm},
+            {"$addToSet": {"variants": {"$each": variants}}},
+            upsert=True,
+        )
+        logger.info(
+            "[FAILED VARIANTS] saved %d variant(s) to MongoDB for norm=%r",
+            len(variants), norm,
+        )
+Update Todos
+
+Create app_workflow/services/db.py (MongoDB client module)
+
+Rewrite app_workflow/services/feedback_store.py to use MongoDB
+
+Remove file path constants from app_workflow/config.py
+
+Update app_workflow/services/services.py to remove file paths
+
+Add request_id and variants to feedback_store.log() in generate_answer.py
+
+Add pymongo to app_workflow/requirements.txt
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\config.py
+Removed 3 lines
+Update Todos
+
+Create app_workflow/services/db.py (MongoDB client module)
+
+Rewrite app_workflow/services/feedback_store.py to use MongoDB
+
+Remove file path constants from app_workflow/config.py
+
+Update app_workflow/services/services.py to remove file paths
+
+Add request_id and variants to feedback_store.log() in generate_answer.py
+
+Add pymongo to app_workflow/requirements.txt
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\services.py
+Removed 3 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\services.py
+Removed 4 lines
+Update Todos
+
+Create app_workflow/services/db.py (MongoDB client module)
+
+Rewrite app_workflow/services/feedback_store.py to use MongoDB
+
+Remove file path constants from app_workflow/config.py
+
+Update app_workflow/services/services.py to remove file paths
+
+Add request_id and variants to feedback_store.log() in generate_answer.py
+
+Add pymongo to app_workflow/requirements.txt
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\generate_answer.py
+Added 2 lines
+Update Todos
+
+Create app_workflow/services/db.py (MongoDB client module)
+
+Rewrite app_workflow/services/feedback_store.py to use MongoDB
+
+Remove file path constants from app_workflow/config.py
+
+Update app_workflow/services/services.py to remove file paths
+
+Add request_id and variants to feedback_store.log() in generate_answer.py
+
+Add pymongo to app_workflow/requirements.txt
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\requirements.txt
+Edit failed
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\requirements.txt (lines 249-258)
+The requirements file is UTF-16 LE encoded. I'll use PowerShell to append in the correct encoding.
+
+PowerShell Append pymongo to app_workflow requirements.txt in UTF-16 LE encoding
+IN
+Add-Content -Path "c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\requirements.txt" -Value "pymongo==4.17.0" -Encoding Unicode
+
+OUT
+(PowerShell completed with no output)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\requirements.txt (lines 250-254)
+pymongo==4.17.0 is now appended in the correct format.
+
+Update Todos
+
+Create app_workflow/services/db.py (MongoDB client module)
+
+Rewrite app_workflow/services/feedback_store.py to use MongoDB
+
+Remove file path constants from app_workflow/config.py
+
+Update app_workflow/services/services.py to remove file paths
+
+Add request_id and variants to feedback_store.log() in generate_answer.py
+
+Add pymongo to app_workflow/requirements.txt
+All 6 changes are done. Here's a summary of what was implemented:
+
+New file: app_workflow/services/db.py — MongoDB client with interactions_col(), thumbdowns_col(), failed_variants_col(). Uses sparse=True on the request_id unique index to allow CLI-path records that have no request_id.
+
+Rewritten: app_workflow/services/feedback_store.py — fully MongoDB-backed, no more file I/O. Keeps load_failed_variants() and save_failed_variants() (which the workflow nodes use) backed by failed_variants_col() with $addToSet. Records with no request_id omit the field entirely so the sparse index is never violated.
+
+Updated: app_workflow/config.py — removed FEEDBACK_PATH, USER_THUMBDOWNS_PATH, FAILED_VARIANTS_PATH.
+
+Updated: app_workflow/services/services.py — FeedbackStore() now takes no arguments; removed the three file-path imports.
+
+Updated: app_workflow/nodes/generate_answer.py — feedback_store.log() now passes request_id and variants from state, bringing parity with the app project.
+
+Updated: app_workflow/requirements.txt — pymongo==4.17.0 appended.
+
+c:\Users\LOQ\Desktop\Projects\RAG-work\.env
+2026-06-27 16:05:17 | INFO     | [-] | MongoDB client initialized (host=mongodb://localhost:27017)
+ERROR:    Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\starlette\routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Program Files\Python314\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\api.py", line 44, in lifespan
+    from graph import build_graph
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\graph.py", line 3, in <module>
+    from nodes import (
+    ...<29 lines>...
+    )
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\__init__.py", line 1, in <module>
+    from nodes.user_input import user_input_node
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\user_input.py", line 3, in <module>
+    from services.services import feedback_store
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\services.py", line 26, in <module>
+    feedback_store = FeedbackStore()
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py", line 16, in __init__
+    self._interactions = interactions_col()
+                         ~~~~~~~~~~~~~~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\db.py", line 41, in interactions_col
+    _ensure_indexes()
+    ~~~~~~~~~~~~~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\db.py", line 33, in _ensure_indexes
+    db["feedback_interactions"].create_index([("request_id", ASCENDING)], unique=True, sparse=True)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 2391, in create_index
+    return (self._create_indexes([index], session, **cmd_options))[0]
+            ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\_csot.py", line 125, in csot_wrapper
+    return func(self, *args, **kwargs)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 2273, in _create_indexes
+    return self.database.client._retryable_write(False, inner, session, _Op.CREATE_INDEXES)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2113, in _retryable_write
+    return self._retry_with_session(retryable, func, s, bulk, operation, operation_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 1986, in _retry_with_session
+    return self._retry_internal(
+           ~~~~~~~~~~~~~~~~~~~~^
+        func=func,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        operation_id=operation_id,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\_csot.py", line 125, in csot_wrapper
+    return func(self, *args, **kwargs)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2038, in _retry_internal
+    ).run()
+      ~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2811, in run
+    res = self._read() if self._is_read else self._write()
+                                             ~~~~~~~~~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 3014, in _write
+    return self._func(self._session, conn, self._retryable)  # type: ignore
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 2263, in inner
+    self._command(
+    ~~~~~~~~~~~~~^
+        conn,
+        ^^^^^
+    ...<4 lines>...
+        session=session,
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 615, in _command
+    return conn.command(
+           ~~~~~~~~~~~~^
+        self._database.name,
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        user_fields=user_fields,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\helpers.py", line 53, in inner
+    return func(*args, **kwargs)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\pool.py", line 403, in command
+    return command(
+        self,
+    ...<20 lines>...
+        write_concern=write_concern,
+    )
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\network.py", line 212, in command
+    helpers_shared._check_command_response(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        response_doc,
+        ^^^^^^^^^^^^^
+    ...<2 lines>...
+        parse_write_concern_error=parse_write_concern_error,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\helpers_shared.py", line 284, in _check_command_response
+    raise OperationFailure(errmsg, code, response, max_wire_version)
+pymongo.errors.OperationFailure: An existing index has the same name as the requested index. When index names are not specified, they are auto generated and can cause conflicts. Please refer to our documentation. Requested index: { v: 2, unique: true, key: { request_id: 1 }, name: "request_id_1", sparse: true }, existing index: { v: 2, unique: true, key: { request_id: 1 }, name: "request_id_1" }, full error: {'ok': 0.0, 'errmsg': 'An existing index has the same name as the requested index. When index names are not specified, they are auto generated and can cause conflicts. Please refer to our documentation. Requested index: { v: 2, unique: true, key: { request_id: 1 }, name: "request_id_1", sparse: true }, existing index: { v: 2, unique: true, key: { request_id: 1 }, name: "request_id_1" }', 'code': 86, 'codeName': 'IndexKeySpecsConflict'}
+
+ERROR:    Application startup failed. Exiting.
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow>
+Show less
+The existing index (created by app/db.py) is non-sparse, so adding sparse=True in app_workflow's db.py conflicts. The fix is two-part: match the existing index exactly, and generate a UUID in log() when no request_id is provided so the non-sparse unique index is never violated.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\db.py
+Modified
+Now update feedback_store.log() to always have a request_id — generating a UUID when the caller doesn't supply one (CLI path).
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py
+Removed 3 lines
+Two fixes applied:
+
+app_workflow/services/db.py — removed sparse=True so the index definition matches the one already in MongoDB (created by app/db.py). No more IndexKeySpecsConflict.
+
+app_workflow/services/feedback_store.py — log() now does request_id or str(uuid.uuid4()), so CLI-path records (where no request_id is set) get a generated UUID. Every record has a unique value, so the non-sparse unique index is never violated.
+
+
+What is this issue:
+
+INFO:     127.0.0.1:56414 - "POST /query HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 420, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\fastapi\applications.py", line 1163, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\starlette\applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\starlette\routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\fastapi\routing.py", line 2531, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\fastapi\routing.py", line 1241, in handle
+    await super().handle(scope, receive, send)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\starlette\routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\fastapi\routing.py", line 150, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\fastapi\routing.py", line 136, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\fastapi\routing.py", line 690, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\fastapi\routing.py", line 344, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\api.py", line 120, in query
+    final_state = await asyncio.to_thread(_ctx["rag_app"].invoke, state)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python314\Lib\asyncio\threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python314\Lib\concurrent\futures\thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "C:\Program Files\Python314\Lib\concurrent\futures\thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langgraph\pregel\main.py", line 3365, in invoke
+    for chunk in self.stream(
+                 ~~~~~~~~~~~^
+        input,
+        ^^^^^^
+    ...<10 lines>...
+        **kwargs,
+        ^^^^^^^^^
+    ):
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langgraph\pregel\main.py", line 2759, in stream
+    for _ in runner.tick(
+             ~~~~~~~~~~~^
+        [t for t in loop.tasks.values() if not t.writes],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        schedule_task=loop.accept_push,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ):
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langgraph\pregel\_runner.py", line 167, in tick
+    run_with_retry(
+    ~~~~~~~~~~~~~~^
+        t,
+        ^^
+    ...<10 lines>...
+        },
+        ^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langgraph\pregel\_retry.py", line 126, in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langgraph\_internal\_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langgraph\_internal\_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\generate_answer.py", line 47, in generate_answer
+    feedback_store.log(
+    ~~~~~~~~~~~~~~~~~~^
+        query=user_input,
+        ^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+        variants=list(state.get("variants_with_chunks") or []),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py", line 83, in log
+    self._interactions.insert_one(record)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 890, in insert_one
+    self._insert_one(
+    ~~~~~~~~~~~~~~~~^
+        document,
+        ^^^^^^^^^
+    ...<5 lines>...
+        comment=comment,
+        ^^^^^^^^^^^^^^^^
+    ),
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 830, in _insert_one
+    self._database.client._retryable_write(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        acknowledged, _insert_command, session, operation=_Op.INSERT
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2113, in _retryable_write
+    return self._retry_with_session(retryable, func, s, bulk, operation, operation_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 1986, in _retry_with_session
+    return self._retry_internal(
+           ~~~~~~~~~~~~~~~~~~~~^
+        func=func,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        operation_id=operation_id,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\_csot.py", line 125, in csot_wrapper
+    return func(self, *args, **kwargs)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2038, in _retry_internal
+    ).run()
+      ~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2811, in run
+    res = self._read() if self._is_read else self._write()
+                                             ~~~~~~~~~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 3014, in _write
+    return self._func(self._session, conn, self._retryable)  # type: ignore
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 828, in _insert_command
+    _check_write_command_response(result)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\helpers_shared.py", line 322, in _check_write_command_response
+    _raise_last_write_error(write_errors)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\helpers_shared.py", line 292, in _raise_last_write_error
+    raise DuplicateKeyError(error.get("errmsg"), 11000, error)
+pymongo.errors.DuplicateKeyError: E11000 duplicate key error collection: rag_db.feedback_interactions index: request_id_1 dup key: { request_id: "7da5a39c-ffc5-4553-9343-c487a396e76b" }, full error: {'index': 0, 'code': 11000, 'errmsg': 'E11000 duplicate key error collection: rag_db.feedback_interactions index: request_id_1 dup key: { request_id: "7da5a39c-ffc5-4553-9343-c487a396e76b" }', 'keyPattern': {'request_id': 1}, 'keyValue': {'request_id': '7da5a39c-ffc5-4553-9343-c487a396e76b'}}
+During task with name 'generate_answer' and id 'c58ab51b-9440-3b8a-c193-a23b94305fad'
+Show less
+Let me look at the relevant files to understand the issue.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\generate_answer.py
+The issue is clear. The generate_answer LangGraph node is being retried by LangGraph (note the retry machinery in the traceback via run_with_retry), so feedback_store.log() is called a second time with the same request_id. MongoDB's unique index on request_id rejects the duplicate insert with DuplicateKeyError, which crashes the whole request.
+
+The fix is to make the log operation idempotent — either catch the duplicate error and skip, or use update_one with upsert=True. Skipping is correct here because the first insert already succeeded.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py
+Added 7 lines
+Root cause: LangGraph's run_with_retry retried the generate_answer node after a transient failure (or due to retry config), calling feedback_store.log() a second time with the same request_id. MongoDB's unique index on request_id rejected the second insert.
+
+Fix: Wrap insert_one in a try/except DuplicateKeyError. A duplicate means the first attempt already succeeded, so the retry is safely skipped with a warning log instead of crashing the request.
+
+Check if the fix is needed inside app folder's project. If needed, implement it there too
+Globpattern: "app/**/*.py"
+Found 24 files
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Let me also check the app/db.py to confirm it has the same unique index on request_id.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\db.py
+Yes — same unique index on request_id at line 34. The fix is needed here too.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Added 7 lines
+Yes, the fix was needed. app/db.py:34 creates the same unique=True index on request_id, so app/feedback_store.py had the identical vulnerability. Applied the same DuplicateKeyError guard to app/feedback_store.py:81.
+
+Give me a brief on this bug that u have fixed in both projects
+Bug Brief: DuplicateKeyError on LangGraph Node Retry
+What broke
+
+POST /query returned a 500 error. The crash happened inside the generate_answer LangGraph node when it tried to log the interaction to MongoDB.
+
+Root cause
+
+LangGraph's internal retry mechanism (run_with_retry) can re-execute a node if it encounters a transient failure mid-run. When generate_answer was retried, feedback_store.log() was called a second time with the same request_id. Both app/ and app_workflow/ collections have a unique index on request_id, so MongoDB rejected the second insert_one with:
+
+
+pymongo.errors.DuplicateKeyError: E11000 duplicate key error
+collection: rag_db.feedback_interactions index: request_id_1
+This unhandled exception propagated all the way up and killed the HTTP request.
+
+Why it's safe to skip the duplicate
+
+A DuplicateKeyError on request_id means the first insert already succeeded — the interaction was already logged. The retry's insert carries identical data, so discarding it loses nothing.
+
+The fix
+
+Wrapped insert_one in a try/except DuplicateKeyError in both:
+
+app/feedback_store.py
+app_workflow/services/feedback_store.py
+On a duplicate, the method now logs a warning and returns cleanly, letting the node (and the HTTP request) complete successfully.
+
+MongoDB was integrated in both app and app_workflow projects. In both projects, data is being modified/inserted inside the database. Is there any case where the concept of rollback is needed?
+Let me look at the MongoDB integration in both projects to understand the data operations.
+
+Globpattern: "**/*.py"
+Found 101 files
+Globpattern: "app*/**/*.py"
+Found 62 files
+Let me read the key MongoDB files in both projects simultaneously.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\db.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\db.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py
+Now let me check the self-learner to see if there are any multi-step writes there.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\self_learner.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\self_learner.py
+Let me check where save_failed_variants is called to get the full picture.
+
+Grep "save_failed_variants|mark_last_bad|mark_bad" (in c:\Users\LOQ\Desktop\Projects\RAG-work, glob: app*/**/*.py)
+13 lines of output
+Now I have a complete picture of all MongoDB operations. Here's the analysis:
+
+Rollback Analysis
+Operations that are already safe (no rollback needed)
+Operation	Why it's safe
+log()	Single insert_one — atomic by nature
+save_failed_variants()	Single update_one with upsert=True + $addToSet — atomic
+SelfLearner.run_distillation()	Only reads from MongoDB; writes go to ChromaDB only
+The one genuine rollback concern: mark_last_bad / mark_bad
+Both projects have this two-step write that touches two separate collections:
+
+
+Step 1 → feedback_interactions.update_one(quality = "USER_THUMBSDOWN")
+Step 2 → user_thumbdowns.insert_one(...)   ← only if feedback meets MIN_FEEDBACK_LEN
+These are not in a transaction. If step 1 succeeds but step 2 fails (e.g. network blip, process crash, exception in _append_thumbdown), you end up with:
+
+Interaction correctly marked USER_THUMBSDOWN ✓
+But the detailed thumbdown record (query variants, bad answer, user feedback text) is missing from user_thumbdowns ✗
+Practical impact: The interaction won't feed into distillation (which is the critical safety goal), so the system isn't "wrong." But find_thumbdowns_for_query will return nothing for that query, meaning the system won't remember the failed pattern for future avoidance.
+
+Should you add a transaction?
+Only if MongoDB is running as a replica set (transactions require that). For a single-node dev instance (mongodb://localhost:27017), multi-document transactions aren't available.
+
+Recommendation: The current partial-write risk is low-impact for this use case. The simplest mitigation — without requiring a replica set — is to wrap _append_thumbdown in a try/except that logs the failure loudly, so the missing thumbdown is at least detectable, rather than silently lost. Both projects currently have no error handling around _append_thumbdown.
+
+
+Explain the replica set concept
+
+The one genuine rollback concern: mark_last_bad / mark_bad
+Both projects have this two-step write that touches two separate collections:
+
+
+Step 1 → feedback_interactions.update_one(quality = "USER_THUMBSDOWN")
+Step 2 → user_thumbdowns.insert_one(...)   ← only if feedback meets MIN_FEEDBACK_LEN
+These are not in a transaction. If step 1 succeeds but step 2 fails (e.g. network blip, process crash, exception in _append_thumbdown), you end up with:
+
+Interaction correctly marked USER_THUMBSDOWN ✓
+But the detailed thumbdown record (query variants, bad answer, user feedback text) is missing from user_thumbdowns ✗
+Practical impact: The interaction won't feed into distillation (which is the critical safety goal), so the system isn't "wrong." But find_thumbdowns_for_query will return nothing for that query, meaning the system won't remember the failed pattern for future avoidance.
+
+Should you add a transaction?
+Only if MongoDB is running as a replica set (transactions require that). For a single-node dev instance (mongodb://localhost:27017), multi-document transactions aren't available.
+
+Recommendation: The current partial-write risk is low-impact for this use case. The simplest mitigation — without requiring a replica set — is to wrap _append_thumbdown in a try/except that logs the failure loudly, so the missing thumbdown is at least detectable, rather than silently lost. Both projects currently have no error handling around _append_thumbdown.
+Thought for a couple of seconds
+
+A replica set is MongoDB’s way of running the same database on multiple MongoDB server processes.
+
+Think of it as:
+
+1 primary MongoDB + 1 or more secondary copies
+
+The primary receives writes. The secondary nodes continuously copy the primary’s data. If the primary dies, one secondary can automatically become the new primary.
+
+In your case, the important point is:
+
+MongoDB multi-document transactions require a replica set, even if it is only a single-node replica set on your laptop.
+
+So this normal local setup:
+
+mongodb://localhost:27017
+
+is usually a standalone MongoDB server, not a replica set. It can do normal inserts/updates, but not proper multi-document transactions.
+
+Your risky case is real because mark_last_bad() first updates feedback_interactions, then separately calls _append_thumbdown() to insert into user_thumbdowns. The code shows the update happens first, and the insert is a separate later operation.
+
+A single-node replica set means you still run MongoDB locally, but configure it as a replica set:
+
+mongod --replSet rs0
+
+Then initialize it in Mongo shell:
+
+rs.initiate()
+
+After that, you connect with something like:
+
+mongodb://localhost:27017/?replicaSet=rs0
+
+Then MongoDB allows transactions, even though there is only one MongoDB node.
+
+For your project: you do not need a full production replica set unless you want strict atomicity. For now, your recommendation is reasonable: add try/except around _append_thumbdown() and log loudly.
+
+" For a single-node dev instance (mongodb://localhost:27017), multi-document transactions aren't available."
+Explain this from scratch
+
+Let's start from the very beginning.
+
+Step 1: What is a MongoDB server?
+
+When you install MongoDB and start it, you are running a database server.
+
+For example:
+
+mongod
+
+Now your application connects to it:
+
+Python App
+      │
+      │
+mongodb://localhost:27017
+      │
+      ▼
+ MongoDB Server
+
+Every insert, update, delete, or query goes to this one server.
+
+Step 2: What is a standalone server?
+
+By default, MongoDB starts as a standalone server.
+
+           MongoDB
+         (Standalone)
+             │
+      All data stored here
+
+There is only one copy of the database.
+
+If the process crashes:
+
+database stops
+no backup server
+no election
+no replication
+
+This is perfectly fine for local development.
+
+Step 3: What is a replica set?
+
+A replica set is multiple MongoDB servers that keep identical copies of the database.
+
+Example:
+
+               Primary
+           (Accepts Writes)
+                  │
+          Replicates Changes
+          ↙               ↘
+     Secondary         Secondary
+
+Every write goes to the primary.
+
+The primary immediately tells the secondaries:
+
+"I just inserted this document. Copy it."
+
+So all three eventually contain identical data.
+
+Step 4: Why does MongoDB need a replica set for transactions?
+
+Imagine your code:
+
+Update Collection A
+Insert into Collection B
+
+You want both operations to succeed together.
+
+If the server crashes after the first operation:
+
+✓ Collection A updated
+
+✗ Collection B not updated
+
+The database is inconsistent.
+
+A transaction promises:
+
+Either both operations happen, or neither happens.
+
+To guarantee this, MongoDB needs a mechanism called the oplog (operations log).
+
+Step 5: What is the oplog?
+
+Every write is recorded in a special log.
+
+Example:
+
+1. Update interaction
+2. Insert thumbdown
+3. Commit transaction
+
+If something crashes, MongoDB can read this log and decide:
+
+Was the transaction committed?
+
+YES
+→ Keep both writes.
+
+NO
+→ Roll everything back.
+
+This log is only maintained in replica set mode.
+
+Standalone MongoDB doesn't maintain the infrastructure needed for transactions.
+
+Step 6: Why not support transactions on standalone?
+
+This is mostly a MongoDB design decision.
+
+Internally, transactions rely on components that only exist when the server is configured as a replica set:
+
+oplog
+logical sessions
+transaction coordinator
+commit protocol
+
+Rather than maintaining two completely different transaction implementations, MongoDB simply enables transactions only in replica set mode.
+
+Step 7: Why is a single-node replica set enough?
+
+This confuses many beginners.
+
+A replica set does not mean multiple computers.
+
+You can have:
+
+Replica Set
+    │
+    ▼
+Primary
+
+Only one server.
+
+No secondary.
+
+No replication.
+
+But MongoDB still enables:
+
+oplog
+sessions
+transaction machinery
+
+because it knows this server is part of a replica set.
+
+Step 8: Comparing the two
+Standalone
+Python App
+      │
+      ▼
+MongoDB
+One database
+No replication
+No elections
+No transactions
+Single-node replica set
+Python App
+      │
+      ▼
+Replica Set
+      │
+      ▼
+Primary
+
+Still only one database server.
+
+But MongoDB now enables:
+
+oplog ✓
+logical sessions ✓
+multi-document transactions ✓
+replication infrastructure ✓
+Step 9: Your project
+
+Currently you likely have
+
+mongodb://localhost:27017
+
+which means:
+
+Standalone MongoDB
+
+Your code:
+
+update_one(...)
+insert_one(...)
+
+are two completely separate operations.
+
+update_one()
+
+<crash>
+
+insert_one()
+
+If the crash happens between them, MongoDB has no transaction to roll back.
+
+If you instead converted your local MongoDB into a single-node replica set, you could write:
+
+with client.start_session() as session:
+    with session.start_transaction():
+
+        interactions.update_one(..., session=session)
+
+        thumbdowns.insert_one(..., session=session)
+
+Now MongoDB guarantees:
+
+Both succeed
+      OR
+Neither succeeds
+
+even though you're still running only one MongoDB server on your own computer.
+
+
+I must implement the transaction concept considering both projects have this two-step write that touches two separate collections
+I'll implement MongoDB transactions for both projects. The pattern: read the document first (outside the transaction, since it's a lookup), then wrap the two-step write in a single session transaction so both collections are either fully written or fully rolled back.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py (lines 2-11)
+Now I'll apply all changes to both files in parallel.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py
+Modified
+Now update _append_thumbdown in both files to accept an optional session parameter:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py
+Added 1 line
+Now pass session to insert_one in both _append_thumbdown methods:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py
+Modified
+Now replace the bodies of mark_last_bad and mark_bad in app/feedback_store.py to use a transaction:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Added 7 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py
+Added 5 lines
+Now the same for app_workflow/services/feedback_store.py — mark_last_bad (no mark_bad there):
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py
+Added 5 lines
+Let me do a final review of both files to confirm everything looks correct:
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\feedback_store.py (lines 121-220)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\feedback_store.py (lines 121-205)
+Both files look correct. Here's a summary of what was changed and one important prerequisite:
+
+Changes made
+Both app/feedback_store.py and app_workflow/services/feedback_store.py received the same structural changes:
+
+get_client imported — needed to open a session from the shared singleton client.
+
+mark_last_bad / mark_bad — both writes now happen inside with get_client().start_session() as session / with session.start_transaction(). If _append_thumbdown raises for any reason, PyMongo automatically aborts the transaction and the update_one is rolled back as well.
+
+_append_thumbdown — gained a session=None parameter that is forwarded to insert_one. When called from within a transaction, the write joins that transaction; when called standalone (e.g. from a test), it runs without a session as before.
+
+Required: MongoDB must run as a replica set
+Multi-document transactions require a replica set. On a standalone mongod you'll get:
+
+
+pymongo.errors.OperationFailure: Transaction numbers are only allowed on a replica set member or mongos
+To enable this locally with a single node, add --replSet rs0 when starting MongoDB and run once:
+
+
+// in mongosh
+rs.initiate()
+Or if using Docker:
+
+
+mongod --replSet rs0 --bind_ip_all
+No application code changes are needed beyond what was done — the same MONGODB_URI env var works.
+
+MongoDB server automatically started running when i had installed it. Do i need to need to change anything?
+Let me check your current MongoDB setup to give you a precise answer.
+
+PowerShell Check if MongoDB is running as standalone or replica set
+IN
+mongosh --eval "db.adminCommand({isMaster:1})" --quiet 2>&1 | Select-String -Pattern "setName|ismaster|hosts|me|version|ok"
+
+OUT
+Exit code 1
+mongosh : The term 'mongosh' is not recognized as the name of a cmdlet, function, script file, or operable program. 
+Check the spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:1
++ mongosh --eval "db.adminCommand({isMaster:1})" --quiet 2>&1 | Select- ...
++ ~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (mongosh:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+PowerShell Find mongosh and mongod.cfg locations
+IN
+Get-ChildItem "C:\Program Files\MongoDB" -Recurse -Filter "mongosh.exe" -ErrorAction SilentlyContinue | Select-Object FullName; Get-ChildItem "C:\Program Files\MongoDB" -Recurse -Filter "mongod.cfg" -ErrorAction SilentlyContinue | Select-Object FullName
+
+OUT
+FullName                                          
+--------                                          
+C:\Program Files\MongoDB\Server\8.3\bin\mongod.cfg
+Read C:\Program Files\MongoDB\Server\8.3\bin\mongod.cfg
+Found the issue — replication: is commented out, so it's running standalone. You need two changes: edit the config and restart the service, then initiate the replica set once.
+
+PowerShell Find available mongo CLI tools
+IN
+Get-ChildItem "C:\Program Files\MongoDB\Server\8.3\bin\" -Filter "mongo*.exe" | Select-Object Name
+
+OUT
+Name      
+----      
+mongod.exe
+mongos.exe
+No mongosh installed — that's fine. I'll edit the config, and you can run rs.initiate() via Python since PyMongo is already installed.
+
+Step 1 — Edit mongod.cfg to enable replication:
+
+Edit C:\Program Files\MongoDB\Server\8.3\bin\mongod.cfg
+Edit failed
+That file requires admin rights to edit. Here's exactly what to do manually — two steps total:
+
+Step 1 — Edit mongod.cfg as Administrator
+
+Open C:\Program Files\MongoDB\Server\8.3\bin\mongod.cfg in Notepad (right-click → Run as administrator). Find this line:
+
+
+#replication:
+Replace it with:
+
+
+replication:
+  replSetName: "rs0"
+Save the file.
+
+Step 2 — Restart the MongoDB service
+
+Run this in an elevated PowerShell (right-click → Run as Administrator):
+
+
+Restart-Service -Name MongoDB
+Step 3 — Initiate the replica set (one-time only)
+
+Run this Python snippet once from your project:
+
+
+from pymongo import MongoClient
+client = MongoClient("mongodb://localhost:27017")
+print(client.admin.command("replSetInitiate"))
+You should see {"ok": 1.0, ...}. After that, transactions will work and your code needs no further changes.
+
+To verify it worked, run:
+
+
+from pymongo import MongoClient
+info = MongoClient("mongodb://localhost:27017").admin.command("isMaster")
+print(info.get("setName"))   # should print: rs0
+print(info.get("ismaster"))  # should print: True
+c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\temp.py
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow> python .\temp.py
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\temp.py", line 3, in <module>
+    print(client.admin.command("replSetInitiate"))
+          ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\_csot.py", line 125, in csot_wrapper
+    return func(self, *args, **kwargs)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\database.py", line 953, in command
+    return self._client._retryable_read(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        inner, read_preference, session, command_name, None, False, is_run_command=True
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2076, in _retryable_read
+    return self._retry_internal(
+           ~~~~~~~~~~~~~~~~~~~~^
+        func,
+        ^^^^^
+    ...<9 lines>...
+        is_aggregate_write=is_aggregate_write,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\_csot.py", line 125, in csot_wrapper
+    return func(self, *args, **kwargs)
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2038, in _retry_internal
+    ).run()
+      ~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2811, in run
+    res = self._read() if self._is_read else self._write()
+          ~~~~~~~~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 3027, in _read
+    self._server = self._get_server()
+                   ~~~~~~~~~~~~~~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2975, in _get_server
+    return self._client._select_server(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._server_selector,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        operation_id=self._operation_id,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 1851, in _select_server
+    server = topology.select_server(
+        server_selector,
+    ...<2 lines>...
+        operation_id=operation_id,
+    )
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\topology.py", line 428, in select_server
+    server = self._select_server(
+        selector,
+    ...<4 lines>...
+        operation_id=operation_id,
+    )
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\topology.py", line 402, in _select_server
+    servers = self.select_servers(
+        selector,
+    ...<4 lines>...
+        deprioritized_servers,
+    )
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\topology.py", line 298, in select_servers
+    server_descriptions = self._select_servers_loop(
+        selector,
+    ...<4 lines>...
+        deprioritized_servers=deprioritized_servers,
+    )
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\pymongo\synchronous\topology.py", line 359, in _select_servers_loop
+    raise ServerSelectionTimeoutError(
+        f"{self._error_message(selector)}, Timeout: {timeout}s, Topology Description: {self.description!r}"
+    )
+pymongo.errors.ServerSelectionTimeoutError: No servers match selector "Primary()", Timeout: 30s, Topology Description: <TopologyDescription id: 6a3fd4ba62fe71dea1cdb95f, topology_type: Unknown, servers: [<ServerDescription ('localhost', 27017) server_type: RSGhost, rtt: 0.0007819975912570954>]>
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow>
+Show less
+The error RSGhost means MongoDB restarted correctly with the replica set config, but it's waiting to be initiated. The problem is PyMongo is looking for a Primary that doesn't exist yet. Fix: connect with directConnection=True to bypass topology discovery.
+
+Update app_workflow/temp.py to:
+
+
+from pymongo import MongoClient
+client = MongoClient("mongodb://localhost:27017", directConnection=True)
+print(client.admin.command("replSetInitiate"))
+Run it again — it should return {'ok': 1.0, ...} and the node will elect itself Primary within a few seconds.
+
+
+Give me a research on the solutions to the following problem:
+I implemented an app where several API requests can be processed parallelly. The first request is starts to process normally. However, each time the 2nd request tries to call the LLM, the token limit has already been consumed by the 1st request's LLM calls. So both requests are competing for the limited groq API tokens. Ultimately, each request increases the delay for the LLM call (exponential backoff + jitter) and in some occasions neither get to make the LLM call. When a request doesnt get to call the LLM without the runtime token limit error, even after 3 retries, then it exits.
+
+I’ll ground this in current Groq rate-limit behavior plus production patterns for shared LLM quotas, then translate it into concrete architecture options for your parallel API setup.
+
+One important finding: Groq limits are organization-level, not per request or per user, so your two API requests are correctly “seeing” the same shared token bucket. The bug is not parallelism itself; it is uncoordinated parallel LLM admission.
+
+Thought for 15s
+Core diagnosis
+
+Your problem is shared quota contention.
+
+Groq rate limits are applied at the organization level, not independently per API request/user. Limits include RPM, RPD, TPM, TPD, and sometimes separate input/output TPM limits. You hit whichever limit is exhausted first. Groq also returns 429 Too Many Requests, retry-after, and rate-limit headers such as remaining tokens and reset time.
+
+So the real issue is:
+
+Multiple parallel requests are independently retrying against the same shared Groq token bucket, without global coordination.
+
+Exponential backoff helps only after failure. It does not prevent requests from colliding again.
+
+Best solutions, ranked
+1. Add a global LLM rate limiter / token scheduler
+
+This is the most correct production solution.
+
+Instead of every request directly calling Groq, all LLM calls should pass through one shared component:
+
+API Request 1 ┐
+API Request 2 ├──> LLM Gateway / Token Scheduler ──> Groq
+API Request 3 ┘
+
+The scheduler should track:
+
+remaining_requests
+remaining_tokens
+reset_tokens_time
+retry_after
+estimated_input_tokens
+reserved_output_tokens
+
+Before making a Groq call, it decides:
+
+Do we have enough token budget now?
+Yes -> call Groq
+No  -> queue/delay/fail fast
+
+This prevents request 2 from blindly calling Groq while request 1 has already consumed the available TPM.
+
+2. Use a queue instead of raw parallel LLM calls
+
+Keep your API parallel, but serialize or partially serialize only the LLM section.
+
+Example:
+
+Retrieval / validation / preprocessing  -> parallel
+LLM call                                -> controlled queue
+Postprocessing                          -> parallel
+
+This is much better than putting a lock around the whole API request.
+
+Bad:
+
+async with global_lock:
+    run_entire_pipeline()
+
+Better:
+
+run_retrieval_parallel()
+
+await llm_queue.submit(llm_call)
+
+run_postprocessing_parallel()
+
+This keeps most of your app concurrent while protecting the bottleneck.
+
+3. Respect Groq’s retry-after header
+
+Do not use blind exponential backoff only.
+
+Groq explicitly provides retry-after when rate-limited, and rate-limit headers are available for remaining/reset information. A real issue reported in Aider showed that ignoring Groq’s retry-after and using custom retry timing caused poor retry behavior.
+
+Correct behavior:
+
+if status_code == 429:
+    wait = response.headers.get("retry-after")
+    await asyncio.sleep(float(wait))
+
+Then add small jitter only if needed.
+
+4. Reserve token budget before calling the LLM
+
+Before sending a request, estimate:
+
+input_tokens + max_output_tokens
+
+Then reserve that amount from a shared token bucket.
+
+Important: max_tokens matters. If you set max_tokens=4096, your scheduler should assume the call may need that much output budget, even if it often generates less.
+
+Production rule:
+
+estimated_cost = input_tokens + max_output_tokens
+
+If budget is insufficient, queue the call.
+
+5. Reduce token usage per request
+
+This is not the main architecture fix, but it helps a lot.
+
+Useful reductions:
+
+- Reduce retrieved chunks
+- Compress context before final generation
+- Use smaller system prompts
+- Cache repeated prompts
+- Lower max_tokens
+- Use structured output instead of verbose natural language
+- Avoid repeated validation LLM calls
+- Merge multiple small LLM calls into one call where possible
+
+Groq says cached tokens do not count toward rate limits, so stable/repeated prompt prefixes can help when prompt caching applies.
+
+Recommended architecture
+
+Use this:
+
+FastAPI
+  |
+  |-- Request pipeline runs normally
+  |
+  |-- Any LLM call goes through:
+        LLMGateway
+          - async queue
+          - RPM limiter
+          - TPM limiter
+          - retry-after handling
+          - per-request timeout
+          - observability logs
+  |
+  |-- Groq API
+
+This is the clean production-grade design.
+
+Simple implementation idea
+class LLMGateway:
+    def __init__(self, max_concurrent_llm_calls: int = 1):
+        self.semaphore = asyncio.Semaphore(max_concurrent_llm_calls)
+
+    async def call_llm(self, payload):
+        async with self.semaphore:
+            for attempt in range(3):
+                try:
+                    return await groq_call(payload)
+
+                except RateLimitError as e:
+                    retry_after = extract_retry_after(e)
+
+                    if retry_after:
+                        await asyncio.sleep(retry_after)
+                    else:
+                        await asyncio.sleep(2 ** attempt)
+
+            raise RuntimeError("LLM call failed after retries")
+
+This is the beginner version.
+
+The production version should also include a token bucket, not just a semaphore.
+
+Key design choice
+Option	Result
+No control	Requests collide and fail
+Global lock around whole request	Safe but slow
+Lock only around LLM call	Better
+Queue + token-aware scheduler	Best
+More Groq quota / paid tier	Helps, but does not remove need for scheduling
+Final recommendation
+
+Do not rely on retries as the main solution.
+
+Build a shared LLM Gateway that controls all Groq calls across your API process. It should queue calls, estimate token cost, respect Groq’s retry-after, and throttle based on remaining TPM/RPM. Your API can still process requests in parallel, but LLM calls must be globally coordinated.
+
+
+The average time for this LangGraph project's total execution is roughly 18 minutes. Other than switching off any module/node, what are the possible ways I can reduce this time?
+
+I’ll focus on reducing runtime without removing features entirely: fewer LLM calls, less serialized waiting, smaller prompts, smarter gating, and cheaper validation/compression paths.
+
+Thought for 12s
+
+Yes. Your biggest wins are not from LangGraph itself, but from reducing LLM-call count, prompt size, retries, and serialization.
+
+Highest-impact options
+Stop serializing every LLM call through one global FIFO gate
+
+Your llm_invoke() forces all LLM calls through one shared FIFO gate, so even parallel LangGraph nodes become effectively sequential when they call the LLM. This protects rate limits, but it kills parallelism. Use separate throttlers/pools for:
+
+main answer LLM
+judge LLM
+compression LLM
+distillation LLM
+
+Right now the gate/cooldown design serializes calls and may sleep between calls.
+
+Batch validation instead of validating chunk groups one-by-one
+
+You validate retrieval, merge faithfulness, DC redundancy, and LBC compression using many separate judge calls. For example, retrieval validation calls the judge LLM on chunks, merge validation calls judge LLM per merge pair, and LBC validation calls judge per compressed chunk.
+
+Better: send multiple chunks/pairs in one judge prompt and return a list of verdicts.
+
+Reduce LBC calls
+
+Your LBC compresses each chunk individually through the LLM. That can explode runtime when many chunks survive earlier stages.
+
+Instead:
+
+LBC only top N chunks
+skip LBC for chunks already below a size threshold
+batch 3–5 chunks per LBC call
+use extractive sentence filtering before LLM compression
+Avoid embedding every chunk repeatedly
+
+Dedup merge generates embeddings for every input chunk during execution.
+Store embeddings from retrieval or Chroma results where possible, or cache content_hash -> embedding.
+
+Query both Chroma collections truly in parallel
+
+retrieve_separate() embeds once, but queries documents first, then learned QA.
+Run both collection.query() calls concurrently after the single embedding.
+
+Add early-exit gates
+
+Before expensive compression:
+
+if retrieved chunks ≤ 3, skip NAC/DC/LBC and answer directly
+if total context tokens are already below budget, skip compression
+if learned QA has high similarity, reduce document processing depth
+
+Your tools file already has a token-budget idea for compression skipping. Apply that same idea to the LangGraph node pipeline.
+
+Use cheaper models for judge/compression
+
+Use the strongest model only for final answer. Use faster/cheaper model for:
+
+retrieval validation
+merge validation
+DC scan
+LBC compression
+CAQ
+Remove unnecessary draft → CAQ → final duplication
+
+Your final answer often just reuses the draft if it exists.
+So draft + CAQ + final can become:
+
+generate answer once
+optionally run CAQ only for long/high-risk answers
+Make timing tracker less write-heavy
+
+TimingTracker.record() flushes the whole JSON file every time.
+This is not your 18-minute bottleneck, but change it to flush once per request.
+
+Limit retries
+
+Several nodes retry LLM calls on empty/failed output. NAC, DC, and LBC all have retry loops.
+Use lower retry limits for non-final stages.
+
+Best practical order
+
+Do this first:
+
+Separate LLM throttles instead of one global FIFO gate.
+Batch judge validations.
+Batch or threshold LBC.
+Cache chunk embeddings.
+Query documents and learned QA concurrently.
+Collapse draft/final generation into one step.
+
+These can reduce 18 minutes to a few minutes without switching off modules.
+
+The average time for this LangGraph project's total execution is roughly 18 minutes. Other than switching off any module/node, what are the possible ways I can reduce this time?
+
+Show less
+17:06
+
+Searched memory
+Searched memory
+I have a thorough picture of your entire system now — the graph topology, the FIFO serialization gate in llm_caller.py, the LBC per-chunk loop, the DC windowing, the NAC sequential runs, the validation layers, and Groq as the backend. Let me give you a complete, structured analysis.
+
+Root Cause Analysis First
+18 minutes is dominated by one structural reality: you have a FIFO-serialized LLM gate (_gate_acquire / _gate_release_to_next in llm_caller.py) that forces every LLM call system-wide to be strictly sequential. Your graph has two parallel compression tracks (Documents and Learned QA), but the FIFO gate collapses them into a single queue at the LLM layer. Every node that touches the LLM — and many of your nodes do — waits in line behind every other one. Then you layer on top an adaptive cooldown (_apply_cooldown) that intentionally sleeps between calls to avoid 429s on Groq's free/rate-limited tier. You're not actually running in parallel at the LLM level at all, despite the graph's parallelism.
+
+This is the single most impactful thing to understand. Everything else follows from it.
+
+Optimization Strategies (No Nodes Removed)
+1. Attack the FIFO Gate: Switch to a Proper Async/Concurrent LLM Client
+The FIFO gate was built to serialize LLM calls due to Groq rate limits. This is a legitimate constraint but a blunt instrument. The right fix is token-bucket rate limiting with concurrency, not full serialization.
+
+Replace llm_caller.py's threading gate with an asyncio-native rate limiter using a semaphore + token bucket:
+
+python
+import asyncio
+from asyncio import Semaphore
+
+# Allow up to N concurrent LLM calls within the rate limit budget
+_llm_semaphore = Semaphore(3)  # tune based on your Groq tier's TPM/RPM
+
+async def llm_invoke_async(llm, messages, *, caller_tag="LLM", **kwargs):
+    async with _llm_semaphore:
+        await _wait_for_token_window_async(caller_tag)
+        result = await _invoke_once_async(llm, messages, **kwargs)
+        await _apply_cooldown_async(result, caller_tag)
+        return result
+Then run your graph with rag_app.ainvoke(state) and rewrite all node functions as async def. LangGraph fully supports async nodes. This alone could cut your time by 50–70% because the two compression tracks and the multi-variant retrievals can now genuinely proceed in parallel at the LLM call level, within the rate limit budget.
+
+The key insight: Groq's rate limits are measured in tokens per minute and requests per minute, not "one at a time." You can have 2–3 in-flight calls simultaneously and stay within budget, which your current architecture completely prevents.
+
+2. LBC Is Your Hottest Loop — Parallelize Chunk Processing Within It
+Looking at lbc.py: _run_lbc() iterates over chunks sequentially with a for idx, chunk in enumerate(chunks) loop, making one LLM call per chunk. With N chunks this is N sequential round-trips. Even with async, these calls are currently chained.
+
+Replace the sequential loop with asyncio.gather (or concurrent.futures.ThreadPoolExecutor if you keep sync):
+
+python
+# Sync version using ThreadPoolExecutor (quick win, no async refactor needed)
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def _run_lbc(chunks, query):
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(_compress_single_chunk, chunk, query, idx): idx
+            for idx, chunk in enumerate(chunks)
+        }
+        results = [None] * len(chunks)
+        for future in as_completed(futures):
+            idx = futures[future]
+            results[idx] = future.result()
+    return results
+Important caveat: your FIFO gate would need to become a semaphore instead of a mutex for this to work. They're coupled. Fix both together.
+
+3. DC's Windowed Scan Can Be Parallelized Across Non-Overlapping Windows
+In dc.py, _run_dc() slides a window of size DC_WINDOW_SIZE=3 across chunks sequentially. Windows are non-overlapping (range(0, len(result), window_size)), so they're actually independent of each other and can be processed in parallel:
+
+python
+from concurrent.futures import ThreadPoolExecutor
+
+def _run_dc_parallel(chunks):
+    windows = [
+        (start, min(start + DC_WINDOW_SIZE, len(chunks)))
+        for start in range(0, len(chunks), DC_WINDOW_SIZE)
+    ]
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [
+            executor.submit(_process_window, chunks[s:e], s)
+            for s, e in windows
+        ]
+        results = [f.result() for f in futures]
+    # merge results back in order
+    return [chunk for window_result in results for chunk in window_result]
+This is safe because each window operates on its own slice and you reconstruct order after.
+
+4. Groq Rate Limit Is Likely Your Wall Ceiling — Upgrade Your Tier or Switch Provider
+Your llm_setup.py uses llama-3.1-8b-instant on Groq. On Groq's free tier, the limits are roughly 30 RPM and 6,000 TPM for that model. With your pipeline making potentially 15–30+ LLM calls per query (variants × LBC chunks × DC windows × validation passes × draft/quality/answer), you will hit rate limits on every single request, and the FIFO gate's cooldown (_apply_cooldown) is what you're seeing as those missing minutes.
+
+Concrete options:
+
+Option A — Groq paid tier: Raises limits to ~600 RPM / 200k TPM. At that point the FIFO gate becomes irrelevant overhead and you can remove it entirely, dropping to a simple retry-with-jitter pattern.
+
+Option B — Switch to OpenAI (you already have langchain-openai in requirements): gpt-4o-mini is cheap, has far higher rate limits by default, and supports parallel calls natively. You can run both LBC tracks simultaneously without throttling.
+
+Option C — Run a local model (Ollama + llama3.1:8b): Zero rate limits, no cooldown needed, and the FIFO gate evaporates. Latency per call will be higher but total time drops dramatically because you can fully parallelize. Given you're using all-MiniLM-L6-v2 locally already, you clearly have the infrastructure mindset for this.
+
+5. Reduce LLM Calls via Pre-Filtering Before Compression
+Your compression pipeline runs NAC → DC → LBC on all chunks above COMPRESS_MIN_TOKENS=500. But LBC makes an LLM call per chunk regardless of how much compression potential that chunk has. You can add a heuristic pre-filter:
+
+python
+def _lbc_worth_compressing(chunk: dict, query: str) -> bool:
+    content = chunk.get("content", "")
+    # Skip chunks that are already short
+    if len(content) < 300:
+        return False
+    # Skip chunks where query terms appear very sparsely
+    query_terms = set(query.lower().split())
+    content_lower = content.lower()
+    overlap = sum(1 for t in query_terms if t in content_lower)
+    if overlap == 0:
+        return False  # NAC/DC already handles true duplicates; LBC skip if zero relevance
+    return True
+This can eliminate 20–40% of LBC calls on typical queries with no quality loss, since LBC on a zero-overlap chunk just returns the original anyway (you already handle the compressed_text == original_content case).
+
+6. Collapse the Validation Pass Into the Compression Call (Prompt Fusion)
+You have a structural pattern of: compress → validate → pass to next. Each validation is a separate LLM call. For LBC especially, you're making 2 LLM calls per chunk (compress + validate). You can fuse these into one call with a dual-output prompt:
+
+Compress the following chunk for the query.
+ALSO evaluate your own compression quality.
+Return JSON: {"compressed": "...", "verdict": "OK|OVER_COMPRESSED|HALLUCINATED", "issues": [...]}
+One call instead of two per chunk. This halves LBC's LLM call count when ENABLE_COMPRESSION_VALIDATION=True. The quality is comparable because you're using the same model for both tasks anyway (judge_llm = llm = llama-3.1-8b-instant).
+
+7. Semantic Caching for Repeated Queries
+You already track blocked_variants and failed_variants in MongoDB. You're one step away from full answer caching. Add a semantic similarity cache layer at user_input_node:
+
+python
+def _check_cache(query: str, threshold: float = 0.92) -> dict | None:
+    query_embedding = embedding_manager.generate_embedding(query)
+    # Search against cached queries in ChromaDB
+    results = cache_collection.query(
+        query_embeddings=[query_embedding.tolist()],
+        n_results=1,
+    )
+    if results and results["distances"][0][0] < (1 - threshold):
+        return results["metadatas"][0][0]["cached_answer"]
+    return None
+If a semantically equivalent query was answered in the last N hours, return the cached answer immediately. This bypasses the entire compression pipeline — 18 minutes → sub-second for cache hits. Your learned_qa collection is already a semantic store; this is a natural extension.
+
+8. Reduce Query Variants Aggressively
+generate_query_variants dispatches one retrieve Send per variant, and your fan-out in routes.py creates len(query_variants) parallel retrieve branches. Each branch independently accumulates chunks via the operator.add reducer. If the LLM generates 4–5 variants, you're doing 4–5 retrieval + embedding calls, all contributing to the chunk pool that then goes through the full compression pipeline.
+
+Empirically, in RAG systems the marginal information gain from variant 3+ is minimal. Cap variants at 2 explicitly:
+
+python
+# In config.py
+MAX_QUERY_VARIANTS = 2
+
+# In query_variants.py, after building the list:
+query_variants = query_variants[:MAX_QUERY_VARIANTS]
+Fewer variants → fewer retrieve calls → fewer chunks entering the compression pipeline → fewer LBC iterations. The compression pipeline's cost scales linearly with chunk count.
+
+9. fix_llm_output Is a Hidden LLM Call Multiplier
+ENABLE_GLOBAL_LLM_OUTPUT_FIX = True means every LLM output that fails JSON parsing triggers _LLM_Json_Repair → another LLM call, then _Verify_And_Correct → yet another LLM call. In the worst case, a single LBC chunk compress call can generate 3 LLM calls (compress → repair → verify).
+
+Two improvements:
+
+Short-term: Strengthen your prompts with explicit JSON schema examples and response_format={"type": "json_object"} if your Groq model supports it, reducing parse failures and thus fix calls.
+
+Medium-term: Use Pydantic + structured outputs via the OpenAI-compatible endpoint that Groq exposes. llama-3.1-8b-instant on Groq supports response_format: json_object. With structured outputs, malformed JSON should drop to near-zero, and you can disable ENABLE_GLOBAL_LLM_OUTPUT_FIX entirely or set it as a last-resort only:
+
+python
+llm = ChatGroq(
+    model_name="llama-3.1-8b-instant",
+    temperature=0.1,
+    max_tokens=2048,
+    model_kwargs={"response_format": {"type": "json_object"}},  # forces JSON output
+)
+10. check_answer_quality Is a Redundant LLM Call in the Happy Path
+generate_draft → check_answer_quality → generate_answer. If check_answer_quality returns OK, generate_answer just uses the draft directly (you can see this in generate_answer.py: if draft: answer = draft). That means check_answer_quality is a full LLM round-trip spent validating something you'll use anyway unless it's INSUFFICIENT.
+
+Restructure this to be optimistic by default: skip quality check on the first pass, return the draft as the answer, and only re-generate if the user thumbs-down:
+
+python
+# In config.py
+ENABLE_ANSWER_QUALITY_CHECK = False  # or condition it on retry_count > 0
+Or if you want to keep it: merge draft generation and quality check into a single prompt that returns {"answer": "...", "quality": "OK|INSUFFICIENT", "reason": "..."} — one call instead of two.
+
+Summary Priority Order
+Given that the FIFO gate and Groq rate limits are the structural bottleneck, here's the ROI-ordered action list:
+
+Tier 1 — Immediate, high impact (addresses the root cause)
+
+Upgrade Groq tier or switch to a provider with higher/no rate limits. This alone could cut 60–70% of the time that's spent in cooldown sleeps.
+Convert llm_invoke from FIFO-serialized threading to a semaphore-bounded async pattern and run the graph with ainvoke.
+Tier 2 — Medium effort, large gain
+
+Parallelize LBC's per-chunk loop using ThreadPoolExecutor or asyncio.gather.
+Fuse compress + validate into a single LLM call per chunk.
+Disable or restructure check_answer_quality to avoid an unconditional extra LLM round-trip.
+Tier 3 — Low effort, meaningful reduction
+
+Cap MAX_QUERY_VARIANTS = 2.
+Add response_format: json_object to Groq calls to eliminate fix_llm_output LLM repair calls.
+Add heuristic pre-filtering before LBC to skip low-value chunks.
+Tier 4 — Architectural, pays off at scale
+
+Semantic answer cache on top of your existing ChromaDB infrastructure.
+Parallelize DC window processing.
+The most important thing to internalize: your graph is already well-designed for parallelism. The two compression tracks, the fan-out retrieval, the parallel validation pairs — that's all correct. What's undermining it is the serialization happening beneath the graph at the LLM call layer. Fix that layer and your graph's existing parallelism will actually deliver.
+
+Give more possible solutions
+
+17:28
+
+Searched memory
+Searched memory
+Good. I now have the complete picture — the dedup_merge embedding loop, the retriever's sequential collection queries, the validate_merge/validate_redundancy call patterns, and the draft/quality/answer triple-call structure. Here are the additional optimizations, going beyond what was covered previously.
+
+Additional Optimization Strategies
+11. retrieve_separate Queries Both Collections Sequentially — Run Them in Parallel
+In retriever.py, retrieve_separate() runs _query_collection(documents) then _query_collection(learned_qa) back to back. These are two independent ChromaDB queries and can be parallelized trivially:
+
+python
+def retrieve_separate(self, query, top_k, top_l, score_threshold):
+    query_embedding = self._embed_and_log(query)
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        doc_future = executor.submit(
+            self._query_collection, self.vector_store.collection, query_embedding, top_k
+        )
+        qa_future = executor.submit(
+            self._query_collection, self.learned_collection, query_embedding, top_l
+        ) if self.learned_collection and self.learned_collection.count() > 0 else None
+        
+        doc_results = doc_future.result()
+        qa_results = qa_future.result() if qa_future else []
+    
+    documents = self._rank_collection_results(doc_results, top_k, score_threshold)
+    learned_qa = self._rank_collection_results(qa_results, top_l, score_threshold)
+    return {"documents": documents, "learned_qa": learned_qa}
+You already use concurrent.futures.ThreadPoolExecutor in _query_collection itself (for the timeout wrapper) and in embedding_manager.py, so the pattern is established in your codebase. Since this runs once per query variant and you fan out N variants, this compounds — with N=3 variants you're currently making 6 sequential ChromaDB calls where 2 parallel calls per variant would suffice.
+
+12. dedup_merge Embeds Every Chunk Individually in a For-Loop — Batch the Embeddings
+In dedup_merge.py, _run_dedup_merge() does this:
+
+python
+for c in input_chunks:
+    emb = embedding_manager.generate_embedding(content)  # one call per chunk
+    chunks_with_emb.append({**c, "embedding": emb})
+SentenceTransformer.encode() is designed for batch processing and is dramatically faster on batches than on individual strings due to GPU/CPU tensor operations, padding, and batched matmul. Replace this with a single batched call:
+
+python
+def _run_dedup_merge(track_name, input_chunks):
+    contents = [(c.get("content") or "").strip() for c in input_chunks]
+    valid_mask = [bool(c) for c in contents]
+    valid_contents = [c for c in contents if c]
+    
+    if not valid_contents:
+        return list(input_chunks), []
+    
+    # One model.encode() call for all chunks instead of N calls
+    all_embeddings = embedding_manager.generate_embedding(valid_contents)
+    
+    chunks_with_emb = []
+    emb_idx = 0
+    for i, chunk in enumerate(input_chunks):
+        if valid_mask[i]:
+            chunks_with_emb.append({**chunk, "embedding": all_embeddings[emb_idx]})
+            emb_idx += 1
+For N chunks this goes from N model inference calls to 1. On all-MiniLM-L6-v2 with CPU, individual calls have fixed overhead per call (~20–50ms each) whereas batching amortizes that completely. With 10 chunks this is the difference between ~400ms and ~50ms just in the embedding step.
+
+13. generate_draft and generate_answer Are Near-Identical Prompts — Merge Them Into One Node
+Looking at generate_draft.py and generate_answer.py side by side:
+
+generate_draft prompt: "Answer the question using only the provided context. Be thorough and complete."
+generate_answer prompt (fallback, no draft): "Answer the following question using only the provided context."
+When a draft exists, generate_answer just returns draft unchanged — it makes zero modifications.
+So the sequence generate_draft → check_answer_quality → generate_answer is paying for two LLM calls (draft + quality) when quality passes, and the second node (generate_answer) just reads the draft from state. You can collapse this:
+
+python
+def generate_draft_and_check(state: GraphState) -> dict:
+    # Single prompt that generates the answer AND self-evaluates it
+    combined_prompt = f"""
+Answer the question using only the provided context.
+Then on a new line starting with 'QUALITY:', evaluate if your answer is SUFFICIENT or INSUFFICIENT 
+based on how well the context supports it.
+
+Question: {user_input}
+Context: {context}
+
+Answer:"""
+    result = llm_invoke(llm, [{"role": "user", "content": combined_prompt}])
+    # Parse answer and quality verdict from the single response
+One call replaces two. This is the "fused prompt" pattern used in production RAG systems like Ragas and TruLens internally — quality self-assessment in the same inference pass as generation.
+
+14. NAC's _merge_similar_chunks Calls the LLM Even for 2-Chunk Runs — Use a Non-LLM Merge for Small Runs
+In nac.py, _merge_similar_chunks invokes the LLM to merge similar consecutive chunks. For a run of only 2 chunks that are already highly similar (they passed the neighbor similarity check), you can substitute a simple concatenation or extractive merge without any LLM call:
+
+python
+def _merge_similar_chunks_fast(chunks: list[dict]) -> dict:
+    """Non-LLM merge: concatenate content, deduplicate sentences by overlap."""
+    if len(chunks) == 1:
+        return chunks[0]
+    
+    # Simple extractive merge: join with separator, let DC handle redundancy later
+    merged_content = "\n\n".join(c.get("content", "") for c in chunks)
+    return {
+        **chunks[0],
+        "content": merged_content,
+        "source": chunks[0].get("source", "?"),
+    }
+
+def _merge_similar_chunks(chunks, llm, embedding_manager, output_fix_enabled):
+    # Fast path: 2 short chunks — no LLM needed, DC will clean it up
+    total_chars = sum(len(c.get("content", "")) for c in chunks)
+    if len(chunks) == 2 and total_chars < 600:
+        return _merge_similar_chunks_fast(chunks)
+    # Slow path: LLM merge for complex/long cases
+    ...
+The rationale: NAC identifies consecutive same-source chunks. Two such short chunks concatenated is semantically equivalent to what the LLM would produce — it doesn't add intelligence, it just reformats. DC runs immediately after NAC anyway and will handle redundancy within the merged text.
+
+15. The Pairwise Cosine Loop in dedup_merge Is O(N²) — Use ANN Instead
+In dedup_merge.py, the similarity detection is:
+
+python
+for i in range(len(chunks_with_emb)):
+    for j in range(i + 1, len(chunks_with_emb)):
+        sim = embedding_manager.cosine_similarity(emb_i, emb_j)
+        if sim >= MERGE_SIMILARITY_THRESHOLD:
+            ...
+This is O(N²) comparisons. With N=20 chunks from multiple variants you get 190 cosine similarity calls. Each call is a numpy dot product (fast, but called individually). You can vectorize the entire pairwise matrix in one shot:
+
+python
+import numpy as np
+
+def _find_near_duplicates(chunks_with_emb, threshold):
+    embs = np.stack([c["embedding"] for c in chunks_with_emb])  # shape: (N, D)
+    # Compute full similarity matrix in one matmul — O(N²) but vectorized
+    sim_matrix = embs @ embs.T  # cosine since embeddings are normalized
+    
+    claimed = set()
+    merge_groups = []
+    for i in range(len(chunks_with_emb)):
+        if i in claimed:
+            continue
+        group = [i]
+        for j in range(i + 1, len(chunks_with_emb)):
+            if j not in claimed and sim_matrix[i, j] >= threshold:
+                group.append(j)
+                claimed.add(j)
+        if len(group) > 1:
+            claimed.add(i)
+            merge_groups.append(group)
+    return merge_groups
+The key change is embs @ embs.T — a single matrix multiply that computes all N² similarities at once via BLAS, rather than N² individual numpy dot products with Python function call overhead each. For N=20 this is ~10–20x faster for that step.
+
+16. Embedding Cache for Repeated Queries and Chunks
+Your EmbeddingManager generates a fresh embedding every time, including in dedup_merge for chunks that may have already been embedded during retrieval. You have similarity_score on chunks from the retrieval phase, but not the embedding vector itself. Add a simple LRU cache keyed by content hash:
+
+python
+from functools import lru_cache
+import hashlib
+
+class EmbeddingManager:
+    def __init__(self, ...):
+        self._embedding_cache: dict[str, np.ndarray] = {}
+    
+    def generate_embedding_cached(self, text: str) -> np.ndarray:
+        key = hashlib.sha256(text.encode()).hexdigest()
+        if key not in self._embedding_cache:
+            self._embedding_cache[key] = self.generate_embedding(text)
+        return self._embedding_cache[key]
+The dedup_merge step re-embeds chunks that were already embedded at retrieval time to compute their similarity score. If you pass embeddings downstream in the state (add a NotRequired[list] field for pre-computed embeddings), you can skip re-embedding entirely in dedup_merge. Even without that state change, the LRU cache catches within-session repeated content (e.g. the same chunk returned by multiple query variants).
+
+17. validate_document_retrieval and validate_learned_qa_retrieval Each Make LLM Calls Per Chunk — These Are Sequential Loops Too
+Looking at the validator pattern across your codebase: every validate_* node iterates over chunks and makes one llm_invoke call per chunk or pair. These loops are synchronous. The same ThreadPoolExecutor fan-out pattern from LBC applies here. Since all your validate nodes are already gated by the FIFO lock, making the inner loop parallel would let multiple validation calls queue up concurrently (with the semaphore-based fix from strategy #1).
+
+Before the async refactor, you can at minimum batch the validation prompt — instead of one LLM call per chunk, send all chunks in a single prompt:
+
+python
+# Instead of: for chunk in chunks: llm_invoke(validate_chunk_prompt)
+# Do:
+batch_prompt = f"""
+Validate the following {len(chunks)} retrieved chunks for relevance to the query.
+For each chunk, output JSON: {{"chunk_id": N, "verdict": "RELEVANT|IRRELEVANT", "reason": "..."}}
+
+Query: {query}
+
+{format_chunks_numbered(chunks)}
+"""
+result = llm_invoke(llm, [{"role": "system", "content": batch_prompt}])
+verdicts = parse_batch_validation(result.content)
+One LLM call for N chunks instead of N calls. This directly replaces the per-chunk loops in validate_document_retrieval, validate_learned_qa_retrieval, and the LBC validators. The tradeoff is prompt size vs. call count — for 5 chunks and 8b-instant this is well within the context window.
+
+18. MAX_TOTAL_RETRIEVALS = 5 With RETRIEVAL_TOP_K = 5 Per Variant Creates Redundant Work
+From your config, RETRIEVAL_TOP_K = 5 and RETRIEVAL_TOP_L = 5. With 3 query variants fanned out, you retrieve up to 15 document chunks and 15 learned QA chunks before dedup_merge. The dedup_merge then has to do O(N²) similarity comparisons on 15 chunks to collapse them back toward a reasonable number. You're paying full embedding + comparison costs on chunks that will be merged away.
+
+A more efficient approach is reciprocal rank fusion at the vector store level rather than post-hoc embedding-based dedup:
+
+python
+# In retrieve_separate, instead of top_k=5 per variant:
+# Retrieve top_k=3 per variant but with a higher similarity floor
+# The RRF score naturally weights chunks that appear across multiple variants
+
+def reciprocal_rank_fusion(ranked_lists: list[list[dict]], k: int = 60) -> list[dict]:
+    scores: dict[str, float] = {}
+    chunk_map: dict[str, dict] = {}
+    for ranked_list in ranked_lists:
+        for rank, chunk in enumerate(ranked_list):
+            key = chunk["content"][:100]  # content fingerprint
+            scores[key] = scores.get(key, 0) + 1.0 / (k + rank + 1)
+            chunk_map[key] = chunk
+    return sorted(chunk_map.values(), key=lambda c: scores[c["content"][:100]], reverse=True)
+Chunks that appear in results from multiple query variants get boosted scores, reducing the number entering the compression pipeline without losing quality. This is the approach used by production RAG systems like LlamaIndex and Weaviate's hybrid search.
+
+19. DC_WINDOW_SIZE = 3 With Sequential Windows Means DC Scans The Entire Chunk List — Add An Early-Exit On No Redundancy
+In dc.py, _run_dc() scans every window regardless of whether the previous window found any redundancy. For a typical 8–10 chunk input, this is 3–4 LLM calls. Add a no-redundancy early exit:
+
+python
+consecutive_empty_windows = 0
+MAX_CONSECUTIVE_EMPTY = 2  # if 2 windows in a row find nothing, stop scanning
+
+for window_start in range(0, len(result), window_size):
+    ...
+    groups = _find_redundancy_groups(blocks, dc_llm_result)
+    if not groups:
+        consecutive_empty_windows += 1
+        if consecutive_empty_windows >= MAX_CONSECUTIVE_EMPTY:
+            logger.debug("[DC] early exit — %d consecutive empty windows", consecutive_empty_windows)
+            break
+    else:
+        consecutive_empty_windows = 0
+        # apply redundancy removal
+In practice, if documents are already well-deduplicated by NAC and dedup_merge, DC frequently finds nothing in most windows. This cuts DC's LLM calls from N/window_size to typically 1–2 for clean inputs.
+
+20. The _apply_cooldown Sleep Happens After Every Single LLM Call — Make It Adaptive to Queue Depth
+Your current cooldown logic in llm_caller.py sleeps _cooldown_floor after every successful call if the queue is non-empty. But during compression of a single query, you have a burst of many calls in rapid succession, all queued up, all sleeping between themselves. The cooldown is designed to prevent 429s — but Groq's rate limit is measured over a sliding 1-minute window, not per-call.
+
+Replace the fixed per-call cooldown with a token budget tracker that only sleeps when you're close to the window limit:
+
+python
+class TokenBudgetTracker:
+    def __init__(self, tpm_limit: int = 6000, window_seconds: int = 60):
+        self.tpm_limit = tpm_limit
+        self.window_seconds = window_seconds
+        self.calls: list[tuple[float, int]] = []  # (timestamp, tokens_used)
+    
+    def record_call(self, tokens_used: int):
+        now = time.monotonic()
+        self.calls = [(t, tok) for t, tok in self.calls if now - t < self.window_seconds]
+        self.calls.append((now, tokens_used))
+    
+    def sleep_if_needed(self):
+        now = time.monotonic()
+        recent = [(t, tok) for t, tok in self.calls if now - t < self.window_seconds]
+        used = sum(tok for _, tok in recent)
+        if used > self.tpm_limit * 0.85:  # 85% threshold
+            oldest = min(t for t, _ in recent)
+            sleep_until = oldest + self.window_seconds
+            sleep_time = sleep_until - now
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+This way you only sleep when you're actually about to hit the limit, not after every single call. For bursts under the TPM budget (which is common for short chunks), you get zero cooldown between calls.
+
+21. LangGraph's invoke Is Synchronous — Use stream For Faster Time-to-First-Token on Long Runs
+This doesn't reduce total execution time but it eliminates the perception of the 18-minute wait for interactive use. LangGraph supports .stream():
+
+python
+for event in rag_app.stream(state, stream_mode="updates"):
+    node_name = list(event.keys())[0]
+    if node_name == "generate_draft":
+        print(f"[Draft ready, quality checking...]")
+    elif node_name == "generate_answer":
+        print(f"\nAnswer: {event['generate_answer']['answer']}")
+        break
+Combined with streaming LLM responses from Groq (ChatGroq supports stream=True), you can print the answer token-by-token the moment generate_answer completes, while any subsequent auto_distillation runs in the background. The user sees output in seconds even if the full graph run takes longer.
+
+22. validate_nac_documents Iterates Merge Pairs But Never Modifies State — It's Pure Logging
+Looking at validate_nac_documents in nac.py: it iterates over nac_merge_pairs_documents, calls validate_merge, logs the result, and returns {}. It makes one LLM call per merge pair but never uses the verdict to do anything — it doesn't reject bad merges, doesn't update state, doesn't route differently. The same is true for validate_dedup_merge_documents and validate_dedup_merge_learned_qa.
+
+These are observability-only nodes right now. Unless you're actively using the logged verdicts to improve the system, they're pure latency cost. You have two options:
+
+Option A — Make them actually functional: Route back if UNFAITHFUL, replacing the bad merge with the original chunks. This adds value proportional to the LLM cost.
+
+Option B — Downgrade to sampling: Only validate 1 in N merge pairs rather than all of them:
+
+python
+VALIDATION_SAMPLE_RATE = 0.3  # validate 30% of pairs
+
+pairs_to_validate = random.sample(pairs, max(1, int(len(pairs) * VALIDATION_SAMPLE_RATE)))
+for pair in pairs_to_validate:
+    check = validate_merge(...)
+This maintains observability at a fraction of the LLM call cost.
+
+Summary of New Strategies
+#	Strategy	Where	Estimated Impact	Effort
+11	Parallel ChromaDB queries in retrieve_separate	retriever.py	Medium	Low
+12	Batch embeddings in dedup_merge	dedup_merge.py	Medium	Low
+13	Fuse generate_draft + check_answer_quality	generate_draft.py, check_answer_quality.py	High (saves 1 LLM call)	Medium
+14	Non-LLM fast merge for small NAC runs	nac.py	Medium	Low
+15	Vectorized pairwise cosine in dedup_merge	dedup_merge.py	Low–Medium	Low
+16	Embedding LRU cache	embedding_manager.py	Medium	Low
+17	Batch validation prompts (N chunks → 1 call)	All validate_* nodes	High	Medium
+18	Reciprocal Rank Fusion instead of post-hoc dedup	retriever.py, dedup_merge.py	High	Medium
+19	Early exit in DC window scan	dc.py	Medium	Low
+20	Token-budget-aware cooldown instead of per-call sleep	llm_caller.py	High	Medium
+21	Switch to stream() for perceived latency	main.py, api.py	UX win	Low
+22	Sample-based validation instead of 100% coverage	All validate_* nodes	Medium	Low
+The highest-leverage ones that are also low-effort and require no architectural change: #12 (batch embeddings), #15 (vectorized cosine), #17 (batched validation prompts), and #19 (DC early exit). These four together could realistically cut 3–5 minutes off the run time without touching the graph structure at all.

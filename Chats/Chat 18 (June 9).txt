@@ -1,0 +1,2232 @@
+Can u understand my notes on where to implement the fix_llm_output.py ?
+
+Yes. After looking at both your handwritten notes and the codebase structure, I think your placement plan is mostly correct, but I would make it slightly more aggressive.
+
+Your notes appear to identify every location where an LLM is expected to return JSON and where malformed outputs can break the pipeline.
+
+From the code, I see these major LLM-output consumption points:
+
+Stage	Function	Current Parsing
+Retrieval Judge	validate_retrieval()	_safe_json_parse()
+Merge Judge	validate_merge()	json parsing
+Redundancy Judge	validate_redundancy()	json parsing
+LBC Judge	validate_lbc()	json parsing
+NAC Merge	_merge_similar_chunks()	json.loads()
+DC Scan	deduplicate_compression()	json.loads()
+LBC Compression	LBC compressor	json.loads()
+Distillation	_generate_qa_pairs()	json.loads()
+
+These correspond almost exactly to your numbered list.
+
+What your notes mean
+1. Retrieval Judge
+
+Your note:
+
+Retrieval Judge
+validate_retrieval()
+
+Correct.
+
+Replace:
+
+parsed = _safe_json_parse(raw)
+
+with:
+
+parsed, correct = fix_llm_output(
+    expected_schema=RetrievalCheckResult,
+    raw_response=raw
+)
+
+This is probably the highest priority location.
+
+2. Dedup Merge Judge
+
+Your note:
+
+Dedup + merge
+validate_merge()
+
+Correct.
+
+This consumes structured JSON from the judge LLM.
+
+Replace the current parsing logic with fix_llm_output().
+
+3. NAC
+
+Your note:
+
+NAC -> validate_merge()
+
+Correct.
+
+NAC itself doesn't need fixing.
+
+The LLM output enters through:
+
+candidate = _merge_similar_chunks(...)
+
+then
+
+validate_merge(...)
+
+So:
+
+fix _merge_similar_chunks()
+fix validate_merge()
+
+4. NAC Judge
+
+Your note:
+
+NAC judge -> validate_merge()
+
+Correct.
+
+Same place.
+
+No extra implementation needed.
+
+5. Deduplicate Compression
+
+Your note:
+
+deduplicate_compression()
+
+Correct.
+
+This is a major LLM JSON consumer.
+
+Inside DC:
+
+raw = dc_result.content
+parsed = json.loads(...)
+
+This should absolutely call:
+
+fix_llm_output()
+
+instead.
+
+6. DC Validator
+
+Your note:
+
+validate_redundancy()
+
+Correct.
+
+This is another judge returning JSON arrays.
+
+Needs fix_llm_output().
+
+7. Validate Redundancy
+
+Your note:
+
+validate_redundancy()
+
+Correct.
+
+This is probably the same location as #6.
+
+8. LBC
+
+Your note:
+
+lbc compression()
+
+Correct.
+
+The compressor LLM output is JSON:
+
+{
+  "compressed": "...",
+  "dropped_count": 3,
+  "reason": "..."
+}
+
+Must pass through fix_llm_output().
+
+9. validate_lbc()
+
+Your note:
+
+validate_lbc()
+
+Correct.
+
+Judge output.
+
+Must use fix_llm_output().
+
+10. Distillation
+
+Your note:
+
+_generate_qa_pairs()
+
+Correct.
+
+Currently:
+
+pairs = json.loads(cleaned)
+
+This is fragile.
+
+Should become:
+
+pairs, correct = fix_llm_output(...)
+
+One place you missed
+
+The most important addition:
+
+_merge_similar_chunks()
+
+Inside:
+
+parsed = json.loads(cleaned)
+
+This is a direct LLM response parser.
+
+If merge generation returns:
+
+Here's the merged chunk:
+
+{
+ ...
+}
+
+the entire merge stage fails.
+
+This is one of the biggest candidates for fix_llm_output().
+
+Located in:
+
+context_compression.py
+
+Another place you missed
+Future-proof llm_invoke()
+
+Not required immediately, but I'd eventually add:
+
+fix_llm_output()
+
+support inside llm_caller.py
+for structured callers.
+
+Because almost every failure you're testing:
+
+prefix text
+suffix text
+code fences
+malformed JSON
+missing keys
+Python dicts
+JS objects
+
+is happening after:
+
+raw = llm_result.content
+
+A centralized repair layer would reduce duplication.
+
+My implementation order
+
+If I were implementing this today:
+
+Tier 1 (must fix)
+_merge_similar_chunks()
+validate_retrieval()
+validate_merge()
+validate_redundancy()
+validate_lbc()
+
+These protect the entire compression pipeline.
+
+Tier 2
+deduplicate_compression()
+LBC compressor output
+Tier 3
+_generate_qa_pairs()
+
+Distillation failures are less critical than runtime query failures.
+
+So overall, your handwritten plan is about 90–95% correct. The only major thing I'd add is:
+
+Insert fix_llm_output() directly inside _merge_similar_chunks() because that's one of the most fragile JSON parsing points in the whole NAC/DC pipeline.
+
+
+
+Write my notes in digital, ready to copy-paste form
+
+Based on your handwritten notes, here's the cleaned-up digital version:
+
+Schema / Output Schemas
+-----------------------
+
+Retrieval Judge
+---------------
+validators.py
+└── validate_retrieval()                -> RetrievalCheckResult (dict)
+
+Merge Stage
+-----------
+context_compression.py
+└── _merge_similar_chunks()             -> merge_judge output (dict)
+
+Retrieval Judge
+---------------
+validators.py
+└── validate_retrieval()                -> dict
+
+NAC (Neighbor-Aware Compression)
+--------------------------------
+context_compression.py
+└── validate_merge()                    -> dict
+
+DC (Deduplication Compression)
+------------------------------
+context_compression.py
+├── deduplicate_compression()           -> list
+└── validate_redundancy()              -> dict
+
+LBC (Loss-Based Compression)
+----------------------------
+context_compression.py
+├── lbc_compression()                  -> dict
+└── validate_lbc()                     -> dict
+
+Distillation
+------------
+self_learner.py
+└── _generate_qa_pairs()               -> list
+
+
+Implementation Order
+====================
+
+1. validate_retrieval()
+   File: validators.py
+   Lines: 347-351
+
+2. _merge_similar_chunks()
+   File: context_compression.py
+   Lines: 468-471
+
+3. validate_merge()
+   File: validators.py
+   Lines: 472-476
+
+4. NAC Judge
+   File: validators.py
+   Uses validate_merge()
+
+5. deduplicate_compression()
+   File: context_compression.py
+   Lines: 765-818
+
+6. validate_redundancy()
+   File: validators.py
+   Lines: 555-559
+
+7. lbc_compression()
+   File: context_compression.py
+   Lines: 660-662
+
+8. validate_lbc()
+   File: validators.py
+   Lines: 750-755
+
+9. _generate_qa_pairs()
+   File: self_learner.py
+   Line: 137
+
+
+Subsystem Mapping
+=================
+
+NAC
+---
+context_compression.py
+└── validate_merge()
+
+DC
+--
+context_compression.py
+├── deduplicate_compression()
+└── validate_redundancy()
+
+LBC
+---
+context_compression.py
+├── lbc_compression()
+└── validate_lbc()
+
+Distillation
+------------
+self_learner.py
+└── _generate_qa_pairs()
+
+
+Files Involved
+==============
+
+validators.py
+-------------
+- validate_retrieval()
+- validate_merge()
+- validate_redundancy()
+- validate_lbc()
+
+context_compression.py
+----------------------
+- _merge_similar_chunks()
+- deduplicate_compression()
+- lbc_compression()
+
+self_learner.py
+---------------
+- _generate_qa_pairs()
+
+One thing I'd add to your notes:
+
+Potential Additional Audit
+==========================
+
+Search repository for:
+
+json.loads(
+json.load(
+_safe_json_parse(
+response.content
+llm_result.content
+raw = response.content
+raw = llm_result.content
+
+Any location where:
+- LLM output becomes structured data
+- TypedDict objects are created
+- Judge outputs are parsed
+- Compression outputs are parsed
+- Tool outputs are parsed
+
+should be reviewed for fix_llm_output() integration.
+
+This preserves the structure of your sketch while making it copy-paste ready for Claude Code or project documentation.
+
+
+
+
+explain the difference:
+
+snippet 1:
+llm = ChatGroq(
+        api_key=os.getenv("GROQ_API_KEY"),
+        model_name="llama-3.1-8b-instant",
+        temperature=0.1,
+        max_tokens=2048,
+    )
+
+snippet 2:
+load_dotenv()
+        _os.environ.pop("GROQ_API_BASE", None)
+        _llm = ChatGroq(
+            api_key=_os.getenv("GROQ_API_KEY"),
+            model_name="llama-3.1-8b-instant",
+            temperature=0.0,
+            max_tokens=2048,
+        )
+
+
+NOTE: The second snippet is working. The first one is returning the following error:
+LLM call failed (NOT_FOUND): Error code: 404 - {'error': {'message': 'Unknown request URL: POST /openai/v1/openai/v1/chat/completions. Please check the URL for typos, or see the docs at https://console.groq.com/docs/', 'type': 'invalid_request_error', 'code': 'unknown_url'}}
+
+
+The difference is not actually the temperature value (0.1 vs 0.0). That would not cause a 404.
+
+The important difference is this line in Snippet 2:
+
+_os.environ.pop("GROQ_API_BASE", None)
+
+That line removes a custom environment variable before creating the ChatGroq client.
+
+What the error tells us
+
+Your error is:
+
+404 - Unknown request URL:
+POST /openai/v1/openai/v1/chat/completions
+
+Notice the duplicated path:
+
+/openai/v1/openai/v1/chat/completions
+          ↑ repeated
+
+A normal Groq OpenAI-compatible endpoint would look like:
+
+/openai/v1/chat/completions
+
+not
+
+/openai/v1/openai/v1/chat/completions
+
+This strongly suggests that somewhere in your environment you have:
+
+GROQ_API_BASE=https://api.groq.com/openai/v1
+
+or something similar.
+
+Then LangChain/Groq internally appends:
+
+/openai/v1/chat/completions
+
+resulting in:
+
+https://api.groq.com/openai/v1/openai/v1/chat/completions
+
+which produces the 404.
+
+Why Snippet 2 works
+
+Snippet 2 does:
+
+load_dotenv()
+
+_os.environ.pop("GROQ_API_BASE", None)
+
+_llm = ChatGroq(...)
+
+This removes the problematic variable.
+
+After removal, ChatGroq falls back to its default endpoint:
+
+https://api.groq.com/openai/v1/chat/completions
+
+which is valid.
+
+Why Snippet 1 fails
+
+Snippet 1:
+
+llm = ChatGroq(
+    api_key=os.getenv("GROQ_API_KEY"),
+    model_name="llama-3.1-8b-instant",
+    temperature=0.1,
+    max_tokens=2048,
+)
+
+does not remove:
+
+GROQ_API_BASE
+
+Therefore LangChain reads it automatically and constructs the wrong URL.
+
+How to verify
+
+Before creating the model, print:
+
+print("GROQ_API_BASE =", os.getenv("GROQ_API_BASE"))
+
+I expect you'll see something like:
+
+https://api.groq.com/openai/v1
+
+or another custom value.
+
+Proper fixes
+Fix 1 (recommended)
+
+Remove the variable entirely:
+
+load_dotenv()
+
+os.environ.pop("GROQ_API_BASE", None)
+
+llm = ChatGroq(
+    api_key=os.getenv("GROQ_API_KEY"),
+    model_name="llama-3.1-8b-instant",
+)
+
+This is exactly what your working snippet is doing.
+
+Fix 2
+
+Remove it from .env:
+
+GROQ_API_KEY=xxxxx
+
+# delete this if present
+GROQ_API_BASE=...
+Fix 3
+
+If you intentionally need a custom base URL (for OpenRouter, LiteLLM, local proxy, etc.), make sure it does not already include the OpenAI suffix expected by the client.
+
+Most likely root cause in your project
+
+Since you're working on the Agentic RAG project and have experimented with multiple OpenAI-compatible providers (Groq, custom endpoints, OpenRouter, etc.), I suspect an old environment variable was left behind:
+
+GROQ_API_BASE=https://api.groq.com/openai/v1
+
+and Snippet 2 works because it explicitly clears it before LangChain initializes the client.
+
+So the real difference is:
+
+_os.environ.pop("GROQ_API_BASE", None)
+
+not:
+
+temperature=0.0
+
+or
+
+load_dotenv()
+
+The duplicated /openai/v1/openai/v1/ in the error is the giveaway.
+
+This strongly suggests that somewhere in your environment you have: env GROQ_API_BASE=https://api.groq.com/openai/v1
+
+this statement is in my env
+
+Yes — that is the cause.
+
+For ChatGroq, remove/comment this from .env:
+
+GROQ_API_BASE=https://api.groq.com/openai/v1
+
+Keep only:
+
+GROQ_API_KEY=your_key_here
+
+Then use:
+
+load_dotenv()
+
+llm = ChatGroq(
+    api_key=os.getenv("GROQ_API_KEY"),
+    model_name="llama-3.1-8b-instant",
+    temperature=0.1,
+    max_tokens=2048,
+)
+
+Why: ChatGroq already knows Groq’s base URL internally. Your .env value adds /openai/v1, then the client adds /openai/v1/chat/completions again, causing:
+
+/openai/v1/openai/v1/chat/completions
+
+So either delete GROQ_API_BASE, or keep this safety line before initializing ChatGroq:
+
+os.environ.pop("GROQ_API_BASE", None)
+
+
+
+
+
+Use Graphify first.
+
+Determine where LLM outputs are produced, transformed, validated, stored, or returned to users.
+
+Identify every execution path where raw LLM responses flow through the system.
+
+For each location:
+
+- Explain why fix_llm_output() should or should not be called.
+- Show the call chain leading to that location.
+- Only read source files after Graphify identifies relevant nodes and paths.
+
+Do not make code changes yet.
+Produce a report first. @ @
+Show less
+graphify skill
+The graph exists at graphify-out/graph.json. I'll run targeted queries to trace all LLM output paths before reading any source.
+
+Bash Query graph for LLM output-related nodes
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python graphify-out/.graphify_python -c "
+import json
+from networkx.readwrite import json_graph
+import networkx as nx
+from pathlib import Path
+
+data = json.loads(Path('graphify-out/graph.json').read_text(encoding='utf-8'))
+G = json_graph.node_link_graph(data, edges='links')
+
+# Find all nodes related to llm_invoke, fix_llm_output, validators
+terms = ['llm_invoke', 'fix_llm_output', 'validate', 'llm_json_repair', 'verify_correct', 'safe_json_parse', 'llm_result', 'check_answer_quality']
+
+for term in terms:
+    matches = [(nid, G.nodes[nid].get('label',''), G.nodes[nid].get('source_file','')) 
+               for nid in G.nodes() 
+               if term.lower() in G.nodes[nid].get('label','').lower() or term.lower() in nid.lower()]
+    if matches:
+        print(f'=== {term} ===')
+        for nid, label, sf in matches[:8]:
+            print(f'  {nid}  |  {label}  |  {sf}')
+        print()
+" 2>&1 | head -100
+
+OUT
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\graphify-out\.graphify_python", line 1
+    C:\Users\LOQ\AppData\Roaming\uv\tools\graphifyy\Scripts\python.exe
+       ^
+SyntaxError: unexpected character after line continuation character
+Bash Check graphify python path file
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && type graphify-out\.graphify_python
+
+OUT
+Exit code 1
+/usr/bin/bash: line 1: type: graphify-out.graphify_python: not found
+Bash Check python availability
+IN
+python --version && python -c "import json; print('ok')" 2>&1
+
+OUT
+Python 3.14.2
+ok
+Good. I have the full graph as an attachment. Let me query it directly and then grep for the specific call sites.
+
+Bash Query graph for callers of key LLM output functions
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -c "
+import json
+from pathlib import Path
+from networkx.readwrite import json_graph
+import networkx as nx
+
+G = json_graph.node_link_graph(json.loads(Path('graphify-out/graph.json').read_text(encoding='utf-8')), edges='links')
+
+# 1. All callers of llm_invoke
+print('=== CALLERS OF llm_invoke ===')
+target = 'llm_caller_llm_invoke'
+for u, v, d in G.edges(data=True):
+    if v == target:
+        label = G.nodes[u].get('label', u)
+        sf = G.nodes[u].get('source_file', '')
+        loc = d.get('source_location', '')
+        print(f'  {label}  ({sf}:{loc})')
+
+print()
+print('=== CALLERS OF fix_llm_output ===')
+target2 = 'fix_llm_output_fix_llm_output'
+for u, v, d in G.edges(data=True):
+    if v == target2 or v == 'fix_llm_output_main':
+        label = G.nodes[u].get('label', u)
+        sf = G.nodes[u].get('source_file', '')
+        loc = d.get('source_location', '')
+        print(f'  {label}  ({sf}:{loc})')
+
+print()
+print('=== CALLERS OF _safe_json_parse ===')
+target3 = 'validators__safe_json_parse'
+for u, v, d in G.edges(data=True):
+    if v == target3:
+        label = G.nodes[u].get('label', u)
+        sf = G.nodes[u].get('source_file', '')
+        loc = d.get('source_location', '')
+        print(f'  {label}  ({sf}:{loc})')
+" 2>&1
+
+OUT
+=== CALLERS OF llm_invoke ===
+  run_agent Function  (app/agent_query.py:line 539)
+  DC: Deduplication Compression  (app/context_compression.py:line 465)
+  LBC: LLM-Based Compression  (app/context_compression.py:line 663)
+  merge_similar_chunks (_merge_similar_chunks alias)  (app/context_compression.py:line 243)
+  _LLM_Json_Repair Last-Resort LLM Repair  (app/fix_llm_output.py:line 562)
+  _Verify_And_Correct Post-Validation Pass  (app/fix_llm_output.py:line 797)
+
+=== CALLERS OF fix_llm_output ===
+
+=== CALLERS OF _safe_json_parse ===
+  validate_retrieval()  (app/validators.py:line 350)
+  validate_merge()  (app/validators.py:line 462)
+  validate_redundancy()  (app/validators.py:line 577)
+  validate_lbc()  (app/validators.py:line 739)
+Bash Query all edges to llm_invoke and check_answer_quality
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -c "
+import json
+from pathlib import Path
+from networkx.readwrite import json_graph
+import networkx as nx
+
+G = json_graph.node_link_graph(json.loads(Path('graphify-out/graph.json').read_text(encoding='utf-8')), edges='links')
+
+# All edges TO llm_invoke (including inferred)
+print('=== ALL EDGES TO llm_invoke (any confidence) ===')
+target = 'llm_caller_llm_invoke'
+for u, v, d in G.edges(data=True):
+    if v == target:
+        label = G.nodes[u].get('label', u)
+        sf = G.nodes[u].get('source_file', '')
+        conf = d.get('confidence', '')
+        loc = d.get('source_location', '')
+        print(f'  [{conf}] {label}  ({sf}:{loc})')
+
+print()
+# check_answer_quality
+print('=== check_answer_quality edges ===')
+for nid in G.nodes():
+    if 'check_answer' in nid.lower() or 'check_answer' in G.nodes[nid].get('label','').lower():
+        print(f'Node: {nid} | {G.nodes[nid].get(\"label\",\"\")} | {G.nodes[nid].get(\"source_file\",\"\")}')
+        for u2, v2, d2 in G.edges(data=True):
+            if u2 == nid or v2 == nid:
+                ul = G.nodes[u2].get('label', u2)
+                vl = G.nodes[v2].get('label', v2)
+                print(f'  {ul} --{d2.get(\"relation\",\"\")}[{d2.get(\"confidence\",\"\")}]--> {vl}')
+" 2>&1
+
+OUT
+=== ALL EDGES TO llm_invoke (any confidence) ===
+  [EXTRACTED] run_agent Function  (app/agent_query.py:line 539)
+  [EXTRACTED] DC: Deduplication Compression  (app/context_compression.py:line 465)
+  [EXTRACTED] LBC: LLM-Based Compression  (app/context_compression.py:line 663)
+  [EXTRACTED] merge_similar_chunks (_merge_similar_chunks alias)  (app/context_compression.py:line 243)
+  [EXTRACTED] _LLM_Json_Repair Last-Resort LLM Repair  (app/fix_llm_output.py:line 562)
+  [EXTRACTED] _Verify_And_Correct Post-Validation Pass  (app/fix_llm_output.py:line 797)
+
+=== check_answer_quality edges ===
+Node: app_tools_make_check_answer_quality | make_check_answer_quality() | app/tools.py
+  main() --calls[INFERRED]--> make_check_answer_quality()
+  tools.py --contains[EXTRACTED]--> make_check_answer_quality()
+Node: tools_check_answer_quality | make_check_answer_quality / check_answer_quality | app/tools.py
+  agent_query main() --calls[EXTRACTED]--> make_check_answer_quality / check_answer_quality
+  llm_invoke Function --calls[EXTRACTED]--> make_check_answer_quality / check_answer_quality
+  make_check_answer_quality / check_answer_quality --references[EXTRACTED]--> GROUNDING_PROMPT with thumbdown variant
+Node: architecture_adr_llm_grounding | ADR-014 (Arch): LLM Grounding Check for check_answer_quality | Architecture.md
+  ADR-014 (Arch): LLM Grounding Check for check_answer_quality --references[INFERRED]--> BUG-005: check_answer_quality Blind to Hallucination
+  ADR-014 (Arch): LLM Grounding Check for check_answer_quality --conceptually_related_to[INFERRED]--> Research: Process Reward Models and ToolPRMBench
+  ADR-014 (Arch): LLM Grounding Check for check_answer_quality --conceptually_related_to[INFERRED]--> ToolPRMBench Academic Paper
+Node: bugs_bug005 | BUG-005: check_answer_quality Blind to Hallucination | Bugs.md
+  ADR-014 (Arch): LLM Grounding Check for check_answer_quality --references[INFERRED]--> BUG-005: check_answer_quality Blind to Hallucination
+  BUG-005: check_answer_quality Blind to Hallucination --conceptually_related_to[INFERRED]--> Research: Process Reward Models and ToolPRMBench
+Node: decisions_adr_remove_caq | ADR-020: check_answer_quality Removed from Tool Schemas | Decisions.md
+  ADR-010: 4-Phase State Machine --conceptually_related_to[INFERRED]--> ADR-020: check_answer_quality Removed from Tool Schemas
+Bash Check node IDs for validators and llm_invoke
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -c "
+import json
+from pathlib import Path
+from networkx.readwrite import json_graph
+import networkx as nx
+
+G = json_graph.node_link_graph(json.loads(Path('graphify-out/graph.json').read_text(encoding='utf-8')), edges='links')
+
+# Find the actual node IDs for validators and llm_invoke
+print('=== validator node IDs ===')
+for nid in G.nodes():
+    if 'validate' in nid.lower() and 'validator' in G.nodes[nid].get('source_file','').lower():
+        print(f'  {nid}  ->  {G.nodes[nid].get(\"label\",\"\")}')
+
+print()
+print('=== llm_invoke node IDs ===')
+for nid in G.nodes():
+    if 'llm_invoke' in nid.lower() or 'llm_invoke' in G.nodes[nid].get('label','').lower():
+        print(f'  {nid}  ->  {G.nodes[nid].get(\"label\",\"\")}')
+" 2>&1
+
+OUT
+=== validator node IDs ===
+  app_validators_validate_retrieval  ->  validate_retrieval()
+  app_validators_validate_merge  ->  validate_merge()
+  app_validators_validate_redundancy  ->  validate_redundancy()
+  app_validators_validate_lbc  ->  validate_lbc()
+  validators_validate_retrieval  ->  validate_retrieval()
+  validators_validate_merge  ->  validate_merge()
+  validators_validate_redundancy  ->  validate_redundancy()
+  validators_validate_lbc  ->  validate_lbc()
+
+=== llm_invoke node IDs ===
+  app_llm_caller_llm_invoke  ->  llm_invoke()
+  llm_caller_llm_invoke  ->  llm_invoke Function
+Bash Find all callers of any llm_invoke node and fix_llm_output
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -c "
+import json
+from pathlib import Path
+from networkx.readwrite import json_graph
+import networkx as nx
+
+G = json_graph.node_link_graph(json.loads(Path('graphify-out/graph.json').read_text(encoding='utf-8')), edges='links')
+
+llm_invoke_nodes = [nid for nid in G.nodes() if 'llm_invoke' in nid.lower() or 'llm_invoke' in G.nodes[nid].get('label','').lower()]
+
+print('=== ALL CALLERS OF ANY llm_invoke NODE ===')
+for target in llm_invoke_nodes:
+    for u, v, d in G.edges(data=True):
+        if v == target:
+            label = G.nodes[u].get('label', u)
+            sf = G.nodes[u].get('source_file', '')
+            conf = d.get('confidence', '')
+            loc = d.get('source_location', '')
+            print(f'  [{conf}] {label}  ({sf}:{loc})  --> {target}')
+
+print()
+print('=== ALL CALLERS OF fix_llm_output (any node) ===')
+for nid in G.nodes():
+    label = G.nodes[nid].get('label', '')
+    if 'fix_llm_output' in label.lower() and ('fix_llm_output()' in label or 'entrypoint' in label.lower() or 'public' in label.lower()):
+        print(f'Checking target: {nid} | {label}')
+        for u, v, d in G.edges(data=True):
+            if v == nid:
+                ul = G.nodes[u].get('label', u)
+                sf = G.nodes[u].get('source_file', '')
+                conf = d.get('confidence', '')
+                print(f'  [{conf}] {ul}  ({sf})')
+" 2>&1
+
+OUT
+=== ALL CALLERS OF ANY llm_invoke NODE ===
+  [INFERRED] run_agent()  (app/agent_query.py:L539)  --> app_llm_caller_llm_invoke
+  [INFERRED] _merge_similar_chunks()  (app/context_compression.py:L243)  --> app_llm_caller_llm_invoke
+  [INFERRED] deduplicate_compression()  (app/context_compression.py:L465)  --> app_llm_caller_llm_invoke
+  [INFERRED] llm_based_compression()  (app/context_compression.py:L660)  --> app_llm_caller_llm_invoke
+  [EXTRACTED] llm_caller.py  (app/llm_caller.py:L94)  --> app_llm_caller_llm_invoke
+  [EXTRACTED] LLMResult  (app/llm_caller.py:L94)  --> app_llm_caller_llm_invoke
+  [EXTRACTED] str  (app/llm_caller.py:L94)  --> app_llm_caller_llm_invoke
+  [EXTRACTED] _handle_bad_request()  (app/llm_caller.py:L113)  --> app_llm_caller_llm_invoke
+  [EXTRACTED] run_agent Function  (app/agent_query.py:line 539)  --> llm_caller_llm_invoke
+  [EXTRACTED] DC: Deduplication Compression  (app/context_compression.py:line 465)  --> llm_caller_llm_invoke
+  [EXTRACTED] LBC: LLM-Based Compression  (app/context_compression.py:line 663)  --> llm_caller_llm_invoke
+  [EXTRACTED] merge_similar_chunks (_merge_similar_chunks alias)  (app/context_compression.py:line 243)  --> llm_caller_llm_invoke
+  [EXTRACTED] _LLM_Json_Repair Last-Resort LLM Repair  (app/fix_llm_output.py:line 562)  --> llm_caller_llm_invoke
+  [EXTRACTED] _Verify_And_Correct Post-Validation Pass  (app/fix_llm_output.py:line 797)  --> llm_caller_llm_invoke
+
+=== ALL CALLERS OF fix_llm_output (any node) ===
+Checking target: app_fix_llm_output_fix_llm_output | fix_llm_output()
+  [EXTRACTED] fix_llm_output.py  (app/fix_llm_output.py)
+  [EXTRACTED] Any  (app/fix_llm_output.py)
+  [EXTRACTED] str  (app/fix_llm_output.py)
+  [EXTRACTED] bool  (app/fix_llm_output.py)
+  [EXTRACTED] _parse_to_python()  (app/fix_llm_output.py)
+  [EXTRACTED] _LLM_Json_Repair()  (app/fix_llm_output.py)
+  [EXTRACTED] _coerce_top_level()  (app/fix_llm_output.py)
+  [EXTRACTED] _validate_with_pydantic()  (app/fix_llm_output.py)
+  [EXTRACTED] _resolve_expected()  (app/fix_llm_output.py)
+  [EXTRACTED] _empty()  (app/fix_llm_output.py)
+Checking target: fix_llm_output_main | fix_llm_output Public Entrypoint
+Now let me grep the actual source to verify - the graph shows no production callers of fix_llm_output. Let me confirm and check where validators and compression call llm_invoke.
+
+Grep "fix_llm_output" (in c:\Users\LOQ\Desktop\Projects\RAG-work\app, glob: *.py)
+8 lines of output
+Grep "llm_invoke" (in c:\Users\LOQ\Desktop\Projects\RAG-work\app, glob: *.py)
+18 lines of output
+Confirmed: fix_llm_output is only called in test_output_fixes.py. Now I need to read exactly how each llm_invoke call processes its output. Let me read the critical sections.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py (lines 271-400)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py (lines 431-490)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py (lines 231-310)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py (lines 451-530)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py (lines 646-725)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 526-605)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 726-825)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\tools.py (lines 311-370)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\self_learner.py (lines 116-185)
+Now I have everything I need. Let me read the fix_llm_output function signature to understand what it expects.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\fix_llm_output.py (lines 689-773)
+I now have a complete picture from the graph traversal and source reads. Let me produce the report.
+
+LLM Output Flow Report
+Overview
+Every raw LLM response in this system is produced by llm_invoke() (app/llm_caller.py:94) and returns an LLMResult dataclass with .content (str), .ok (bool), and error metadata. There are 10 distinct call sites where that raw content is then parsed, validated, stored, or returned to users. fix_llm_output() exists as a full 5-step repair chain but is called from zero of those 10 sites in production code—only test_output_fixes.py:1535 uses it.
+
+Site 1 — RETRIEVE phase: tool-call parsing
+File: app/agent_query.py:539
+
+Call chain: main() → run_agent() → llm_invoke(..., tools=retrieve_tool_schemas) → agent_result.response
+
+What happens to the output:
+
+LangChain parses .tool_calls from the response. The agent reads resp_content as a bare string and resp_tool_calls as a list. Both are logged and dispatched; the text content in this phase is never parsed as JSON.
+
+Should fix_llm_output be called?
+
+No. The output is a tool-call message handled by the LangChain framework, not a raw JSON string this code owns. The framework extracts structured arguments; manual repair would bypass that contract.
+
+Site 2 — DRAFT phase: final answer generation
+File: app/agent_query.py:744
+
+Call chain: main() → run_agent() → llm_invoke(..., tools=None) → draft_answer = draft_result.content
+
+What happens to the output:
+
+The raw string is stored verbatim as draft_answer, passed to check_answer_quality, and—if quality is OK—returned directly to the user as the answer. It is never parsed as JSON.
+
+Should fix_llm_output be called?
+
+No. This is free-prose text, not JSON. fix_llm_output is a JSON repair tool and is irrelevant here.
+
+Site 3 — Validator: validate_retrieval()
+File: app/validators.py:327
+
+Call chain: run_agent() → validate_retrieval() → llm_invoke(judge_llm, ..., "VALIDATE-RETRIEVAL") → raw → _safe_json_parse(raw) → RetrievalCheckResult
+
+What happens to the output:
+
+_safe_json_parse() strips ``` fences, tries json.loads, then does one regex fallback to find {...}. On failure it returns verdict="UNKNOWN" and keeps all chunks.
+
+Should fix_llm_output be called?
+
+Yes. The current parser handles only 2–3 of the 40 failure modes documented in Research.md. It misses: Python literal normalization (True/None), JSON comment stripping, balanced-bracket extraction from embedded text, json_repair, and LLM-based recovery. The target schema (RetrievalJudgeSchema) is already registered in _SCHEMA_REGISTRY. A failed parse silently degrades to UNKNOWN, which keeps all chunks—including irrelevant ones—defeating the purpose of the validator. Calling fix_llm_output("retrieval_judge", raw) here would substantially reduce fallback rates.
+
+Site 4 — Validator: validate_merge()
+File: app/validators.py:440
+
+Call chain: _merge_similar_chunks() → validate_merge() → llm_invoke(judge_llm, ..., "VALIDATE-MERGE") → raw → _safe_json_parse(raw) → MergeCheckResult
+
+What happens to the output:
+
+Same _safe_json_parse path as Site 3. Failure returns verdict="UNKNOWN" and the merge is rejected (the original chunks are kept).
+
+Should fix_llm_output be called?
+
+Yes. Same reasoning as Site 3. Schema MergeJudgeSchema is registered. A parse failure here silently blocks the merge faithfulness check, meaning unvalidated merges could silently pass through.
+
+Site 5 — Validator: validate_redundancy()
+File: app/validators.py:548
+
+Call chain: deduplicate_compression() → validate_redundancy() → llm_invoke(judge_llm, ..., "VALIDATE-REDUNDANCY") → raw → _safe_json_parse(raw) → RedundancyCheckResult
+
+What happens to the output:
+
+Same pattern. The validator judges whether each proposed redundancy group is CONFIRMED or REJECTED.
+
+Should fix_llm_output be called?
+
+Yes. The DC scan result is already a list schema that fix_llm_output handles via RedundancyJudgeItem. Parse failures here let unvalidated redundancy groups through or skip deduplication entirely.
+
+Site 6 — Validator: validate_lbc()
+File: app/validators.py:717
+
+Call chain: llm_based_compression() → validate_lbc() → llm_invoke(judge_llm, ..., "VALIDATE-LBC") → raw → _safe_json_parse(raw) → LBCCheckResult
+
+What happens to the output:
+
+Same pattern. A failed parse returns verdict="UNKNOWN", which according to Architecture.md ADR-011 is the safe fallback (keeps all chunks). However it means the LBC compression result goes unvalidated.
+
+Should fix_llm_output be called?
+
+Yes. Schema LBCJudgeSchema is registered. The compression→validation contract (hyperedge compression_validation_contract) requires this check to function correctly; parse failures break the contract silently.
+
+Site 7 — NAC: _merge_similar_chunks()
+File: app/context_compression.py:243
+
+Call chain: compress_context_pipeline() → compress_neighbor_chunks() → _merge_similar_chunks() → llm_invoke(llm, ..., "MERGE") → raw → manual strip + json.loads(cleaned) → merged chunk dict
+
+What happens to the output:
+
+
+cleaned = raw.replace("```json", "").replace("```", "").strip()
+cleaned = re.sub(r'\[Source: "([^"]+)"\]', r'[Source: \1]', cleaned)
+parsed = json.loads(cleaned)
+merged_content = parsed["content"]
+On any (json.JSONDecodeError, KeyError, AttributeError, TypeError): falls back to similar_chunks[0].
+
+Should fix_llm_output be called?
+
+Yes. The current handling strips ``` fences and retries on transient errors, but the JSON repair is a single json.loads call. The MergeSchema (with content, sources, merged_from) is registered. A parse failure here silently returns the first chunk unmerged, producing no visible error but wasting the LLM call.
+
+Site 8 — DC: deduplicate_compression()
+File: app/context_compression.py:465
+
+Call chain: compress_context_pipeline() → deduplicate_compression() → llm_invoke(llm, ..., "DC") → raw → manual strip + json.loads + regex array fallback
+
+What happens to the output:
+
+
+cleaned = raw.replace("```json","").replace("```python","").replace("```","").strip()
+parsed = json.loads(cleaned)          # try 1
+# fallback: re.search(r"\[[\s\S]*\]", cleaned) then json.loads(outer.group(0))
+On failure: skips the deduplication window.
+
+Should fix_llm_output be called?
+
+Yes. The DC output schema is a list of RedundancyGroupProposal objects. The current code has 2 parse attempts; fix_llm_output adds balanced extraction, json_repair, and LLM repair as subsequent tiers. A parse failure here silently skips an entire window of redundancy detection.
+
+Site 9 — LBC: llm_based_compression()
+File: app/context_compression.py:660
+
+Call chain: compress_context_pipeline() → llm_based_compression() → llm_invoke(llm, ..., "LBC") → raw → manual strip + json.loads + regex object fallback
+
+What happens to the output:
+
+
+cleaned = raw.replace("```json","").replace("```","").strip()
+candidate = json.loads(cleaned)       # try 1
+# fallback: re.search(r"\{[\s\S]*\}", cleaned) then json.loads(m.group(0))
+On failure: keeps the original uncompressed chunk.
+
+Should fix_llm_output be called?
+
+Yes. The LBC output schema is LBCCompressSchema (compressed, dropped_count, reason). Current handling has 2 parse tiers; fix_llm_output adds 3 more. A parse failure here causes the chunk to pass through uncompressed, silently undermining the ~27.6% reduction target cited in ADR-007.
+
+Site 10 — check_answer_quality verdict
+File: app/tools.py:325
+
+Call chain: agent_query.main() → make_check_answer_quality(judge_llm) → closure check_answer_quality(answer, context, query) → llm_invoke(judge_llm, ..., "CAQ-JUDGE") → verdict = result.content.strip()
+
+What happens to the output:
+
+
+if verdict.upper().startswith("OK"):
+    return "OK"
+else:
+    return f"INSUFFICIENT — {reason}"
+Plain-text verdict, no JSON parsing. On LLM failure: defaults to "OK".
+
+Should fix_llm_output be called?
+
+No. This is a free-text classification output, not JSON. The only parsing needed is startswith("OK").
+
+Site 11 — Self-learner QA distillation
+File: app/self_learner.py:137
+
+Call chain: run_agent() → self_learner.run_distillation() → _generate_qa_pairs() → self.llm.invoke(...) (raw LangChain, not llm_invoke) → raw = response.content.strip() → manual strip + json.loads
+
+What happens to the output:
+
+
+cleaned = raw.replace("```json","").replace("```","").strip()
+pairs = json.loads(cleaned)
+On any exception: returns [] and no pairs are stored.
+
+Should fix_llm_output be called?
+
+Yes—and there is a secondary issue. The target schema is [QAPair] (list of {question, answer} pairs), which is registered as "distill_qa". Beyond calling fix_llm_output, this site also bypasses the llm_invoke wrapper entirely, meaning it skips structured error handling, retry logic for rate limits/timeouts, and error-kind categorization. A parse failure here silently produces no learned QA pairs with no retry.
+
+Summary table
+Site	File	Schema	Currently calls fix_llm_output?	Should it?
+RETRIEVE tool calls	agent_query.py:539	LangChain tool call	—	No (framework-owned)
+DRAFT answer	agent_query.py:744	Free prose	—	No (not JSON)
+validate_retrieval	validators.py:327	RetrievalJudgeSchema	No	Yes
+validate_merge	validators.py:440	MergeJudgeSchema	No	Yes
+validate_redundancy	validators.py:548	RedundancyJudgeItem list	No	Yes
+validate_lbc	validators.py:717	LBCJudgeSchema	No	Yes
+NAC merge	context_compression.py:243	MergeSchema	No	Yes
+DC dedup	context_compression.py:465	RedundancyGroupProposal list	No	Yes
+LBC compress	context_compression.py:660	LBCCompressSchema	No	Yes
+check_answer_quality	tools.py:325	Free text (OK/INSUFFICIENT)	—	No (not JSON)
+QA distillation	self_learner.py:137	QAPair list	No	Yes (+ also needs llm_invoke)
+Eight sites should call fix_llm_output but don't. All eight already have their target schemas registered in _SCHEMA_REGISTRY in fix_llm_output.py:235. Each currently relies on 1–2 parse tiers (fence strip + json.loads + at most one regex fallback), while fix_llm_output provides 5 tiers plus Pydantic schema validation. Parse failures at Sites 3–9 silently degrade to "keep original" or "skip step" behaviors with no recovery attempt.
+
+c#688-688
+Integrate the fix_llm_output() as per found and the following notes for help:
+
+Schema / Output Schemas
+-----------------------
+
+Retrieval Judge
+---------------
+validators.py
+└── validate_retrieval()                -> RetrievalCheckResult (dict)
+
+Merge Stage
+-----------
+context_compression.py
+└── _merge_similar_chunks()             -> merge_judge output (dict)
+
+Retrieval Judge
+---------------
+validators.py
+└── validate_retrieval()                -> dict
+
+NAC (Neighbor-Aware Compression)
+--------------------------------
+context_compression.py
+└── validate_merge()                    -> dict
+
+DC (Deduplication Compression)
+------------------------------
+context_compression.py
+├── deduplicate_compression()           -> list
+└── validate_redundancy()              -> dict
+
+LBC (Loss-Based Compression)
+----------------------------
+context_compression.py
+├── lbc_compression()                  -> dict
+└── validate_lbc()                     -> dict
+
+Distillation
+------------
+self_learner.py
+└── _generate_qa_pairs()               -> list
+
+
+Implementation Order
+====================
+
+1. validate_retrieval()
+   File: validators.py
+   Lines: 347-351
+
+2. _merge_similar_chunks()
+   File: context_compression.py
+   Lines: 468-471
+
+3. validate_merge()
+   File: validators.py
+   Lines: 472-476
+
+4. NAC Judge
+   File: validators.py
+   Uses validate_merge()
+
+5. deduplicate_compression()
+   File: context_compression.py
+   Lines: 765-818
+
+6. validate_redundancy()
+   File: validators.py
+   Lines: 555-559
+
+7. lbc_compression()
+   File: context_compression.py
+   Lines: 660-662
+
+8. validate_lbc()
+   File: validators.py
+   Lines: 750-755
+
+9. _generate_qa_pairs()
+   File: self_learner.py
+   Line: 137
+
+
+Subsystem Mapping
+=================
+
+NAC
+---
+context_compression.py
+└── validate_merge()
+
+DC
+--
+context_compression.py
+├── deduplicate_compression()
+└── validate_redundancy()
+
+LBC
+---
+context_compression.py
+├── lbc_compression()
+└── validate_lbc()
+
+Distillation
+------------
+self_learner.py
+└── _generate_qa_pairs()
+
+
+Files Involved
+==============
+
+validators.py
+-------------
+- validate_retrieval()
+- validate_merge()
+- validate_redundancy()
+- validate_lbc()
+
+context_compression.py
+----------------------
+- _merge_similar_chunks()
+- deduplicate_compression()
+- lbc_compression()
+
+self_learner.py
+---------------
+- _generate_qa_pairs()
+Show less
+Let me read all the relevant sections precisely before making any changes.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\fix_llm_output.py (lines 234-273)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\fix_llm_output.py (lines 2-28)
+Now read each exact target section in order:
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py (lines 2-16)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py (lines 341-395)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py (lines 456-515)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py (lines 541-620)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py (lines 621-670)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py (lines 711-790)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py (lines 2-13)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py (lines 259-313)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py (lines 481-525)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py (lines 651-715)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\self_learner.py (lines 2-16)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\self_learner.py (lines 131-170)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\fix_llm_output.py (lines 519-598)
+Good — _LLM_Json_Repair auto-constructs a fallback LLM when llm=None, but it's cheaper to pass the existing one. I have everything I need. Making all 8 changes now.
+
+Update Todos
+
+Add fix_llm_output import to validators.py, context_compression.py, self_learner.py
+
+validators.py: replace _safe_json_parse in validate_retrieval
+
+validators.py: replace _safe_json_parse in validate_merge
+
+validators.py: replace manual parse block in validate_redundancy
+
+validators.py: replace _safe_json_parse in validate_lbc
+
+context_compression.py: replace manual parse in _merge_similar_chunks
+
+context_compression.py: replace manual parse block in deduplicate_compression
+
+context_compression.py: replace manual parse in llm_based_compression
+
+self_learner.py: replace manual parse in _generate_qa_pairs
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py
+Added 1 line
+That hint is expected — the import exists but isn't used yet. It will resolve as I add the call sites.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\self_learner.py
+Added 1 line
+Update Todos
+
+Add fix_llm_output import to validators.py, context_compression.py, self_learner.py
+
+validators.py: replace _safe_json_parse in validate_retrieval
+
+validators.py: replace _safe_json_parse in validate_merge
+
+validators.py: replace manual parse block in validate_redundancy
+
+validators.py: replace _safe_json_parse in validate_lbc
+
+context_compression.py: replace manual parse in _merge_similar_chunks
+
+context_compression.py: replace manual parse block in deduplicate_compression
+
+context_compression.py: replace manual parse in llm_based_compression
+
+self_learner.py: replace manual parse in _generate_qa_pairs
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py
+Modified
+Update Todos
+
+Add fix_llm_output import to validators.py, context_compression.py, self_learner.py
+
+validators.py: replace _safe_json_parse in validate_retrieval
+
+validators.py: replace _safe_json_parse in validate_merge
+
+validators.py: replace manual parse block in validate_redundancy
+
+validators.py: replace _safe_json_parse in validate_lbc
+
+context_compression.py: replace manual parse in _merge_similar_chunks
+
+context_compression.py: replace manual parse block in deduplicate_compression
+
+context_compression.py: replace manual parse in llm_based_compression
+
+self_learner.py: replace manual parse in _generate_qa_pairs
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py
+Modified
+Update Todos
+
+Add fix_llm_output import to validators.py, context_compression.py, self_learner.py
+
+validators.py: replace _safe_json_parse in validate_retrieval
+
+validators.py: replace _safe_json_parse in validate_merge
+
+validators.py: replace manual parse block in validate_redundancy
+
+validators.py: replace _safe_json_parse in validate_lbc
+
+context_compression.py: replace manual parse in _merge_similar_chunks
+
+context_compression.py: replace manual parse block in deduplicate_compression
+
+context_compression.py: replace manual parse in llm_based_compression
+
+self_learner.py: replace manual parse in _generate_qa_pairs
+validate_redundancy has the largest parse block — replacing all of it:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py
+Removed 30 lines
+Update Todos
+
+Add fix_llm_output import to validators.py, context_compression.py, self_learner.py
+
+validators.py: replace _safe_json_parse in validate_retrieval
+
+validators.py: replace _safe_json_parse in validate_merge
+
+validators.py: replace manual parse block in validate_redundancy
+
+validators.py: replace _safe_json_parse in validate_lbc
+
+context_compression.py: replace manual parse in _merge_similar_chunks
+
+context_compression.py: replace manual parse block in deduplicate_compression
+
+context_compression.py: replace manual parse in llm_based_compression
+
+self_learner.py: replace manual parse in _generate_qa_pairs
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py
+Modified
+_safe_json_parse is now dead code — all four call sites are replaced. Let me check if _strip_code_fences is also only used by it.
+
+Grep "_safe_json_parse|_strip_code_fences" (in c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py, glob: *.py)
+3 lines of output
+Both are now unused. Remove them both.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py (lines 271-298)
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py
+Removed 23 lines
+Grep "\bjson\.\|\bre\." (in c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py)
+1 line of output
+Both json and re are now unused — they were only needed by the deleted functions.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\validators.py
+Removed 2 lines
+Update Todos
+
+Add fix_llm_output import to validators.py, context_compression.py, self_learner.py
+
+validators.py: replace _safe_json_parse in validate_retrieval
+
+validators.py: replace _safe_json_parse in validate_merge
+
+validators.py: replace manual parse block in validate_redundancy
+
+validators.py: replace _safe_json_parse in validate_lbc
+
+context_compression.py: replace manual parse in _merge_similar_chunks
+
+context_compression.py: replace manual parse block in deduplicate_compression
+
+context_compression.py: replace manual parse in llm_based_compression
+
+self_learner.py: replace manual parse in _generate_qa_pairs
+Now the three context_compression.py sites. The merge site keeps the source-normalization as a pre-pass before handing off to fix_llm_output:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py
+Removed 3 lines
+Update Todos
+
+Add fix_llm_output import to validators.py, context_compression.py, self_learner.py
+
+validators.py: replace _safe_json_parse in validate_retrieval
+
+validators.py: replace _safe_json_parse in validate_merge
+
+validators.py: replace manual parse block in validate_redundancy
+
+validators.py: replace _safe_json_parse in validate_lbc
+
+context_compression.py: replace manual parse in _merge_similar_chunks
+
+context_compression.py: replace manual parse block in deduplicate_compression
+
+context_compression.py: replace manual parse in llm_based_compression
+
+self_learner.py: replace manual parse in _generate_qa_pairs
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py
+Removed 21 lines
+Update Todos
+
+Add fix_llm_output import to validators.py, context_compression.py, self_learner.py
+
+validators.py: replace _safe_json_parse in validate_retrieval
+
+validators.py: replace _safe_json_parse in validate_merge
+
+validators.py: replace manual parse block in validate_redundancy
+
+validators.py: replace _safe_json_parse in validate_lbc
+
+context_compression.py: replace manual parse in _merge_similar_chunks
+
+context_compression.py: replace manual parse block in deduplicate_compression
+
+context_compression.py: replace manual parse in llm_based_compression
+
+self_learner.py: replace manual parse in _generate_qa_pairs
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py
+Removed 12 lines
+Update Todos
+
+Add fix_llm_output import to validators.py, context_compression.py, self_learner.py
+
+validators.py: replace _safe_json_parse in validate_retrieval
+
+validators.py: replace _safe_json_parse in validate_merge
+
+validators.py: replace manual parse block in validate_redundancy
+
+validators.py: replace _safe_json_parse in validate_lbc
+
+context_compression.py: replace manual parse in _merge_similar_chunks
+
+context_compression.py: replace manual parse block in deduplicate_compression
+
+context_compression.py: replace manual parse in llm_based_compression
+
+self_learner.py: replace manual parse in _generate_qa_pairs
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\self_learner.py
+Removed 1 line
+Update Todos
+
+Add fix_llm_output import to validators.py, context_compression.py, self_learner.py
+
+validators.py: replace _safe_json_parse in validate_retrieval
+
+validators.py: replace _safe_json_parse in validate_merge
+
+validators.py: replace manual parse block in validate_redundancy
+
+validators.py: replace _safe_json_parse in validate_lbc
+
+context_compression.py: replace manual parse in _merge_similar_chunks
+
+context_compression.py: replace manual parse block in deduplicate_compression
+
+context_compression.py: replace manual parse in llm_based_compression
+
+self_learner.py: replace manual parse in _generate_qa_pairs
+Now let me verify the self_learner.py change didn't leave json unused:
+
+Grep "\bjson\." (in c:\Users\LOQ\Desktop\Projects\RAG-work\app\self_learner.py)
+1 line of output
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\self_learner.py (lines 2-6)
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\self_learner.py
+Removed 1 line
+Now do a final check — verify no stray manual parse patterns remain in any of the three files:
+
+Grep "replace\(\"```json\"\|replace\(\"```python\"\|json\.loads\(cleaned\)" (in c:\Users\LOQ\Desktop\Projects\RAG-work\app, glob: *.py)
+1 line of output
+Grep "fix_llm_output" (in c:\Users\LOQ\Desktop\Projects\RAG-work\app, glob: *.py)
+20 lines of output
+All 8 call sites are wired up. The output is exactly what was expected:
+
+validators.py: 4 sites (retrieval_judge, merge_judge, redundancy_judge, lbc_judge) — each passes judge_llm to enable the LLM repair tier
+context_compression.py: 3 sites (merge, dc_scan, lbc_compress) — each passes the local llm instance; the merge site applies the [Source: "path"] pre-pass before handing off
+self_learner.py: 1 site (distill_qa) — passes self.llm
+Dead code removed: _safe_json_parse, _strip_code_fences from validators.py; unused import json / import re from validators.py; unused import json from self_learner.py.
+
+c#8-8
+@app/
+implement the "ENABLE_SUB_QUERY_GENERATION" boolean check in the agent_query.py
+If the boolean is true, the user's input query must go to the LLM for subquery/query-variants generation.
+If the boolean is false, the user's query shall only be used for retrieval.
+Show less
+Let me read the relevant files first.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\config.py, c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Now let me check the prompts file for any existing sub-query generation prompts.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\prompts.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\llm_caller.py
+Let me also check query.py to see if it calls run_agent.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\query.py
+Good - query.py doesn't use run_agent. Now I have everything I need. Here's the plan:
+
+Add _generate_sub_queries() function to agent_query.py
+Add sub_queries: list[str] | None = None parameter to run_agent
+Pre-seed sub-queries via _handle_retrieve_documents_call at the start of the first RETRIEVE iteration
+In main(), check ENABLE_SUB_QUERY_GENERATION and call the generator before run_agent
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Added 12 lines
+The import warning is expected since I haven't used ENABLE_SUB_QUERY_GENERATION yet. Let me check if the constants I imported are already defined locally in the file (they might need to be removed to avoid duplication).
+
+Grep "^(VECTOR_STORE_PATH|COLLECTION_NAME|MAX_ITERATIONS|MAX_TOOL_CALLS_PER_ITERATION|MAX_TOTAL_RETRIEVALS|LEARN_EVERY_N|FAILED_VARIANTS_PATH|MERGE_SIMILARITY_THRESHOLD|LLM_RESPONSE_RETRY_LIMIT)\s*=" (in c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py)
+1 line of output
+Good — the constants were not defined locally, so config.py is the authoritative source and my import is correct. Now let me add the _generate_sub_queries function and wire in the flag.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 28-37)
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Added 40 lines
+Still expected — still wiring it up. Now I'll modify run_agent to accept and pre-seed sub-queries, then update main().
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Added 1 line
+Now add the pre-seeding logic inside the RETRIEVE phase, guarded by a one-shot flag.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Added 1 line
+Now add the actual pre-seeding block inside RETRIEVE, right before the first llm_invoke call.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Added 29 lines
+Minor spell-check warning — fix the print string.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Modified
+
+
+c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py
+for each of the compression technique's validation function call, add a check with the boolean constant "ENABLE_COMPRESSION_VALIDATION"...
+Therefore, the validators only run when this boolean is true, otherwise they pipeline directly uses the LLM's output.
+Show less
+Let me read the file first.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py
+Now I'll make the three changes — one per compression technique (NAC, DC, LBC).
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py
+Added 8 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py
+Added 5 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py
+Added 8 lines
+All three validation call sites are now gated on ENABLE_COMPRESSION_VALIDATION:
+
+NAC (context_compression.py:209): validate_merge is skipped; candidate is accepted directly with a "validation disabled" log line.
+DC (context_compression.py:361): validate_redundancy is skipped; valid_groups is used directly as confirmed_groups.
+LBC (context_compression.py:541): validate_lbc is skipped; the compressed chunk is installed immediately, identical to the SAFE path.
+When ENABLE_COMPRESSION_VALIDATION = False, no judge LLM calls are made and the pipeline uses the compression LLM's output as-is.
+
+
+
+I need to create a new config file, that will have all the turn on/off switches (that i will implement soon) and constants declared. Suggest everything u can about it
+
+I’ll map the config suggestions to your actual current code, not generic “settings.py” advice. I’ll focus on constants already scattered across the RAG pipeline and the switches you’ll likely need soon.
+
+Thought for 27s
+
+Yes — create config.py, but make it typed and grouped, not a dumping ground.
+
+Your constants are currently scattered across agent_query.py, tools.py, context_compression.py, ingest.py, self_learner.py, etc. For example, retrieval/agent budgets live in agent_query.py, compression thresholds live in context_compression.py, retrieval thresholds live in tools.py, and ingestion constants live in ingest.py .
+
+Use this structure:
+
+# config.py
+from pathlib import Path
+from dataclasses import dataclass, field
+from typing import Final
+
+
+# ─────────────────────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────────────────────
+
+PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
+DATA_DIR: Final[Path] = PROJECT_ROOT / "data"
+
+VECTOR_STORE_PATH: Final[Path] = DATA_DIR / "vector_store"
+FEEDBACK_DIR: Final[Path] = DATA_DIR / "feedback"
+
+INTERACTIONS_PATH: Final[Path] = FEEDBACK_DIR / "interactions.jsonl"
+FAILED_VARIANTS_PATH: Final[Path] = FEEDBACK_DIR / "failed_variants.json"
+USER_THUMBDOWNS_PATH: Final[Path] = FEEDBACK_DIR / "user_thumbdowns.json"
+
+PDF_DIR: Final[Path] = DATA_DIR / "pdfs"
+TEXT_DIR: Final[Path] = DATA_DIR / "textfiles"
+CSV_DIR: Final[Path] = DATA_DIR / "csv"
+WORD_DIR: Final[Path] = DATA_DIR / "word"
+HTML_DIR: Final[Path] = DATA_DIR / "html"
+JSON_DIR: Final[Path] = DATA_DIR / "json"
+
+
+# ─────────────────────────────────────────────────────────────
+# Feature switches
+# ─────────────────────────────────────────────────────────────
+
+ENABLE_AGENTIC_RETRIEVAL: Final[bool] = True
+ENABLE_RETRIEVAL_JUDGE: Final[bool] = True
+ENABLE_ANSWER_QUALITY_JUDGE: Final[bool] = True
+ENABLE_CONTEXT_COMPRESSION: Final[bool] = True
+ENABLE_NAC_COMPRESSION: Final[bool] = True
+ENABLE_DC_COMPRESSION: Final[bool] = True
+ENABLE_LBC_COMPRESSION: Final[bool] = True
+ENABLE_LEARNED_QA_RETRIEVAL: Final[bool] = True
+ENABLE_SELF_LEARNING: Final[bool] = True
+ENABLE_THUMBDOWN_MEMORY: Final[bool] = True
+ENABLE_FAILED_VARIANT_BLOCKING: Final[bool] = True
+ENABLE_LLM_JSON_REPAIR: Final[bool] = True
+ENABLE_JSON_REPAIR_LIBRARY: Final[bool] = True
+ENABLE_VERBOSE_LOGGING: Final[bool] = True
+ENABLE_TOKEN_USAGE_TRACKING: Final[bool] = True
+
+
+# ─────────────────────────────────────────────────────────────
+# Collections / models
+# ─────────────────────────────────────────────────────────────
+
+DOCUMENT_COLLECTION: Final[str] = "documents"
+LEARNED_COLLECTION: Final[str] = "learned_qa"
+
+EMBEDDING_MODEL: Final[str] = "all-MiniLM-L6-v2"
+
+AGENT_LLM_MODEL: Final[str] = "llama-3.1-8b-instant"
+MERGE_LLM_MODEL: Final[str] = "llama-3.1-8b-instant"
+JUDGE_LLM_MODEL: Final[str] = "llama-3.1-8b-instant"
+REPAIR_LLM_MODEL: Final[str] = "llama-3.1-8b-instant"
+
+AGENT_TEMPERATURE: Final[float] = 0.1
+MERGE_TEMPERATURE: Final[float] = 0.0
+JUDGE_TEMPERATURE: Final[float] = 0.0
+REPAIR_TEMPERATURE: Final[float] = 0.0
+
+LLM_MAX_TOKENS: Final[int] = 2048
+REPAIR_LLM_MAX_TOKENS: Final[int] = 1024
+
+
+# ─────────────────────────────────────────────────────────────
+# Agent budgets
+# ─────────────────────────────────────────────────────────────
+
+MAX_ITERATIONS: Final[int] = 6
+MAX_TOOL_CALLS_PER_ITERATION: Final[int] = 5
+MAX_TOTAL_RETRIEVALS: Final[int] = 5
+DEFAULT_AGENT_RETRIEVAL_TOP_K: Final[int] = 5
+DEFAULT_SIMPLE_QUERY_TOP_K: Final[int] = 7
+
+
+# ─────────────────────────────────────────────────────────────
+# Retrieval thresholds
+# ─────────────────────────────────────────────────────────────
+
+MIN_SIMILARITY: Final[float] = 0.5
+DEFAULT_MIN_SCORE: Final[float] = 0.2
+MERGE_SIMILARITY_THRESHOLD: Final[float] = 0.90
+
+
+# ─────────────────────────────────────────────────────────────
+# Ingestion
+# ─────────────────────────────────────────────────────────────
+
+UNSTRUCTURED_EXT: Final[set[str]] = {".pdf", ".txt", ".doc", ".docx", ".html", ".htm"}
+TABULAR_EXT: Final[set[str]] = {".csv", ".xls", ".xlsx"}
+SUPPORTED_EXT: Final[set[str]] = UNSTRUCTURED_EXT | TABULAR_EXT | {".json"}
+
+SEARCH_ROOTS: Final[list[Path]] = [
+    PDF_DIR,
+    TEXT_DIR,
+    CSV_DIR,
+    WORD_DIR,
+    HTML_DIR,
+    JSON_DIR,
+    DATA_DIR,
+]
+
+CHUNK_SIZE: Final[int] = 1000
+CHUNK_OVERLAP: Final[int] = 200
+MIN_CHUNK_CHARS: Final[int] = 150
+INGEST_BATCH_SIZE: Final[int] = 512
+EMBEDDING_BATCH_SIZE: Final[int] = 32
+
+
+# ─────────────────────────────────────────────────────────────
+# Compression
+# ─────────────────────────────────────────────────────────────
+
+COMPRESS_MIN_TOKENS: Final[int] = 500
+DC_WINDOW_SIZE: Final[int] = 3
+LBC_MIN_RETENTION_RATIO: Final[float] = 0.35
+MIN_CLEANED_CHUNK_CHARS: Final[int] = 50
+
+
+# ─────────────────────────────────────────────────────────────
+# Retry / repair
+# ─────────────────────────────────────────────────────────────
+
+LLM_RESPONSE_RETRY_LIMIT: Final[int] = 3
+JSON_REPAIR_TRIES: Final[int] = 2
+MAX_JSON_REPAIR_INPUT_CHARS: Final[int] = 4000
+
+
+# ─────────────────────────────────────────────────────────────
+# Feedback / learning
+# ─────────────────────────────────────────────────────────────
+
+MIN_FEEDBACK_LEN: Final[int] = 10
+LEARN_EVERY_N: Final[int] = 5
+DISTILLATION_BATCH_SIZE: Final[int] = 10
+DISTILL_QA_MIN_PAIRS: Final[int] = 1
+DISTILL_QA_MAX_PAIRS: Final[int] = 3
+
+
+# ─────────────────────────────────────────────────────────────
+# Answer policy
+# ─────────────────────────────────────────────────────────────
+
+MIN_ANSWER_LENGTH: Final[int] = 50
+MAX_FINAL_ANSWER_WORDS: Final[int] = 400
+
+NO_CONTEXT_ANSWER: Final[str] = (
+    "The knowledge base does not contain information about this query. "
+    "No relevant documents were retrieved across all search attempts."
+)
+
+
+# ─────────────────────────────────────────────────────────────
+# Logging display
+# ─────────────────────────────────────────────────────────────
+
+THIN_LINE: Final[str] = "─" * 70
+THICK_LINE: Final[str] = "═" * 70
+
+The important production-grade rule: keep constants/config values here, but keep large prompts in a separate prompts.py. Your prompts are large behavioral assets, not normal constants. Moving _ROLE_AND_RULES, _PROCESS_INSTRUCTIONS, _CHUNK_MERGE_PROMPT, _DC_SCAN_PROMPT, GROUNDING_PROMPT, and validator prompts into prompts.py will keep config.py clean.
+
+Suggested files:
+
+app/
+├── config.py        # paths, switches, limits, thresholds, model names
+├── prompts.py       # long LLM prompts
+├── agent_query.py
+├── ingest.py
+├── tools.py
+└── ...
+
+Then import like:
+
+from config import (
+    VECTOR_STORE_PATH,
+    DOCUMENT_COLLECTION,
+    MAX_TOTAL_RETRIEVALS,
+    ENABLE_CONTEXT_COMPRESSION,
+)
+
+Best immediate switches to implement first:
+
+ENABLE_RETRIEVAL_JUDGE = True
+ENABLE_CONTEXT_COMPRESSION = True
+ENABLE_SELF_LEARNING = True
+ENABLE_THUMBDOWN_MEMORY = True
+ENABLE_LLM_JSON_REPAIR = True
+ENABLE_VERBOSE_LOGGING = True
+
+Do not put API keys in this file. Keep GROQ_API_KEY in .env; only config should reference model names, temperatures, retry limits, and feature flags.
+
+List down all the variables listed in the attached picture/my notes...
+
+From the handwritten notes, I can identify the following items/variables/features:
+
+1. Sub-query generation flow
+
+2. Dedup + merge of retrievals
+   + llm_output_fix
+
+3. Validation
+   + llm_output_fix
+
+4. 3 for the 3 compressors
+   + 1 for all validators
+   + 1 for all llm_output_fix
+
+5. Answer draft creation
+
+6. Check-answer-quality
+
+7. Auto-distillation
+
+8. Generate QA pairs
+   + llm_output_fix
+
+9. Overall implementation-wide llm_output_fix
+
+If you're converting these into config switches, I'd name them something like:
+
+# Query generation
+ENABLE_SUBQUERY_GENERATION_FLOW = True
+
+# Retrieval processing
+ENABLE_RETRIEVAL_DEDUP = True
+ENABLE_RETRIEVAL_MERGE = True
+ENABLE_RETRIEVAL_LLM_OUTPUT_FIX = True
+
+# Validation
+ENABLE_VALIDATION = True
+ENABLE_VALIDATION_LLM_OUTPUT_FIX = True
+
+# Compressors
+ENABLE_NAC_COMPRESSION = True
+ENABLE_DC_COMPRESSION = True
+ENABLE_LBC_COMPRESSION = True
+
+# Validators
+ENABLE_ALL_VALIDATORS = True
+
+# Global LLM output repair
+ENABLE_ALL_LLM_OUTPUT_FIXES = True
+
+# Answer generation
+ENABLE_ANSWER_DRAFT_CREATION = True
+
+# Quality checking
+ENABLE_CHECK_ANSWER_QUALITY = True
+
+# Self-learning
+ENABLE_AUTO_DISTILLATION = True
+
+# QA generation
+ENABLE_GENERATE_QA_PAIRS = True
+ENABLE_QA_GENERATION_LLM_OUTPUT_FIX = True
+
+# Global safeguard
+ENABLE_GLOBAL_LLM_OUTPUT_FIX = True
+
+The note at #4 appears to be an implementation reminder rather than a feature:
+
+3 separate llm_output_fix integrations
+    - NAC compressor
+    - DC compressor
+    - LBC compressor
+
+1 shared llm_output_fix integration
+    - all validators
+
+1 shared llm_output_fix integration
+    - all other LLM-output-fix consumers
+
+So in total I count:
+
+Features / Flows:
+1. Sub-query generation
+2. Retrieval deduplication
+3. Retrieval merging
+4. Validation
+5. Answer draft creation
+6. Check-answer-quality
+7. Auto-distillation
+8. Generate QA pairs
+
+Cross-cutting:
+9. LLM output fix for compressors
+10. LLM output fix for validators
+11. LLM output fix for QA generation
+12. Global/system-wide LLM output fix
+
+Those are the items I can clearly read from the image.
+
+
+
+
+List down all the boolean variables listed in the attached picture/my notes...into the config.py file
+Each represent whether a certain part will happen in the pipeline flow or not
+3:11 PM
+
+Worked for 36s
+Added 16 boolean pipeline feature toggles to config.py.
+
+All toggles use the ENABLE_* naming convention and default to True. Verified every variable is boolean and the file compiles successfully.
+
+
+Edited config.py
++35
+-0
+3:11 PM
+fix
+3:17 PM
+
+Worked for 1m 56s
+Fixed.
+
+Added missing os and Path imports to config.py.
+Removed duplicated constants from agent_query.py.
+Imported centralized constants from config.py.
+Removed unused PAD_TOKENS from agent_query.py.
+Verified compilation and imports using the project virtual environment.
+
+
+Edited 2 files
++34
+-29
+
+app/agent_query.py
++27
+-28
+
+app/config.py
++7
+-1
+3:19 PM
+
+c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Task:
+implement the use of ENABLE_RETRIEVAL_DEDUP_MERGE, ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION, and ENABLE_RETRIEVAL_VALIDATION boolean constants.
+
+If ENABLE_RETRIEVAL_VALIDATION is true, only then the agent should check the retrieved chunks agaisnt the original query; otherwise, it will use the retrieved chunks as they are
+
+If ENABLE_RETRIEVAL_DEDUP_MERGE is true, only then the agent should find the cosine similarity of the of the retrieved chunks, merge them, and scrub the message/history; otherwise, just add them into accumulated chunks as normal
+
+If ENABLE_RETRIEVAL_DEDUP_MERGE and ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION are both true, then apply the merge validator on the merged chunks; otherwise, if either of them is false, simply use the the merged chunks and perform the rest of the pipeline
+Show less
+Let me read the relevant files to understand the current structure.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\config.py
+Now I have a clear picture. I need to gate three blocks in _handle_retrieve_documents_call:
+
+The validate_retrieval block behind ENABLE_RETRIEVAL_VALIDATION
+The cosine-similarity dedup/merge loop behind ENABLE_RETRIEVAL_DEDUP_MERGE
+The validate_merge sub-loop behind ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION
+I'll do this as one focused replacement of the section from the validation comment through the end of the dedup/merge block.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Added 32 lines
+Those are spell-checker warnings only (severity: "Information") — not code errors. "dedup" and "dups" are existing abbreviations already present throughout the file before my changes. No action needed.
+
+The three flags are now wired up:
+
+ENABLE_RETRIEVAL_VALIDATION = False → skips validate_retrieval(), the irrelevant-chunk filter, the sidecar judge messages, and the early-return-on-empty-chunks path; all retrieved chunks pass through as-is.
+ENABLE_RETRIEVAL_DEDUP_MERGE = False → skips cosine-similarity grouping and merging entirely; chunks are appended to accumulated_chunks directly (no embeddings computed, no LLM merge calls).
+ENABLE_RETRIEVAL_DEDUP_MERGE = True + ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION = False → dedup grouping still runs, but each merge group is merged in one shot without calling validate_merge() or retrying.
+Both True → existing behavior: retry loop with validate_merge gating each install.
+c#34-34
+Task:
+implement the use of ENABLE_ANSWER_DRAFT_CREATION and ENABLE_ANSWER_QUALITY_CHECK boolean constants.
+
+If ENABLE_ANSWER_DRAFT_CREATION is true, only then the agent should create the answer draft as it is doing now; otherwise, it will use the retrieved chunks to directly produce the final answer and no answer quality check will happen.
+
+If ENABLE_ANSWER_DRAFT_CREATION and ENABLE_ANSWER_QUALITY_CHECK are both true, only then the agent should perform answer quality check on the answer draft
+Show less
+Let me read the current DRAFT and JUDGE phases.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 681-840)
+Now I'll replace the DRAFT phase to gate both behaviors.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Added 28 lines
+Done. Here's how the two flags are now wired:
+
+ENABLE_ANSWER_DRAFT_CREATION = False — at the top of PHASE 3, the agent immediately returns full_context (the compressed chunks) as the final answer with quality "OK". No LLM draft call, no JUDGE phase.
+
+ENABLE_ANSWER_DRAFT_CREATION = True + ENABLE_ANSWER_QUALITY_CHECK = False — the LLM draft call runs normally, but after the draft is produced the agent returns it directly as "OK" instead of transitioning to JUDGE. No retry loop.
+
+Both True — existing behavior: DRAFT → JUDGE with the full retry loop.
+
+c#62-62
+Task:
+implement the use of ENABLE_SUB_QUERY_GENERATION boolean constant.
+
+If ENABLE_SUB_QUERY_GENERATION is true, only then the agent should follow the current architecture of building base prompt, creating query variants and retrieving them; otherwise, it will use only the user's oriiginal query to retrieve the chunks
+Show less
+Let me read the prompts file and the RETRIEVE phase to understand the full flow.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\prompts.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 183-282)
+Let me check the retrieve_documents tool signature and the top_k default.
+
+Grep "def retrieve_documents|top_k|retrieve_documents" (in c:\Users\LOQ\Desktop\Projects\RAG-work\app, glob: tools.py)
+15 lines of output
+Now let me read the current RETRIEVE phase in the edited file.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 521-700)
+Now let me read the JUDGE phase.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 811-885)
+I have everything I need. Two edits: (1) add a direct-retrieval fast-path at the top of the RETRIEVE phase, (2) suppress the JUDGE retry loop when sub-query generation is off.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Added 26 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+Added 1 line
+Done. Here's what each flag controls now:
+
+ENABLE_SUB_QUERY_GENERATION = True — existing behavior: LLM drives the RETRIEVE phase, generates multiple query variants, loops back after JUDGE if INSUFFICIENT.
+
+ENABLE_SUB_QUERY_GENERATION = False — the RETRIEVE phase is bypassed entirely: a single synthetic retrieve_documents call is injected with the original user query (no LLM call), then the pipeline goes straight to COMPRESS → DRAFT → JUDGE. In the JUDGE phase, the retry loop is also suppressed (budget_ok = False) because there are no new variants to try with the same query.
+
+
+c#6-40
+Write a python script that: 
+1. runs the agent_query.p for the same query multiple times, 
+2. each try with a different combination of the config file's booleans
+3. stores the output/log of each query from terminal to a text file at "C:\Users\LOQ\Desktop\Projects\RAG-work\app\run_logs\"
+
+Query to use: "What can you tell me about ASD?"
+
+Boolean Variables to create combinations of:
+ENABLE_SUB_QUERY_GENERATION = True
+ENABLE_RETRIEVAL_DEDUP_MERGE = True
+ENABLE_RETRIEVAL_DEDUP_MERGE_OUTPUT_FIX = True
+ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION = True
+ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION_OUTPUT_FIX = True
+ENABLE_RETRIEVAL_VALIDATION = True
+ENABLE_RETRIEVAL_VALIDATION_OUTPUT_FIX = True
+ENABLE_NAC_COMPRESSION = True
+ENABLE_DC_COMPRESSION = True
+ENABLE_LBC_COMPRESSION = True
+ENABLE_COMPRESSION_VALIDATION = True
+ENABLE_COMPRESSION_OUTPUT_FIX = True
+ENABLE_ANSWER_DRAFT_CREATION = True
+ENABLE_ANSWER_QUALITY_CHECK = True
+ENABLE_AUTO_DISTILLATION = True
+ENABLE_QA_PAIR_GENERATION = True
+ENABLE_QA_PAIR_OUTPUT_FIX = True
+ENABLE_GLOBAL_LLM_OUTPUT_FIX = True
+
+NOTE: currently, regarding the stats of interactions:
+  Total interactions logged : 125
+  Successful (OK quality)   : 66
+  Learned QA pairs in store : 318
+  Next distillation at      : 4 more good interaction(s)
+Show less
+With 18 boolean variables, there are 2^18 = 262,144 possible combinations — running all of them is infeasible. Let me check the project structure first, then ask how you'd like to scope it.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\config.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py
+AskUserQuestion
+OUT
+Your questions have been answered: "With 18 booleans there are 2^18 = 262,144 combinations. Which strategy should the script use?"="Random sample". You can now continue with these answers in mind.
+AskUserQuestion
+OUT
+Your questions have been answered: "How many random combinations should the script run?"="50 runs". You can now continue with these answers in mind.
+Let me check how agent_query.py accepts its query input.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 61-160)
+Grep "if __name__|argparse|input\(|sys\.argv|query" (in c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py)
+31 lines of output
+Grep "if __name__" (in c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py)
+1 line of output
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 1133-1172)
+Grep "def main" (in c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py)
+1 line of output
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 918-967)
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app\agent_query.py (lines 967-1046)
+Now I have everything I need. The script will:
+
+Temporarily patch config.py with each random combination
+Pipe the query + "quit" into the interactive input() loop of agent_query.py
+Restore config.py in a finally block
+Write a log file per run with the config used and full output
+Write c:\Users\LOQ\Desktop\Projects\RAG-work\run_combinations.py
+192 lines
+The script is at run_combinations.py. Here's what it does:
+
+Execution flow per run:
+
+Backs up the original config.py in memory
+Patches only the 18 boolean flags using regex substitution (all other constants untouched)
+Launches agent_query.py as a subprocess with the query piped to stdin, followed by "quit" to exit the REPL cleanly
+Restores the original config.py in a finally block — guaranteed even on crash or timeout
+Writes a .txt log file with the full terminal output + the config combo used
+Log files are named run_001_<session_timestamp>.txt through run_050_...txt, all under app/run_logs/.
+
+Run 1 is always the all-True baseline — useful as a reference point when comparing logs.
+
+To run it:
+
+
+cd C:\Users\LOQ\Desktop\Projects\RAG-work
+python run_combinations.py
+Optional flags:
+
+
+python run_combinations.py --runs 20    # fewer runs
+python run_combinations.py --seed 7     # different random sample, reproducibly
+Each run has a 5-minute timeout so a hung LLM call won't block the whole sweep.
+
+
+
+
+These r the outputs of the run_combinations.py file
+
+9 Jun
+
+Searched memory
+Searched memory
+I can see exactly what's happening. All 8 runs crash with the same UnicodeEncodeError at the same line — print(f"\n{_THICK}") in agent_query.py. The issue is that _THICK uses ═ (U+2550, Box Drawings Double Horizontal), which can't be encoded by Windows' cp1252 codepage. This is crashing every single run before any query is even processed.
+
+Let me look at the exact line and the context around it:
+
+
+Viewed 3 files
+Viewed 3 files
+The diagnosis is clear. The fix is straightforward — agent_query.py needs to reconfigure stdout to use UTF-8 at startup, because Windows defaults to cp1252 which can't handle the box-drawing characters (═, ─) used in _THICK and _THIN.
+
+Here's the fix and what's going on:
+
+Root cause: On Windows, sys.stdout defaults to the cp1252 encoding. The very first print(f"\n{_THICK}") after receiving a query crashes because ═ (U+2550) isn't in cp1252. This kills every single run before any RAG logic executes — the config combinations don't even matter.
+
+The fix — add two lines near the top of agent_query.py's main() (or at module level), right after imports:
+
+
+Check imports at top of agent_query.py
+Check imports at top of agent_query.py
+The fix goes at the very top of agent_query.py, right after the imports. Add this:
+
+python
+import sys
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout = open(sys.stdout.fileno(), mode="w", encoding="utf-8", buffering=1)
+if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+    sys.stderr = open(sys.stderr.fileno(), mode="w", encoding="utf-8", buffering=1)
+But since run_combinations.py already passes encoding="utf-8" to subprocess.run, the cleaner, more reliable fix is to force Python's I/O encoding via an environment variable in run_combinations.py. This requires zero changes to agent_query.py:
+
+
+Find the subprocess.run call in run_combinations.py
+Find the subprocess.run call in run_combinations.py
+The problem is clear. run_combinations.py uses encoding="utf-8" when reading the subprocess output, but the subprocess itself (Python on Windows) still opens its own stdout with cp1252 — so the crash happens inside the child process before it can write anything. The fix is to pass PYTHONUTF8=1 in the subprocess environment:
+
+
+Pass PYTHONUTF8=1 env var to subprocess so Python uses UTF-8 for stdout/stderr on Windows
+Pass PYTHONUTF8=1 env var to subprocess so Python uses UTF-8 for stdout/stderr on Windows
+Now copy the fixed file to outputs so you can download it:
+
+
+Ran a command, read a file
+Ran a command, read a file
+What was wrong: Every single run crashed at the exact same point — print(f"\n{_THICK}") on line 1050 of agent_query.py. The ═ character (U+2550) in _THICK can't be encoded by Windows' default cp1252 codepage, so the child process died immediately before processing any query. The config combinations were irrelevant — nothing was being tested at all.
+
+The fix (one change in run_combinations.py): Pass PYTHONUTF8=1 in the child process's environment:
+
+python
+child_env = {**os.environ, "PYTHONUTF8": "1"}
+result = subprocess.run(..., env=child_env)
+PYTHONUTF8=1 is a standard Python environment variable that forces UTF-8 mode on Windows for all I/O streams, which is exactly what the subprocess needs to print those box-drawing separators without crashing.
+
+
+Run combinations
+PY 
+remove the 5 minute time limit and ensure it starts with majority flags off, then slowly enabling them...total runs should be 10
+
+9 Jun
+
+View the full run_combinations.py to understand current structure
+View the full run_combinations.py to understand current structure
+Three changes needed:
+
+Remove the 5-minute timeout (and its except TimeoutExpired handler)
+Replace generate_random_combos with a deterministic ladder that starts all-False and progressively enables flags
+Default --runs to 10
+
+Write the updated run_combinations.py
+Write the updated run_combinations.py
+Let me verify the ladder looks right before handing it over:
+
+
+Verify the ladder progression looks correct
+Verify the ladder progression looks correct
+Ladder is exactly right.
+
+
+Presented file
+Presented file
+Here's what changed and how the ladder works:
+
+Changes made:
+
+No timeout — timeout=300 removed from subprocess.run, and the except subprocess.TimeoutExpired block with it. Runs go until they finish naturally.
+Progressive ladder — generate_random_combos replaced with generate_progressive_combos, which builds a deterministic all-off → all-on sequence.
+Default --runs is now 10.
+The 10-run ladder (2 flags added per step):
+
+Run	Flags ON	Newly enabled
+1	0/18	(bare minimum — nothing on)
+2	2/18	SUB_QUERY_GENERATION, RETRIEVAL_DEDUP_MERGE
+3	4/18	…_OUTPUT_FIX, …_VALIDATION
+4	6/18	…_VALIDATION_OUTPUT_FIX, RETRIEVAL_VALIDATION
+5	8/18	…_VALIDATION_OUTPUT_FIX, NAC_COMPRESSION
+6	10/18	DC_COMPRESSION, LBC_COMPRESSION
+7	12/18	COMPRESSION_VALIDATION, COMPRESSION_OUTPUT_FIX
+8	14/18	ANSWER_DRAFT_CREATION, ANSWER_QUALITY_CHECK
+9	16/18	AUTO_DISTILLATION, QA_PAIR_GENERATION
+10	18/18	QA_PAIR_OUTPUT_FIX, GLOBAL_LLM_OUTPUT_FIX
+Flags are enabled in the same order they appear in BOOL_FLAGS, so the progression follows the natural pipeline order (retrieval → compression → answer generation → learning).

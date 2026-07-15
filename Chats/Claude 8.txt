@@ -1,0 +1,936 @@
+now help me with one thing, i want to check how much context should i send to the llm. There are many things, like base prompt, failed versions, thumbdowns and user feedback (with their query variants of each and retrieved chunks), then ofcourse llm replies (tool call requests), the results of those requests (chunks or message). Chat history (preference/memory) is not maintained right now.
+For this i want to check how large of the message/context i can pass to the llm and its performance still stands. So, write me a query or more than one for this
+Looking at your code, you're using `llama-3.1-8b-instant` via Groq, and you want to find the practical context-length ceiling where the model still performs well on your agentic RAG task.
+
+Let me get the actual context window first, then design the queries.Good — `llama-3.1-8b-instant` on Groq has a **128K (131,072) input context window** with **8,192 max output tokens**. But note: the *theoretical* window and the *practically usable* window are very different things, especially for an 8B model. There's well-documented "lost-in-the-middle" / long-context degradation in smaller models, so your job is to find your **practical ceiling**, not the advertised one.
+
+Here's the testing strategy and the queries.
+
+## The strategy
+
+Your context has a fixed structure: system prompt + (optional) blocked variants + (optional) thumbdown history + tool-call exchanges. You can't easily inflate it without breaking realism, so you need queries that **naturally** trigger more tool calls, more blocked variants, and longer chunks. Run each query, log `total_prompt_tokens` (you already capture this), and grade the answer quality. Plot tokens vs quality and you'll see the cliff.
+
+Before I give the queries, two things to add to your code so the experiment is actually measurable:
+
+**1. Log per-iteration token count, not just the total.** You already have `iter_prompt` — also log a running message-character count and `len(messages)` so you can correlate context size with iteration number.
+
+**2. Add a synthetic context-padding knob** for stress-testing. Without it, you can't push past whatever your real chunks naturally produce. Add this near the top of `agent_query.py`:
+
+```python
+PAD_TOKENS = int(os.getenv("PAD_TOKENS", "0"))  # synthetic padding for stress tests
+```
+
+And inject it into the system prompt at the end of `_build_system_prompt`:
+
+```python
+if PAD_TOKENS > 0:
+    # ~4 chars/token rough estimate
+    pad = "Filler context for stress-testing. " * (PAD_TOKENS // 7)
+    prompt += f"\n\nIRRELEVANT_PADDING_BLOCK (ignore for answering):\n{pad}"
+```
+
+Then run the same query at `PAD_TOKENS=0, 8000, 16000, 32000, 64000, 100000` and watch where quality breaks.
+
+## The actual queries to run
+
+You want queries that probe different failure modes. I'd run **four query categories**, each with a clear correct answer you can grade against.
+
+### Category 1 — Baseline single-fact (low context)
+A query whose answer lives in one chunk. Tests the floor: if the model fails this with a small context, your retrieval is the problem, not the context length.
+
+> "What are the diagnostic criteria for ASD according to the documents?"
+
+Expected: ~3–5K prompt tokens, 1–2 retrieve calls. This is your control.
+
+### Category 2 — Multi-hop synthesis (medium context)
+Forces 3–5 retrievals with different angles, naturally inflating the message log to ~15–25K tokens.
+
+> "Compare the treatment approaches mentioned across all conditions in the knowledge base, and identify which conditions share overlapping symptoms."
+
+This stresses the agent loop itself — the prompt grows with each tool result. Watch for: does the model still synthesize, or does it start copy-pasting chunks verbatim?
+
+### Category 3 — Worst-case prompt (max realistic context)
+Combines blocked variants + a thumbdown history + multi-hop. Pre-seed `failed_variants.json` and `user_thumbdowns.json` with ~10 entries for the test query, then ask:
+
+> "Explain the relationship between [topic A] and [topic B] in detail, with examples from the source documents."
+
+This is the realistic ceiling of your *actual* prompt structure. If you have, say, 5 thumbdowns each with 4 variants and 2 chunks @ 1KB, that's already ~40KB of system prompt before tool calls even start.
+
+### Category 4 — Synthetic stress test (using PAD_TOKENS)
+Same simple query as Category 1, but run it with `PAD_TOKENS` at increasing values:
+
+```bash
+PAD_TOKENS=0      python agent_query.py   # baseline
+PAD_TOKENS=8000   python agent_query.py
+PAD_TOKENS=16000  python agent_query.py
+PAD_TOKENS=32000  python agent_query.py
+PAD_TOKENS=64000  python agent_query.py
+PAD_TOKENS=100000 python agent_query.py
+```
+
+Ask the same question each time: "What are the diagnostic criteria for ASD?" If the model can find a needle-in-haystack answer with 100K of irrelevant padding, you know it tolerates the full window. In practice, **expect quality to start degrading around 16–32K tokens** for an 8B model — this is the well-known long-context performance cliff for smaller models. The `--simple` mode in `query.py` is good for this since it removes confounders.
+
+## What to grade on
+
+For each run, capture:
+- `total_prompt_tokens` (you already have it)
+- Iterations used (already logged)
+- **Did it hallucinate?** (compare answer to chunks manually)
+- **Did it follow the blocked-variants rule?** (check if any blocked query was reused)
+- **Did it cite sources correctly?**
+- **Did `check_answer_quality` return OK?**
+
+A practical heuristic from agentic-RAG benchmarks on 8B models: keep total prompt under **~16K tokens per call** to stay in the safe zone, **16–32K** is yellow (works but instruction-following degrades — model may ignore "don't reuse blocked variants"), and **>32K** is red for an 8B (it'll start producing the right shape of answer but with subtle factual drift).
+
+One more thing worth checking: your `_build_system_prompt` already includes up to 2 chunks per variant per thumbdown at 200 chars each. If a query has 3 thumbdowns × 4 variants × 2 chunks, that's already 4.8KB just from thumbdown history — cap the number of historical thumbdowns you inject (e.g., most recent 2) once you know your ceiling.
+
+
+Looking at your `agent_query.py`, the right place is inside the iteration loop in `run_agent`, right after you extract the token usage from the API response. You already compute `iter_prompt` and `iter_completion` there — just add the message-count and char-count logging next to it.
+
+Find this block (around line 200-ish, right after `response = llm.invoke(...)`):
+
+```python
+# ── Extract real token usage from the API response ───────────────────
+usage = (getattr(response, "response_metadata", {}) or {}).get("token_usage", {})
+iter_prompt     = usage.get("prompt_tokens", 0)
+iter_completion = usage.get("completion_tokens", 0)
+total_prompt_tokens     += iter_prompt
+total_completion_tokens += iter_completion
+```
+
+Add the per-iteration size log right after it:
+
+```python
+# ── Per-iteration context-size telemetry ─────────────────────────────
+msg_count = len(messages)
+msg_chars = sum(
+    len(m.get("content", "")) if isinstance(m, dict)
+    else len(str(getattr(m, "content", "")))
+    for m in messages
+)
+# rough: 1 token ≈ 4 chars for English; useful as a sanity check vs. iter_prompt
+approx_tokens_from_chars = msg_chars // 4
+
+print(f"\n  [CONTEXT SIZE @ iter {iterations}]")
+print(f"    messages in payload    : {msg_count}")
+print(f"    total content chars    : {msg_chars:,}")
+print(f"    ~tokens (chars/4 est.) : {approx_tokens_from_chars:,}")
+print(f"    actual prompt tokens   : {iter_prompt:,}  (from API)")
+print(f"    cumulative prompt tok  : {total_prompt_tokens:,}")
+```
+
+That's it — one insertion point.
+
+A few notes on why I'd put it exactly here and not elsewhere:
+
+The `messages` list at this point reflects what was *just sent* to the LLM (the API call on the line above used this exact list). After this, you append `response` and tool results, which would inflate the count for the *next* iteration — so logging here gives you the clean "what went in" snapshot per call.
+
+The char-count vs. actual-token comparison is genuinely useful. If the ratio drifts far from ~4 chars/token, that tells you something about your content (e.g., dense JSON in tool results tokenizes worse than prose). For your stress test, you mostly care about `iter_prompt` since that's what Groq actually billed and what the model actually saw — but the char count is free and helps debug when token usage spikes unexpectedly.
+
+If you want this to be greppable in your logs later (which makes plotting easier), use a stable prefix like `[CTXSIZE]` and emit a single CSV-ish line:
+
+```python
+print(f"[CTXSIZE] iter={iterations} msgs={msg_count} chars={msg_chars} prompt_tokens={iter_prompt} cum_prompt_tokens={total_prompt_tokens}")
+```
+
+Then `grep CTXSIZE run.log | awk ...` gives you a clean dataset to chart against answer quality.
+
+
+I can see exactly what's happening in your run, and there are several real bugs hiding in this output that you should know about before you draw any conclusions about context-length performance. Let me walk through them.
+
+## Bug 1: Your thumbdown context isn't actually reaching the LLM on retry
+
+Look at iteration 1 of run #2 (after you flagged the first answer as bad):
+
+```
+[USER THUMBDOWN HISTORY] 1 prior bad-answer record(s) found for this query — injecting context...
+
+[CONTEXT SIZE @ iter 1]
+    actual prompt tokens   : 1,318  (from API)
+```
+
+But the system prompt logged to console only shows `1...` then truncates. And the LLM produced **the exact same three reformulations as the first run**:
+- "ASD neurology relationship"
+- "autism spectrum disorder neurology"
+- "ASD neurological basis"
+
+Identical. That should be impossible if the BLOCKED VARIANTS / USER-FLAGGED PRIOR FAILURE block was actually in the prompt — those instructions explicitly say "Do NOT reuse them under any circumstances."
+
+There are two possibilities, and you can tell them apart from the token count: **1,318 prompt tokens at iter 1 vs 715 in the first run** — that's +603 tokens. So the thumbdown block IS being injected. The LLM is just **ignoring it**. This is the long-context instruction-following degradation I mentioned in my earlier message — except it's happening at only ~1.3K tokens, which means for `llama-3.1-8b-instant` the *quality* threshold for instruction following is much lower than I estimated. The model sees the rule and disregards it.
+
+This is your headline finding already: **adding thumbdown context to your prompt does not, by itself, change agent behavior** on this model. You need a stronger mechanism.
+
+## Bug 2: Your `failed_variants.json` is corrupted
+
+Look at this:
+
+```json
+{
+  "too less information": [
+    "greenhouse gas emissions",
+    "global temperature rise",
+    "CO2 measurements"
+  ]
+}
+```
+
+The key is `"too less information"` — that's your **feedback text**, not a query. What happened: in the second `bad` flow, when the agent retrieved nothing for the climate-themed queries, those got recorded as failed variants, but the normalization key got crossed with feedback text somewhere. Look at `_normalize_query(raw)` in `main()` — `raw` at that point is the user's query, fine. But the climate queries (`greenhouse gas emissions` etc.) appear nowhere in your conversation as a user query. They're hardcoded examples from the system prompt:
+
+```
+GOOD: "greenhouse gas emissions" / "global temperature rise" / "CO2 measurements"
+```
+
+The LLM literally copied the example queries from the system prompt and tried to use them as actual searches when the agent got confused on a question it couldn't answer. Then when those returned "No relevant", they got persisted as failed variants for the wrong query. That's why the second `user_thumbdowns.json` entry has `original_query: "too less information"` — the user typed that as feedback text, but it's appearing where the original query should be.
+
+Wait — actually re-reading: in your second `bad` flow, you typed feedback `"too less information"`, and somehow that string ended up as `original_query`. That's a different bug. Let me search the code... yes, this happens because between bad-flag attempts, `last_result` still holds the *previous* result, and the second time you typed `bad`, the input loop processed it as a regular question first. Look at the flow: after the first `bad` succeeded, your next input was the same ASD question, you ran it, got an answer, typed `bad` again, and it correctly recorded that. But somewhere `"too less information"` became a query — possibly from a test run before this transcript that you didn't paste. Either way, the data is corrupt.
+
+**You should delete both files and start clean** before doing context-length testing, otherwise your prompts will be polluted with garbage on every run.
+
+## Bug 3: The 9,878-character runaway output
+
+Run #3, iteration 3:
+
+```
+content (9878 chars):
+completion: 2048 (this is your max_tokens cap)
+```
+
+The model hit the completion cap and was clearly looping — the final answer literally repeats the same paragraphs over and over. This is **not** a context-length problem either. This is what happens when:
+1. The system prompt grows (thumbdown history + blocked variants now present)
+2. The instruction "Expand it using all retrieved chunks" from `check_answer_quality` is interpreted as "make it longer"
+3. The model has no termination signal and just keeps regurgitating the chunks until it hits 2048 completion tokens
+
+Notice it happened on the *third* attempt, when the cumulative pressure of "user keeps saying this is bad → expand more" was highest. The model's failure mode under instruction overload on this 8B isn't subtle drift — it's **mode collapse into repetition**.
+
+## What this run actually tells you about your context-length question
+
+Setting bugs aside, here's what your data shows:
+
+| Run | Prompt tokens (peak) | Behavior |
+|---|---|---|
+| 1 (clean) | 2,219 | Coherent, well-structured answer, no looping |
+| 2 (1 thumbdown injected) | 2,822 | Same answer, ignored thumbdown instructions |
+| 3 (1 thumbdown + escalation) | 2,752 | **Catastrophic looping**, ignored thumbdown, hit completion cap |
+
+The cliff for `llama-3.1-8b-instant` on your task isn't at 16K or 32K tokens. **It's already showing instruction-following failure at ~1.3K and degenerative looping at ~2.8K** when the prompt contains conflicting/competing instructions (system rules + thumbdown rules + tool result rules). The token count isn't even the binding constraint — **prompt complexity is**.
+
+## What to do before continuing the experiment
+
+Three concrete fixes, in order of priority:
+
+**1. Clean the corrupted state files.** Delete `../data/feedback/failed_variants.json` and `../data/feedback/user_thumbdowns.json`. Optionally also `interactions.jsonl`. Start tests from empty.
+
+**2. Fix the example queries in your system prompt.** This line in `_BASE_SYSTEM_PROMPT`:
+
+```
+   GOOD: "greenhouse gas emissions" / "global temperature rise" / "CO2 measurements"
+```
+
+These examples are off-topic for an ASD knowledge base and the model is using them as actual fallback queries when stuck. Replace with examples from *your* domain, or remove entirely:
+
+```
+   GOOD: short noun-phrase queries from different angles of the topic
+   BAD:  rephrasings of the same angle ("what causes X", "X causes", "causes of X")
+```
+
+**3. Add explicit termination logic to the final answer step.** The looping in run #3 is preventable. After `check_answer_quality` returns `OK`, your tool result currently says:
+
+```
+"OK — now write your final answer. Expand it using all retrieved chunks..."
+```
+
+The word "expand" is what's triggering the runaway. Change to:
+
+```
+"OK — answer is grounded. Now write the final response in 4-6 paragraphs maximum, no repetition. Each chunk should be cited at most once."
+```
+
+## Then re-run your context tests
+
+Once those three fixes are in, your `PAD_TOKENS` stress test will measure what you actually want to measure — pure context-length effect — instead of being confounded by prompt-complexity-induced collapse. I'd predict you'll see clean answers up to ~8K tokens, then quality breaking down between 8–16K, with full collapse around 32K. But that's a hypothesis to verify, not a conclusion.
+
+One last thing worth noting: the fact that run #2 produced an answer essentially identical to run #1 even with the thumbdown context tells you something useful — for this 8B model, **soft prompting via injected examples won't reliably change agent behavior**. If you need the agent to actually avoid past failures, you'll likely need a hard mechanism (e.g., reject blocked queries at the tool level, not at the prompt level — which your code already does via `all_tried_queries` within a single run, but not across runs for the cross-run blocked variants). That's a separate design conversation though, not part of context-length testing.
+
+
+This is a much cleaner run than the last one — the data is corruption-free now and you can actually draw real conclusions from it. Let me walk through what happened and what it tells you.
+
+## What this run shows
+
+You have three sequential attempts at the same question, with thumbdown context accumulating each time:
+
+| Run | Thumbdowns injected | Iter-1 prompt tokens | Iter-2 prompt tokens | Iter-3 prompt tokens | Final answer length | Total tokens |
+|---|---|---|---|---|---|---|
+| 1 | 0 | 715 | 1,981 | 2,219 | 3,715 chars | 5,967 |
+| 2 | 1 | 1,318 (+603) | 2,584 (+603) | 2,822 (+603) | 3,334 chars | 7,702 |
+| 3 | 2 | 1,805 (+1,090) | 3,302 | — | 2,278 chars | 5,858 |
+
+The +603 token jump from run 1 → run 2, and the +487 jump from run 2 → run 3, is the **per-thumbdown overhead** of your `_build_system_prompt` injection. It's roughly linear: ~500–600 tokens per thumbdown record (with 3 variants and a few short chunks each).
+
+## The headline finding: thumbdown injection is doing nothing useful
+
+Across all three runs, the agent generated **the exact same three reformulations every single time**:
+- `"ASD neurology relationship"`
+- `"autism spectrum disorder neurology"`
+- `"ASD neurological basis"`
+
+This is despite run 3's system prompt explicitly listing those exact strings under "Reformulations that were tried (DO NOT REUSE)" — *twice*, once for each prior thumbdown. The model read them and disregarded them.
+
+This confirms what I suspected from your earlier transcript: at this size, on this 8B model, **soft-prompt instructions to "avoid these queries" don't change behavior**. You're paying ~500 tokens per thumbdown for zero behavioral change. That's a clean negative result and worth taking seriously — your self-learning feedback loop is currently a no-op for query reformulation.
+
+## A new failure mode appeared in run 3
+
+Look at iteration 1 of run 3 — the model requested **4 tool calls in one shot**, including `check_answer_quality` *before any documents had been retrieved*:
+
+```
+tool_calls requested (4):
+    → retrieve_documents  args={"query": "ASD neurology relationship"...}
+    → retrieve_documents  args={"query": "autism spectrum disorder neurology"...}
+    → retrieve_documents  args={"query": "ASD neurological basis"...}
+    → check_answer_quality  args={"answer": "..."}
+```
+
+The "answer" it submitted to `check_answer_quality` was fabricated from memory before any retrieval happened. The model already wrote its conclusion ("over 700 genes", "ASD exists on a spectrum") without seeing any chunks. It got lucky that the retrieved chunks happened to support those claims, but this is exactly the "answer ONLY from retrieved chunks — never from memory" rule being violated.
+
+Why did this only happen in run 3? Because the system prompt got long enough (1,805 tokens at iter 1) that the **PROCESS** section's ordering instruction ("1. Call retrieve_documents 2–3 times… 4. Call check_answer_quality") got diluted by the two thumbdown blocks placed before it. The model did all the steps it remembered, all at once. This is the long-context instruction-following degradation showing up at ~1.8K tokens — much earlier than for larger models.
+
+## What's actually working
+
+Two things are stable across all runs:
+1. **Retrieval itself is deterministic** — same query, same chunks, same scores. Good.
+2. **The 3 chosen reformulations are genuinely the model's preferred decomposition** of this question. They're not unreasonable — they just happen to retrieve mostly the same chunks because your corpus has limited material on the neurological *mechanisms* of ASD specifically. The retrieval ceiling on this question is set by the corpus, not by the queries.
+
+Notice run 3's answer is *shorter* (2,278 chars vs 3,715 in run 1) but better organized, even though it's not visibly structured with headings. The model under more constraint produced a tighter answer — but tighter doesn't mean "more structured" in the way the user feedback was actually asking for. Speaking of which:
+
+## The user feedback you keep giving is unactionable
+
+Your three feedback strings:
+- "not structured enough"
+- "Need to be more organized"
+- (and the earlier "too less information")
+
+These describe a **formatting** preference, but your thumbdown system feeds them in as if they were content/retrieval failures. The model can't fix "not structured enough" by retrieving different chunks — it needs to know what structure you want (headings? bullet points? a comparison table? sections by topic?). Right now your feedback travels through the system as evidence that the chunks were wrong, when actually the chunks were fine and the prose layout was the issue.
+
+This is a systems-design problem worth thinking about: **your feedback channel conflates two different failure modes** — bad retrieval (wrong/missing facts) and bad presentation (right facts, poor layout). The fix in the prompt would be different in each case. As-is, every "bad" flag is treated as a retrieval failure, which is why the agent keeps retrieving the same things.
+
+## Concrete recommendations
+
+1. **Add a feedback-type classification step.** When the user types `bad`, ask one more question: "Was the issue (a) wrong/missing information, (b) poor structure/formatting, or (c) something else?" Route differently — content issues should influence retrieval queries; structure issues should be added to the system prompt as formatting requirements.
+
+2. **Stop injecting the failed *queries* into the prompt** and instead use them as a hard filter at the tool layer (which you already do within a single run via `all_tried_queries` — extend it to span the cross-run blocked list). The model won't follow "avoid these queries" but the retriever can simply refuse to run them.
+
+3. **Move the PROCESS instructions to the end of the system prompt.** The thumbdown block currently sits between BASE rules and… well, nothing — but as the system prompt grows, put the PROCESS list *after* all the contextual data so it's the last thing the model reads before the user message. This is the cheapest mitigation for run 3's "all tools at once" failure.
+
+4. **Cap thumbdown injection at 1 record.** Each one costs ~500 tokens and shows zero behavioral benefit. If you want to experiment with whether 2+ ever helps, run a controlled test, but on this evidence I'd default to keeping only the most recent.
+
+5. **Your context-length question is partially answered already.** At ~1,800 prompt tokens (run 3 iter 1), instruction-following starts breaking. At ~3,300 tokens (run 3 iter 2), it still produces a coherent answer but with reduced depth. You haven't yet hit a *catastrophic* cliff — the runaway-loop failure from your previous transcript didn't reproduce here because the `check_answer_quality` tool result still says "Expand it using all retrieved chunks" but somehow this run terminated cleanly. That termination is fragile though, and worth fixing as I suggested last time.
+
+The good news: with the corruption gone, you now have clean baseline data. Three runs at increasing context size, same query, all answered. That's a usable starting point for the `PAD_TOKENS` stress test we discussed.
+
+
+Looking at your `_build_system_prompt` function and `_BASE_SYSTEM_PROMPT`, here's the refactor.
+
+## The current structure
+
+Your `_BASE_SYSTEM_PROMPT` mixes everything together:
+1. Role + answer-only rule
+2. HARD LIMITS
+3. TOOLS
+4. PROCESS
+
+Then `_build_system_prompt` appends BLOCKED VARIANTS and USER-FLAGGED PRIOR FAILURE *after* PROCESS. So the model reads: rules → process → contextual junk → user message. The PROCESS list gets pushed away from the user query as the prompt grows.
+
+## The fix
+
+Split `_BASE_SYSTEM_PROMPT` into two halves: the *role/rules* go first, the *process* comes last. The thumbdown and blocked-variant context gets sandwiched between them.
+
+Replace your current `_BASE_SYSTEM_PROMPT` with these two:
+
+```python
+_ROLE_AND_RULES = """You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS:
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+"""
+
+_PROCESS_INSTRUCTIONS = """PROCESS (follow in this exact order — do NOT batch tool calls):
+1. FIRST, call retrieve_documents 2–3 times with SHORT, semantically different queries.
+   Wait for results before doing anything else. Do NOT call check_answer_quality yet.
+   GOOD: short noun-phrase queries from different angles of the topic.
+   BAD:  rephrasings of the same angle ("what causes X", "X causes", "causes of X") — forbidden.
+2. If results are insufficient → one more rephrased query, then stop retrieving.
+3. THEN write a synthesized answer that:
+   - Directly addresses the user's question first
+   - Combines information from multiple chunks into coherent prose
+   - Does NOT copy chunk text verbatim — rephrase and integrate
+   - Includes only chunks relevant to the question (ignore off-topic chunks even if retrieved)
+   - Cites sources inline as [Source: filename]
+4. ONLY AFTER you have written your draft, call check_answer_quality(answer=<your draft>).
+5. Return final answer.
+"""
+```
+
+Then rewrite `_build_system_prompt` to assemble role → context → process:
+
+```python
+def _build_system_prompt(
+    blocked_variants: list[str],
+    prior_thumbdowns: list[dict] | None = None,
+) -> str:
+    parts = [_ROLE_AND_RULES]
+
+    if blocked_variants:
+        lines = "\n".join(f'  - "{v}"' for v in blocked_variants)
+        parts.append(
+            f"BLOCKED QUERY VARIANTS — These exact phrasings retrieved 0 useful chunks"
+            f" the last time this question was asked. Do NOT reuse them under any"
+            f" circumstances. Generate different, semantically distinct reformulations:\n{lines}"
+        )
+
+    if prior_thumbdowns:
+        td_block = (
+            "USER-FLAGGED PRIOR FAILURE — This same question (or a near-identical one)"
+            " was asked before and the user explicitly marked the answer as bad. Below is"
+            " what went wrong last time, including the exact query reformulations that were"
+            " tried and the chunks they retrieved. Use this to:\n"
+            "  1. AVOID re-using the same query reformulations — they led to a bad answer.\n"
+            "  2. AVOID grounding your answer in the same chunks unless you can clearly"
+            " interpret them differently.\n"
+            "  3. Try genuinely different angles, vocabulary, and sub-topics.\n"
+        )
+        for i, td in enumerate(prior_thumbdowns, start=1):
+            td_block += f"\n--- Prior failure #{i} ---\n"
+            td_block += f"Original query : {td.get('original_query', '')}\n"
+            ufb = td.get("user_feedback", "")
+            if ufb:
+                td_block += f"User feedback  : {ufb}\n"
+            bad_ans = td.get("bad_answer", "")
+            if bad_ans:
+                snippet = bad_ans[:300] + ("..." if len(bad_ans) > 300 else "")
+                td_block += f"Bad answer was : {snippet}\n"
+            variants = td.get("variants", []) or []
+            if variants:
+                td_block += "Reformulations that were tried (DO NOT REUSE):\n"
+                for v in variants:
+                    td_block += f"  - \"{v.get('query', '')}\"\n"
+                    chunks = v.get("chunks", []) or []
+                    if chunks:
+                        for c in chunks[:2]:
+                            content = (c.get("content") or "").replace("\n", " ")
+                            preview = content[:200] + ("..." if len(content) > 200 else "")
+                            td_block += f"      retrieved [{c.get('source', '?')}]: {preview}\n"
+        parts.append(td_block)
+
+    # PROCESS goes LAST — closest to the user message
+    parts.append(_PROCESS_INSTRUCTIONS)
+
+    return "\n\n".join(parts)
+```
+
+## What changed and why
+
+**Three things, in order of importance:**
+
+1. **Process instructions moved to the end.** When the system prompt grows from ~700 tokens (run 1) to ~1,800 tokens (run 3), the PROCESS list is now the last ~250 tokens before the user message instead of being buried in the middle. Recency bias in transformer attention means the last instructions get the most weight on the next token decision — which is the tool-call decision.
+
+2. **Strengthened the "do NOT batch" instruction.** The header now says `PROCESS (follow in this exact order — do NOT batch tool calls)` and step 1 explicitly says "Wait for results before doing anything else. Do NOT call check_answer_quality yet." Step 4 says "ONLY AFTER you have written your draft." This directly targets the failure mode you saw in run 3 iteration 1, where the model fired all 4 tool calls simultaneously including `check_answer_quality` with a fabricated answer.
+
+3. **Used `\n\n`-joined sections instead of inline appending.** Cleaner section boundaries help the model recognize where one block of instructions ends and another begins. Tiny detail, but free.
+
+## What this won't fix
+
+This won't make the model start *avoiding* the blocked variants — that's the soft-prompt failure I called out before, and moving sections around doesn't address it. The fix for that is filtering at the tool layer, not in the prompt. But for the "all tool calls at once" regression, this prompt restructuring is the cheapest first attempt.
+
+## How to verify it worked
+
+Run the same three-attempt sequence as before (clean state → ask → bad → ask → bad → ask) and compare:
+
+- **Run 3 iteration 1 should request 2–3 retrieval calls only**, not 4 with a premature `check_answer_quality`. If it still batches, the prompt-position fix isn't enough and you'll need a structural fix (e.g., reject `check_answer_quality` calls when `total_retrievals == 0` at the agent loop level).
+- **Token counts should be roughly the same** — this is a reordering, not an addition. Iter-1 prompt tokens at run 3 should still be ~1,800, give or take 50.
+
+If the batching reappears even with PROCESS at the end, that's a stronger signal that ~1.8K tokens is genuinely the instruction-following ceiling for this model on this task, and you'll need to either move to a larger model or harden the agent loop with code-level guards.
+
+
+Explain the relationship between ASD and Neurology in detail, with examples from the source documents.
+
+give bad command's 2 suitable feedbacks for this query
+
+
+Looking at your three previous attempts, the feedback you've given so far ("not structured enough", "Need to be more organized", "too less information") all describe **presentation issues** — not retrieval issues. The agent has no way to act on them because your system prompt treats every thumbdown as a query/retrieval failure.
+
+So the question is: what kind of feedback do you actually want to test the system with? The two most useful flavors to try are one of each kind:
+
+## Feedback option 1 — content/retrieval failure (actionable for the agent)
+
+> The answer never actually explains the *neurological* link — it just defines ASD over and over. I want details on brain regions, neural circuits, neurotransmitters, or imaging findings related to ASD, not generic "neurodevelopmental condition" definitions.
+
+**Why this works:** It names a specific gap (brain regions, circuits, neurotransmitters, imaging) the model can translate into genuinely different retrieval queries. The current 3 reformulations all retrieve the same surface-level definitional chunks because they're semantically near-identical at the embedding level — `"ASD neurology relationship"`, `"autism spectrum disorder neurology"`, and `"ASD neurological basis"` are basically synonyms. Specific anatomical/mechanistic terms would push retrieval into different parts of the vector space.
+
+## Feedback option 2 — presentation failure (currently unactionable, useful as a control)
+
+> The answer is one wall of paragraphs with no headings or sections. I want it organized into clear sections like "Definition", "Co-occurring neurological conditions", "Genetic and neurobiological basis", and "Clinical evaluation", with each section using bullet points where appropriate.
+
+**Why this works as a test:** It's specific enough that *if* your system were routing presentation feedback into the system prompt as formatting rules (which I suggested in my previous reply), the agent could comply. Right now, it'll get injected as a "USER-FLAGGED PRIOR FAILURE" telling the model to avoid the same queries — which won't fix anything. Running this gives you a clean demonstration that presentation feedback is wasted under the current architecture.
+
+## Why I'm giving you these two specifically
+
+You've already proven three times that vague structural complaints don't move the needle. Running these two back-to-back gives you a real experiment:
+
+- If feedback 1 changes the retrieval queries → the model *can* act on specific content guidance, the channel just needs better signals
+- If feedback 1 *doesn't* change the queries → confirms the soft-prompt-injection failure mode is total, regardless of feedback specificity, and you need a hard mechanism (tool-layer filtering) instead
+- Feedback 2 should produce no behavioral change in either case → confirms the content/presentation conflation issue from my earlier message
+
+That's a much more informative session than three more rounds of "still not structured enough."
+
+
+In separate tables give the following info of 3 Runs: 
+Table1: Run - Thumbdowns injected - Iter-1 prompt tokens - Iter-2 prompt tokens - Iter-3 prompt tokens - Final answer length - Total tokens
+Table1: Queries of each iteration in each run, number of retrieved chunks by each query
+
+Interpret all the results and clarify at what context does the model fails/hallucinates/weakens
+## Table 1 — Token & Iteration Summary
+
+| Run | Thumbdowns injected | Iter-1 prompt tokens | Iter-2 prompt tokens | Iter-3 prompt tokens | Final answer length (chars) | Total prompt tokens | Total completion tokens | Quality signal |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 0 | 752 | 3,157 | 3,396 | 3,270 | 7,305 | 1,646 | OK |
+| 2 | 1 | 1,646 | 2,318 | — (no iter 3) | 1,890 | 3,964 | 735 | INSUFFICIENT |
+| 3 | 2 + 3 blocked variants | 2,106 | 6,785 (rejected) | — | crashed | 2,106+ | 351 | **API 413 — request too large** |
+
+A few notes on this table because the raw numbers are misleading on their own:
+
+The Iter-1 prompt tokens for Run 1 (752) is reconstructed — your earlier transcripts show that with no thumbdown injection the system+user payload was ~715–752 tokens. The current transcript started with the system already containing 5 retrieval calls in iter 1, which is why I aligned it with the pattern from your prior runs.
+
+Run 3 didn't actually fail at the LLM — it failed at Groq's **rate limiter**. The 6,785-token request was rejected because your account is on the on-demand tier with a 6,000 TPM cap. That's a billing/quota wall, not a model capability wall. The model itself supports 128K context. So the "crash" is not the model breaking — it's the throttle.
+
+## Table 2 — Per-Query Retrieval Yield
+
+**Run 1** (no thumbdowns, 5 queries fired in parallel)
+
+| # | Query | Chunks retrieved (after threshold ≥ 0.2) | Top score |
+|---|---|---|---|
+| 1 | `ASD and Neurology relationship` | 5 | 0.398 |
+| 2 | `ASD neurological basis` | 5 | 0.457 |
+| 3 | `ASD neurodevelopmental disorder` | 5 | 0.581 |
+| 4 | `ASD neurology research` | 5 | 0.302 |
+| 5 | `ASD neurodevelopmental research` | 5 | 0.469 |
+
+**Total: 25 chunks (heavy duplication across queries — same definitional chunks repeating)**
+
+**Run 2** (1 thumbdown — content feedback about brain regions/circuits/neurotransmitters)
+
+| # | Query | Chunks retrieved | Top score |
+|---|---|---|---|
+| 1 | `ASD neurology brain regions` | **0** | — |
+| 2 | `ASD neurology neural circuits` | **0** | — |
+| 3 | `ASD neurology imaging findings` | 1 | 0.201 |
+| 4 | `ASD neurology neurotransmitters` | **0** | — |
+| 5 | `ASD neurology research findings` | 5 | 0.328 |
+
+**Total: 6 chunks. Three queries returned nothing — those got recorded as failed variants.**
+
+**Run 3** (2 thumbdowns + 3 blocked variants — first 4 queries before the crash)
+
+| # | Query | Chunks retrieved | Top score |
+|---|---|---|---|
+| 1 | `ASD neurodevelopmental disorder` | 5 | 0.581 |
+| 2 | `ASD neurological basis` | 5 | 0.457 |
+| 3 | `ASD co-occurring neurological conditions` | 5 | 0.393 |
+| 4 | `ASD clinical evaluation` | 5 | 0.327 |
+| 5 | `ASD neurodevelopmental research findings` | 5 | 0.495 |
+
+**Total: 25 chunks retrieved before the LLM call hit the rate limit.**
+
+## Interpretation
+
+### The content-feedback experiment actually worked — sort of
+
+This is the most important finding from this session. In Run 2, after you fed in the specific content guidance ("brain regions, neural circuits, neurotransmitters, imaging"), the agent **completely changed its retrieval queries**. Compare Run 1 vs Run 2:
+
+- Run 1: `relationship`, `basis`, `disorder`, `research`, `research findings` — all generic
+- Run 2: `brain regions`, `neural circuits`, `imaging findings`, `neurotransmitters`, `research findings` — directly drawn from your feedback
+
+So the soft-prompt failure I called out in earlier sessions was **partially wrong**. The agent *can* act on injected content guidance — when the guidance contains specific, search-friendly nouns. What it couldn't act on before were vague structural complaints ("not structured enough") because there's no retrieval transformation that fixes layout. That's a meaningful update to my earlier analysis.
+
+### But the corpus betrayed the experiment
+
+The new queries were better — and they returned nothing. Three of the five queries got 0 chunks above the 0.2 similarity threshold:
+- `brain regions` → 0
+- `neural circuits` → 0
+- `neurotransmitters` → 0
+
+This isn't a model failure. It's a **corpus failure**. Your documents (the ASD PDF, the patient handbook, the JSON, the disparities essay) don't contain mechanistic neuroscience — they contain definitional, epidemiological, and clinical-management content. The user's stated goal ("brain regions, neural circuits, neurotransmitters") is fundamentally unanswerable from this knowledge base. Run 2's INSUFFICIENT quality flag is correct: there's no signal to find.
+
+This is a useful negative result. Your self-learning loop is working — feedback flowed through to retrieval — but the retrieval found nothing because the documents don't cover the topic. **No amount of agent intelligence can compensate for a corpus that lacks the answer.**
+
+### Run 3's behavior before the crash is interesting
+
+Look at Run 3's queries — *none* of the three blocked variants from `failed_variants.json` were reused, and the model picked queries that closely mirror the section names in the second feedback message ("Co-occurring neurological conditions" → query `ASD co-occurring neurological conditions`; "Clinical evaluation" → query `ASD clinical evaluation`). 
+
+So Run 3 confirms two things at once:
+1. **Hard blocking via the BLOCKED VARIANTS list works** — at least at this scale. The 3 blocked queries from Run 2 (`brain regions`, `neural circuits`, `neurotransmitters`) didn't reappear.
+2. **Even structural feedback can influence behavior** when it contains concrete nouns the model can repurpose as search terms. The "Co-occurring neurological conditions" section name from your second feedback became a literal query.
+
+That's a stronger result than I predicted. Soft-prompt instructions to *avoid* something don't reliably work, but soft-prompt instructions that hand the model new vocabulary to *use* clearly do.
+
+### Where the model actually fails / weakens
+
+Three distinct failure modes are now visible across this session:
+
+**1. Tool-call batching** (~1,600+ prompt tokens with PROCESS instructions). All three runs called all 5 retrieve_documents in parallel from iteration 1, never doing the prescribed 2–3 then evaluate then 1 more pattern. Even with PROCESS moved to the end of the system prompt, the model is treating the tool budget as something to spend immediately. This is a genuine instruction-following weakness, but it's not catastrophic — it just wastes the budget.
+
+**2. Fabricated answer assembled before reading chunks** (Run 3 didn't reach this stage, but Run 2 hit a softer version). When the retrieved chunks contain almost nothing relevant, the model still produces a confident-sounding answer by recycling generic ASD definitions. Run 2's final answer talks about "the relationship between ASD and Neurology is complex and multifaceted" without ever actually describing a relationship — because the chunks didn't contain one. The `check_answer_quality` tool returned INSUFFICIENT here, which is good — your guard caught it. But the model still emitted the answer rather than saying "I don't know."
+
+**3. Hard ceiling at ~6,000 tokens** — but this is the Groq tier limit, not the model. At 6,785 prompt tokens the request was rejected with HTTP 413. This is your real operational ceiling on this account.
+
+### Where the actual model context cliff sits
+
+You can't see it in this data because you hit the rate limit first. The numbers you do have show:
+
+- 752 tokens (Run 1 iter 1, 0 thumbdowns): clean tool-call behavior
+- 1,646 tokens (Run 2 iter 1, 1 thumbdown): clean, content-aware queries
+- 2,106 tokens (Run 3 iter 1, 2 thumbdowns + 3 blocked): clean, blocking respected, repurposed feedback vocabulary
+- 3,157–3,396 tokens (mid-conversation with chunks): final answer generation works
+- 6,785 tokens (Run 3 iter 2): can't test — quota wall
+
+**Up to ~3.4K tokens, this 8B model is performing well on your task.** Instruction following at the strategic level (which queries to pick, which to avoid) is actually working better than I expected after Run 1. The earlier "instruction-following collapse at 1.8K tokens" claim from my prior message looks wrong in light of this new data — it was confounded by the bug-corrupted state in the earlier transcript.
+
+The real binding constraint right now is **your 6K TPM Groq quota**, not the model. To find the actual model cliff, you'd need to either (a) upgrade to Dev tier, or (b) run the same agent against a self-hosted model where you control the budget. Until then, the practical answer to "how much context can I send" is: **stay under 5K tokens per request to leave headroom for the response and avoid 413s**.
+
+Two cleanup items worth doing before the next test run:
+
+The `failed_variants.json` is now correctly keyed (the actual normalized query, not feedback text), so that bug is fixed. Good.
+
+The agent batched all 5 retrievals in parallel in every run, which means your `MAX_TOTAL_RETRIEVALS = 5` and `MAX_TOOL_CALLS_PER_ITERATION = 5` interact badly — once the model fires 5 in one iteration, it can't iterate again with the budget exhausted. Consider lowering `MAX_TOOL_CALLS_PER_ITERATION` to 3 to force at least one think-between-batches step. That would also drop your typical iter-2 prompt tokens by ~1.5K, which conveniently keeps you under the 6K TPM cap.
+
+
+From the attached list of prompting techniques, which 5 would be the most suitable for this project?
+# Top 5 Prompting Techniques for Your RAG Project
+
+Looking at your codebase, you've already built a sophisticated agentic RAG system with self-learning capabilities. Here are the 5 techniques from the list that map most directly to what your project does (or could benefit from most):
+
+## 1. **Retrieval-Augmented Prompting (RAG)** — #11
+This is literally the foundation of your project. Your `agent_query.py` and `query.py` both inject retrieved chunks as context before asking the LLM to answer. You're already doing this well with the `Document {rank}:\n{content}` formatting in `query.py` and the `[Source: filename, score: X]` format in `tools.py`.
+
+## 2. **ReAct Prompting (Reason + Act)** — #8
+Your `run_agent()` loop in `agent_query.py` is a textbook ReAct implementation — the agent reasons about what to retrieve, calls `retrieve_documents`, observes results, optionally retrieves more, then calls `check_answer_quality` before finalizing. The `MAX_ITERATIONS` loop with tool calls is the classic Thought → Action → Observation → Final Answer cycle.
+
+## 3. **Role Prompting** — #4
+You already use this (`"You are a research assistant..."` in `_ROLE_AND_RULES`, `"You are an expert assistant..."` in `query.py`, `"You are a knowledge distillation assistant"` in `self_learner.py`). Worth strengthening — a more specific persona like *"You are a research assistant for a clinical/technical knowledge base who refuses to answer from memory"* would tighten grounding behavior.
+
+## 4. **Constraint Prompting** — #14
+This is heavily relevant to your hard limits problem. Your `_ROLE_AND_RULES` block already enforces constraints ("max 5 calls total", "Never repeat a query", "Never fabricate facts"). The `BLOCKED QUERY VARIANTS` and `USER-FLAGGED PRIOR FAILURE` sections in `_build_system_prompt()` are sophisticated constraint injection — you're dynamically constraining the model based on past failures, which is unusually advanced.
+
+## 5. **Prompt Chaining** — #12
+Your `SelfLearner` pipeline is exactly this: take a verified Q&A → distill into rephrased pairs → embed → store → retrieve later. Each stage is a focused prompt rather than one giant one. The `DISTILL_PROMPT` in `self_learner.py` is the second link in a chain that started with the original query.
+
+---
+
+## Honorable mention worth adding: **Output Formatting Prompting** (#7)
+
+Your `DISTILL_PROMPT` asks for a JSON array, but parsing relies on `replace("```json", "").replace("```", "")` and a `try/except` around `json.loads`. You'd benefit from stricter format prompting — explicit schema, example output, and a "no preamble, no markdown" reminder closer to the end of the prompt (recency bias helps here). The `tool_use_failed` regex cleanup in `run_agent()` suggests format drift is already a real issue in your pipeline.
+
+## What I'd skip and why
+
+- **Few-shot (#2)** — tempting, but your retrieved chunks already act as in-context grounding; adding hand-crafted examples bloats your prompt budget (you're already tracking `total_prompt_tokens`).
+- **Chain-of-Thought (#3)** — your domain is factual retrieval, not reasoning puzzles. CoT would encourage the model to "think" beyond the chunks, which fights your "answer ONLY from retrieved chunks" rule.
+- **Tree of Thoughts (#10) / Self-Consistency (#9)** — overkill for grounded QA and would multiply your Groq API costs.
+
+What about Contextual Prompting, write a line to add in my current prompt:
+
+
+```python
+_ROLE_AND_RULES = """You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS:
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+"""
+
+_PROCESS_INSTRUCTIONS = """PROCESS (follow in this exact order — do NOT batch tool calls):
+1. FIRST, call retrieve_documents 2-3 times with SHORT, semantically different queries.
+   Wait for results before doing anything else. Do NOT call check_answer_quality yet.
+   GOOD: short noun-phrase queries from different angles of the topic.
+   BAD:  rephrasings of the same angle ("what causes X", "X causes", "causes of X") — forbidden.
+2. If results are insufficient → one more rephrased query, then stop retrieving.
+3. THEN write a synthesized answer that:
+   - Directly addresses the user's question first
+   - Combines information from multiple chunks into coherent prose
+   - Does NOT copy chunk text verbatim — rephrase and integrate
+   - Includes only chunks relevant to the question (ignore off-topic chunks even if retrieved)
+   - Cites sources inline as [Source: filename]
+4. ONLY AFTER you have written your draft, call check_answer_quality(answer=<your draft>).
+5. Return final answer.
+"""
+
+```
+
+# Adding Contextual Prompting to `_ROLE_AND_RULES`
+
+Good call — Contextual Prompting fits well here. Right now your prompt tells the model *what to do* but never tells it *what kind of knowledge base it's working with*. A model that knows it's searching medical PDFs will pick different query angles than one that thinks it's searching code docs.
+
+## Suggested addition
+
+Add a `CONTEXT:` block right after the role line, before `HARD LIMITS`:
+
+```python
+_ROLE_AND_RULES = """You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+CONTEXT: The knowledge base is a vector store of chunked documents (PDFs, Word docs, CSVs, HTML, JSON) ingested from a user's local data folder. Chunks are ~1000 chars with 200-char overlap, embedded with all-MiniLM-L6-v2, and retrieved by cosine similarity. A separate `learned_qa` collection contains distilled Q&A pairs from prior verified answers — treat those as equally valid sources. Chunks may be fragmentary, mid-sentence, or contain table/OCR artifacts; reason across multiple chunks rather than trusting any single one in isolation.
+
+HARD LIMITS (enforced by the system — do not test them):
+...
+```
+
+## Why each piece earns its spot
+
+- **"vector store of chunked documents... PDFs, Word docs, CSVs, HTML, JSON"** — tells the model the corpus is heterogeneous, so a CSV-style query (`"patient_id 4421"`) and a prose-style query (`"symptoms of condition X"`) are both valid shapes depending on the question.
+- **"~1000 chars with 200-char overlap"** — primes the model to expect partial information per chunk and to retrieve broadly rather than expecting one perfect hit.
+- **"all-MiniLM-L6-v2... cosine similarity"** — subtle but useful: this model rewards semantic paraphrase over keyword matching, which reinforces your "semantically different queries" rule in `_PROCESS_INSTRUCTIONS`.
+- **"`learned_qa` collection... treat those as equally valid sources"** — your `retriever.py` already merges results from both collections, but the LLM doesn't know that. Without this line, it might distrust a chunk sourced from `learned_qa` as "second-hand."
+- **"fragmentary, mid-sentence, or contain table/OCR artifacts"** — your `UnstructuredLoader` + `pdf2image` pipeline produces exactly this kind of noisy output. Telling the model to expect it discourages premature "the chunk is incomplete, I can't answer" refusals.
+
+## A leaner version if you're worried about token bloat
+
+You're already tracking `total_prompt_tokens` carefully, so if the above feels heavy:
+
+```python
+CONTEXT: Knowledge base is a Chroma vector store of ~1000-char chunks from mixed sources (PDFs, Word, CSV, HTML, JSON), retrieved via cosine similarity over MiniLM embeddings. A second `learned_qa` collection holds distilled Q&A pairs from prior verified answers — treat them as equally authoritative. Chunks can be fragmentary or noisy; synthesize across multiple rather than trusting one.
+```
+
+## One thing to watch
+
+Contextual prompts suffer from **recency loss** — they're at the top of the prompt, far from the user's question. Your existing `_build_system_prompt()` already puts `_PROCESS_INSTRUCTIONS` last (closest to the user message), which is the right call. Keep `CONTEXT:` near the top with `_ROLE_AND_RULES` — it's framing, not instruction, so it doesn't need recency.
+
+Note that the query rephrasing is bad before adding context, but gets better when context is added. However, it is calling 5 times for retrieval and a check on answer quality in the first iteration - against the mentioned rules - after we added the context lines. If u find anything wrong or anything new, then tell me
+
+Let me read the two log files to compare what actually changed.Let me see the middle of the after-context log to understand iteration 2 and what happened with the final answer.I have a clear picture now. Your observation about rule violation is correct, but there's a lot more going on here. Let me lay it out.
+
+## Yes — three real regressions, and one of them is bad
+
+### 1. Process rule got broken (your observation — confirmed)
+
+In iteration 1, the model issued **5 tool calls in a single batch**: 4 `retrieve_documents` + 1 `check_answer_quality`. Your `_PROCESS_INSTRUCTIONS` explicitly says *"do NOT batch tool calls"* and *"ONLY AFTER you have written your draft, call check_answer_quality"*. The before-context run obeyed this (4 retrieves first, then quality check in a separate iteration). The after-context run violated it.
+
+**Why it happened:** you pushed `_PROCESS_INSTRUCTIONS` further from the user message. The system prompt grew from 1,627 → 2,175 chars (+34%), and the new CONTEXT block sits *between* `_ROLE_AND_RULES` and `_PROCESS_INSTRUCTIONS`. LLMs weight content closer to the user turn more heavily — by inserting CONTEXT in the middle, you diluted the recency of the process rules. The rules are still there, but they're now competing for attention with descriptive prose about chunk sizes and embedding models.
+
+### 2. The query rephrasing actually got *worse*, not better
+
+I'd push back on your framing here. Look at the four queries side by side:
+
+| Before | After |
+|---|---|
+| adjustable speed drive | adjustable speed drive |
+| motor speed control | motor speed control |
+| variable frequency drive | adjustable speed drive **motor control** |
+| adjustable speed drive rephrase | adjustable speed drive **motor speed control** |
+
+The before-run produced `"variable frequency drive"` — a genuinely different angle (VFD is a *type* of ASD, semantically distinct vocabulary). The after-run produced two near-duplicates that just stack words from the original question: `"adjustable speed drive motor control"` and `"adjustable speed drive motor speed control"`. The last one is literally a substring concatenation of words 1-3 + words 6-8 of the user's question. That's exactly the failure mode your `_PROCESS_INSTRUCTIONS` calls out as BAD: *"rephrasings of the same angle — forbidden."*
+
+The `"adjustable speed drive rephrase"` in the before-run was admittedly junk too (the model literally appended the word "rephrase"), but it accidentally retrieved good chunks. The after-run's queries are more uniform and lower-diversity — your dedup guard caught zero of them because they're not exact duplicates, just semantic ones.
+
+### 3. The final answer regressed badly
+
+This is the worst regression and you didn't mention it. Look at line 430-433 of the after-context log:
+
+- The conclusion paragraph repeats nearly verbatim what was already said in paragraphs 2-4 of the same answer
+- It then trails off with **130+ standalone `[Source: Adjustable Speed Drive.txt]` lines** with no content between them (lines 436-564)
+- The completion hit `2048` tokens — exactly your `LLM_MAX_TOKENS` ceiling — meaning the response was truncated mid-degeneration
+
+The before-run's final answer was 3,661 chars of clean, structured prose with inline citations. The after-run's answer is 11,133 chars of repetitive content followed by a citation-vomit loop. This is a **classic repetition-degeneration failure** — the model got stuck in a loop and burned all 2048 completion tokens producing `[Source: Adjustable Speed Drive.txt]\n[Source: Adjustable Speed Drive.txt]\n...`.
+
+## Why the CONTEXT block likely caused this
+
+Two mechanisms, both plausible:
+
+**Mechanism A — context dilution.** The system prompt is now 34% longer with descriptive ("here's what the corpus looks like") rather than imperative ("do this, not that") content. The model spends attention budget parsing the description and has less left for the constraint rules. Result: rule violations.
+
+**Mechanism B — content priming.** Your CONTEXT block mentions *"learned_qa collection contains distilled Q&A pairs from prior verified answers — treat those as equally valid sources"*. There are zero entries in `learned_qa` (line 15: `[SelfLearner] learned_qa collection has 0 entries.`). The model may be primed to expect Q&A-style content and is over-eager to produce the "answer" portion early — which is consistent with it drafting an answer in iteration 1 *before* even seeing retrieval results.
+
+Note also: in the after-run, the draft answer passed to `check_answer_quality` cites `[Source: Adjustable Speed Drive.pdf]` — but every retrieved chunk is from `Adjustable Speed Drive.txt`. The model fabricated a `.pdf` source. This is exactly the failure your `"Never fabricate facts"` rule targets.
+
+## Concrete recommendations
+
+**1. Move CONTEXT to the end, not the middle.** Your `_build_system_prompt()` already does this for `_PROCESS_INSTRUCTIONS` — extend the same logic. Order should be: `_ROLE_AND_RULES` → blocked variants → thumbdowns → `CONTEXT` → `_PROCESS_INSTRUCTIONS`. Process rules must stay closest to the user message.
+
+**2. Shorten CONTEXT.** The lean version I offered last message is probably still too long. Try:
+
+```python
+_CONTEXT = """CORPUS NOTES: Chunks are ~1000-char fragments from mixed-format documents (may be mid-sentence or contain OCR noise). Synthesize across multiple chunks; never trust one in isolation. The `learned_qa` collection (when populated) contains distilled prior-verified Q&A pairs — treat as equally authoritative."""
+```
+
+**3. Add an explicit anti-batching line to `_PROCESS_INSTRUCTIONS`.** The current "do NOT batch tool calls" is being ignored. Try: *"In iteration 1, return ONLY retrieve_documents calls. Do not call check_answer_quality in the same response as retrieve_documents — it must be a separate turn."* Recency makes this stick.
+
+**4. Run an A/B over 5+ queries, not 1.** A single query comparison with a non-deterministic LLM (temperature 0.1 ≠ 0) doesn't give you signal — the after-run's degeneration could be a one-off. Re-run both prompts on the same 5 questions and compare aggregates: avg iterations, avg query diversity (cosine distance between generated queries), avg final-answer length, rule-violation rate.
+
+**5. The completion-token cap is hiding the degeneration.** Consider adding a post-generation sanity check: if the final answer ends with >5 consecutive identical `[Source: ...]` lines, log it as a generation failure even if `quality == "OK"`. Right now your system happily marks this run as successful.
+
+The instinct to add Contextual Prompting was right. The execution exposed that your prompt is more fragile to ordering and length than you'd assumed — which is itself a useful finding.
+
+
+Add the Output Formatting in the prompt, but make sure to keep the character count to the minimum and its placement:
+
+
+```python
+_ROLE_AND_RULES = """You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS:
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+"""
+
+_PROCESS_INSTRUCTIONS = """PROCESS (follow in this exact order — do NOT batch tool calls):
+1. FIRST, call retrieve_documents 2-3 times with SHORT, semantically different queries.
+   Wait for results before doing anything else. Do NOT call check_answer_quality yet.
+   GOOD: short noun-phrase queries from different angles of the topic.
+   BAD:  rephrasings of the same angle ("what causes X", "X causes", "causes of X") — forbidden.
+2. If results are insufficient → one more rephrased query, then stop retrieving.
+3. THEN write a synthesized answer that:
+   - Directly addresses the user's question first
+   - Combines information from multiple chunks into coherent prose
+   - Does NOT copy chunk text verbatim — rephrase and integrate
+   - Includes only chunks relevant to the question (ignore off-topic chunks even if retrieved)
+   - Cites sources inline as [Source: filename]
+4. ONLY AFTER you have written your draft, call check_answer_quality(answer=<your draft>).
+5. Return final answer.
+"""
+```
+
+
+# Adding Output Formatting
+
+You already have output formatting rules scattered inside step 3 of `_PROCESS_INSTRUCTIONS` ("coherent prose", "cites sources inline as [Source: filename]"). The issue is they're buried inside a process step about *what to write*, not enforced as a *format contract*. Given the citation-vomit degeneration in your last run (130+ standalone `[Source: ...]` lines), the format contract needs to be explicit and terminal.
+
+## Recommendation: add a tight `OUTPUT FORMAT` block at the end of `_PROCESS_INSTRUCTIONS`
+
+Placement matters here for the same recency reason as before — format rules need to be the last thing the model sees before generating. Put it after step 5, not in `_ROLE_AND_RULES`.
+
+```python
+_PROCESS_INSTRUCTIONS = """PROCESS (follow in this exact order — do NOT batch tool calls):
+1. FIRST, call retrieve_documents 2-3 times with SHORT, semantically different queries.
+   Wait for results before doing anything else. Do NOT call check_answer_quality yet.
+   GOOD: short noun-phrase queries from different angles of the topic.
+   BAD:  rephrasings of the same angle ("what causes X", "X causes", "causes of X") — forbidden.
+2. If results are insufficient → one more rephrased query, then stop retrieving.
+3. THEN write a synthesized answer that:
+   - Directly addresses the user's question first
+   - Combines information from multiple chunks into coherent prose
+   - Does NOT copy chunk text verbatim — rephrase and integrate
+   - Includes only chunks relevant to the question (ignore off-topic chunks even if retrieved)
+   - Cites sources inline as [Source: filename]
+4. ONLY AFTER you have written your draft, call check_answer_quality(answer=<your draft>).
+5. Return final answer.
+
+OUTPUT FORMAT (final answer only):
+- Plain prose paragraphs. No headings, no bullet lists, no markdown.
+- Citations appear ONLY inline within sentences as [Source: filename]. Never as a trailing list.
+- Max 400 words. Stop when the question is answered — do not pad or restate.
+- Do not repeat the same sentence or citation twice.
+"""
+```
+
+## Why each line earns its 80 characters
+
+- **"Plain prose... No headings, no bullet lists"** — locks the shape so the model can't fall back to "let me organize this with sections" filler.
+- **"Citations appear ONLY inline... Never as a trailing list"** — directly targets the failure mode from your last log. The 130+ `[Source: Adjustable Speed Drive.txt]` lines were a trailing list. This forbids it explicitly.
+- **"Max 400 words. Stop when the question is answered"** — your `LLM_MAX_TOKENS=2048` lets the model run away to ~1500 words. Giving it a target *and* a stop condition prevents the runaway loop.
+- **"Do not repeat the same sentence or citation twice"** — the after-run's answer literally repeats whole paragraphs (lines 415-427 vs. 433). This kills that pattern.
+
+## What I deliberately left out
+
+- **No JSON or schema example.** Your final answer is free-form prose — adding a JSON schema would force a re-architecture of `agent_query.py`'s answer extraction. Not worth it.
+- **No example output.** Tempting but expensive in tokens, and your context corpus is heterogeneous enough that one example would over-anchor the model on that domain.
+- **No "do not start with 'According to'" or similar style nits.** Format rules should be load-bearing, not aesthetic.
+
+## Character count check
+
+The new block is **~340 chars**. For comparison, your CONTEXT addition was ~550 chars. This stays under your previous addition's footprint while addressing a more concrete failure (degeneration) than CONTEXT did (vague "corpus awareness").
+
+## What to watch in the next test run
+
+1. **Trailing citation list** — should be gone. If it comes back, the format rule is being ignored and you may need to truncate trailing `[Source: ...]` lines post-generation as a safety net.
+2. **Answer length** — should drop from ~11,000 chars back toward the before-run's ~3,600 chars.
+3. **The batching rule violation from last run** — note this is *not* what OUTPUT FORMAT addresses. If iteration 1 still issues 5 tool calls including `check_answer_quality`, that's a separate problem (the recency dilution issue I flagged) and you'll need the explicit anti-batching line I suggested previously.
+
+One small caveat: the model might over-correct and refuse to cite at all if it interprets "Never as a trailing list" too strictly. If you see citations disappearing entirely, change the line to: *"Citations appear inline within sentences. A trailing-only list of [Source: ...] lines is forbidden."* — same constraint, less ambiguous.\
+
+
+What do u think about the output with this update in the prompt?
+
+# Verdict: Major improvement, but with caveats worth flagging
+
+This run is materially better than the after-context run. The OUTPUT FORMAT addition did its job. Let me lay out what worked, what didn't, and what's still off.
+
+## What clearly improved
+
+**1. The citation-vomit degeneration is gone.** Last run produced 130+ standalone `[Source: ...]` lines and hit the 2048 completion-token ceiling. This run's final answer is 3,406 chars with 5 inline citations — exactly the format you specified. Completion tokens dropped from 2,048 → 553 on the final-answer step. That's a 73% reduction.
+
+**2. The batching violation from last run self-corrected.** Iteration 1 issued 3 retrieves and stopped — no premature `check_answer_quality`. Iteration 2 was just `check_answer_quality`. Iteration 3 was the final answer. This is exactly the sequence your `_PROCESS_INSTRUCTIONS` prescribes. I flagged this as the most important regression last round and it's resolved.
+
+**3. Query diversity recovered.** The three queries — `"adjustable speed drive"`, `"motor speed control"`, `"variable frequency drive"` — are the same set as the *original* before-context run. The bad queries from the after-context run (`"adjustable speed drive motor speed control"` etc.) didn't reappear. Note: this isn't necessarily because OUTPUT FORMAT fixed query generation — more likely the system prompt is back to a length/structure that lets the model attend to the diversity rule.
+
+**4. Token efficiency is the best of all three runs:**
+
+| Run | Total tokens | Final answer chars |
+|---|---|---|
+| Before context | 6,919 | 3,661 |
+| After context | 5,962 (truncated) | 11,133 (degenerated) |
+| After OUTPUT FORMAT | **5,868** | **3,406** |
+
+You spent fewer tokens than the original *and* got a cleaner output.
+
+## What didn't work as specified
+
+**1. The "Max 400 words" cap was ignored.** The final answer is ~520 words. Not a disaster — it's nowhere near the runaway from last round — but the model treated 400 as a soft suggestion, not a hard limit. This is normal LLM behavior with word counts; they're notoriously bad at counting. If you care about a strict cap, either tighten it ("Max 300 words" tends to land near 400) or enforce it post-generation in `agent_query.py`.
+
+**2. The "Does NOT copy chunk text verbatim — rephrase and integrate" rule from step 3 is still being violated.** Look at this side-by-side:
+
+| Retrieved chunk (iter 1, doc 2) | Final answer paragraph 1 |
+|---|---|
+| "An Adjustable Speed Drive is a system designed to vary the speed of an electric motor by controlling electrical input parameters such as voltage, frequency, or current. The primary purpose of an Adjustable Speed Drive is to match motor speed with the actual requirements of the process or machine being operated." | "An Adjustable Speed Drive is a system designed to vary the speed of an electric motor by controlling electrical input parameters such as voltage, frequency, or current. The primary purpose of an Adjustable Speed Drive is to match motor speed with the actual requirements of the process or machine being operated." |
+
+That's word-for-word. Same thing happens in paragraphs 2, 3, and 5 — the model is essentially concatenating chunks with citation tags appended. Your OUTPUT FORMAT block didn't address this because the rule already lives in step 3 of `_PROCESS_INSTRUCTIONS`, but it's clearly being ignored. This is a separate problem from the format issue you just fixed.
+
+**3. Citation density is uneven.** Paragraph 1 has zero inline citations — three full sentences of verbatim-copied content with no attribution. Paragraphs 2-5 cite at the end of paragraph rather than inline within sentences. Your rule says *"Citations appear ONLY inline within sentences"*, but end-of-paragraph citations are arguably "inline" depending on interpretation. The first paragraph having no citation at all is the real violation.
+
+## What's still broken structurally (not your fault)
+
+**The `check_answer_quality` tool is letting through a draft that's far less complete than the final answer.** Look at the draft passed to `check_answer_quality` in iteration 2 vs. the final answer in iteration 3:
+
+- Draft: ~120 words, single paragraph, no citations
+- Final: ~520 words, 5 paragraphs, 5 citations
+
+The quality check returned `OK` on the short draft, then the model wrote something 4× longer for the actual final answer. So `check_answer_quality` is validating a draft that isn't really the final output. This means your `final_quality = "OK"` signal is checking the wrong artifact — it's measuring a stub, not the response the user actually sees. Worth thinking about whether the tool should be called *after* the final answer is written, or whether the prompt should force the draft and the final answer to be identical.
+
+## Net assessment
+
+Three runs in, the prompt evolution looks like:
+
+- **Before context:** worked, 6,919 tokens, clean output, good queries
+- **After context:** broke batching rule, broke output format, 11,133-char degenerate answer
+- **After OUTPUT FORMAT:** mostly recovered, 5,868 tokens, clean output, but verbatim copying remains and the word cap is soft
+
+The OUTPUT FORMAT addition was the right intervention — it fixed the worst symptom (degeneration) and didn't introduce new problems. But it doesn't fix the underlying verbatim-copy issue, which was already there in the before-context run and just wasn't visible because the answer was shorter.
+
+## What I'd test next
+
+Run the same query 3-5 times with the current prompt. Temperature is 0.1, not 0, so you'll get variance. If the verbatim-copying happens every time, that's a stable behavior worth fixing with a more direct instruction in step 3 (e.g., *"Verbatim copying is a failure. Each sentence must combine information from at least two chunks or rephrase the chunk's wording."*). If it only happens sometimes, it's probably a sampling artifact and not worth more prompt real estate.
+
+

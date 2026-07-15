@@ -1,0 +1,110 @@
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+from zipfile import ZipFile
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / ".docx-tools"))
+
+from docx import Document
+
+
+FILES = {
+    15: ROOT / "Chapters Created So Far" / "Chapter_15_What_Agentic_Really_Means.docx",
+    16: ROOT / "Chapters Created So Far" / "Chapter_16_Designing_the_Agent_Loop.docx",
+    17: ROOT / "Chapters Created So Far" / "Chapter_17_Tool_Use_and_Function_Calling.docx",
+    28: ROOT / "Chapters Created So Far" / "Chapter_28_What_Self_Learning_Actually_Means.docx",
+    40: ROOT / "Chapters Created So Far" / "Chapter_40_Security_and_Safety.docx",
+}
+
+EXPECTED = {
+    15: ["15.1", "15.2", "15.3", "15.4", "15.5"],
+    16: ["16.1", "16.2", "16.3", "16.4", "16.5"],
+    17: ["17.1", "17.2", "17.3", "17.4", "17.5", "17.6", "17.7"],
+    28: ["28.1", "28.2", "28.3", "28.4", "28.5"],
+    40: ["40.1", "40.2", "40.3", "40.4", "40.5", "40.6"],
+}
+
+
+def count_words(doc: Document) -> int:
+    chunks = [p.text for p in doc.paragraphs]
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                chunks.extend(p.text for p in cell.paragraphs)
+    return len(re.findall(r"\b[\w’'-]+\b", "\n".join(chunks)))
+
+
+def audit(chapter: int, path: Path) -> list[str]:
+    errors: list[str] = []
+    doc = Document(path)
+    sec = doc.sections[0]
+    expected = {
+        "page_width": 8.5,
+        "page_height": 11.0,
+        "top_margin": 2.5 / 2.54,
+        "left_margin": 2.5 / 2.54,
+        "right_margin": 2.5 / 2.54,
+        "bottom_margin": 1.5 / 2.54,
+    }
+    for attr, want in expected.items():
+        got = getattr(sec, attr).inches
+        if abs(got - want) > 0.02:
+            errors.append(f"{attr}={got:.3f}, expected {want:.3f}")
+
+    headings = [p.text.strip() for p in doc.paragraphs if p.style.name.startswith("Heading")]
+    for prefix in EXPECTED[chapter]:
+        if not any(h.startswith(prefix + " ") for h in headings):
+            errors.append(f"missing section {prefix}")
+
+    text = "\n".join(p.text for p in doc.paragraphs)
+
+    caption_pattern = re.compile(rf"^Figure {chapter}\.\d+ — ")
+    captions = [p.text for p in doc.paragraphs if caption_pattern.match(p.text)]
+    if len(captions) != 2:
+        errors.append(f"figure captions={len(captions)}, expected 2")
+    for i in (1, 2):
+        if text.count(f"Figure {chapter}.{i}") < 2:
+            errors.append(f"Figure {chapter}.{i} not referenced")
+
+    words = count_words(doc)
+    if words < 2300:
+        errors.append(f"word count too low: {words}")
+
+    with ZipFile(path) as zf:
+        xml = zf.read("word/document.xml").decode("utf-8")
+        media = [n for n in zf.namelist() if n.startswith("word/media/")]
+        if len(media) != 2:
+            errors.append(f"embedded images={len(media)}, expected 2")
+        if xml.count("descr=\"Figure ") < 2:
+            errors.append("missing figure alt descriptions")
+        if "Times New Roman" not in zf.read("word/styles.xml").decode("utf-8"):
+            errors.append("Times New Roman missing from styles")
+        if "Courier New" not in xml:
+            errors.append("Courier New code formatting missing")
+
+    print(
+        f"Chapter {chapter}: words={words:,} headings={len(headings)} "
+        f"tables={len(doc.tables)} figures={len(captions)} size={path.stat().st_size:,} bytes"
+    )
+    return errors
+
+
+def main() -> None:
+    failures = []
+    for chapter, path in FILES.items():
+        if not path.exists():
+            failures.append(f"Chapter {chapter}: missing file")
+            continue
+        failures.extend(f"Chapter {chapter}: {msg}" for msg in audit(chapter, path))
+    if failures:
+        print("\nFAILURES")
+        print("\n".join(f"- {item}" for item in failures))
+        raise SystemExit(1)
+    print("\nALL CHAPTER AUDITS PASSED")
+
+
+if __name__ == "__main__":
+    main()

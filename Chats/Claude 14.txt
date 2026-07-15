@@ -1,0 +1,252 @@
+Using these chats, consider the changes/modifications made and give some queries from the interactions.jsonl file to test the working...
+
+13 May
+Let me read the interactions file first.
+
+
+Read the interactions JSONL file
+Read the interactions JSONL file
+Let me read the truncated portion too.
+
+
+Read all lines from the JSONL file
+Read all lines from the JSONL file
+Now I have a thorough picture of the data. Here's a well-organized set of test queries derived directly from the interactions, chosen to exercise each key behavior of the modified pipeline:
+
+Test Queries for the Modified Pipeline
+1. Compress-or-Skip Gate (< 500 token threshold)
+These queries historically retrieved very few or shallow chunks — ideal for verifying that compress_context skips compression when tokens are below 500, but still transitions cleanly to the draft phase:
+
+"What is ASD and what are its main characteristics?" (query #1/7 — returned 3 short chunks, expected quality OK; verify pipeline reaches DRAFT without compressing)
+
+"Can ASD be caused by vaccines?" (query #4 — 3 short chunks; triggers the ≤500 token bypass, answer should still be generated)
+
+2. Empty Chunks → Canned Answer (No LLM Draft)
+These queries returned chunks: 0 — the pipeline should write the canned no-context message and stop, with zero further LLM calls:
+
+"What ASD components are responsible for protecting the motor during faults?" (query #15 — 0 chunks, ambiguous acronym context)
+
+"What is the recommended dosage of risperidone for a 7-year-old child with autism and epilepsy?" (query #18 — 0 chunks, out-of-KB medical specifics)
+
+"Can an Adjustable Speed Drive be used with a single-phase household power supply?" (query #29 — 0 chunks, KB doesn't cover this)
+
+"Which specific brand of Variable Frequency Drive is best for a 75 kW pump application?" (query #19 — 0 chunks; also tests that the pipeline doesn't hallucinate brand recommendations)
+
+3. INSUFFICIENT → Re-retrieval Loop
+These produced chunks but quality=INSUFFICIENT, so the pipeline should loop back to RETRIEVE with fresh query variants:
+
+"How is ASD diagnosed in children under 3 years old?" (query #2 — chunks retrieved but answer judged insufficient; verify re-retrieval fires with new variants)
+
+"What is the difference between ASD severity levels mild, moderate, and severe as defined in the knowledge base?" (query #30 — 3 chunks, still INSUFFICIENT; tests whether iteration cap is respected)
+
+"What is the prognosis for a child diagnosed with severe ASD at age 2?" (query #26 — 3 chunks, INSUFFICIENT; tests multi-round retrieval)
+
+"What did the 2023 CDC ADDM report say about ASD prevalence?" (query #21 — tests date-specific out-of-KB gap with re-retrieval, should eventually exhaust iterations)
+
+4. Topic Ambiguity (ASD = Autism vs. Adjustable Speed Drive)
+These test whether the retriever disambiguates the "ASD" acronym correctly across two knowledge domains:
+
+"How does an ASD control the speed of an electric motor?" (query #8 — should retrieve ASD=Adjustable Speed Drive docs, not medical)
+
+"What comorbid conditions are commonly found alongside ASD?" (query #3 — should retrieve ASD=Autism docs)
+
+"Now I want to go back to the medical topic — what are the early red flags for autism in infants?" (query #16 — context-switch mid-session; verify correct domain retrieval)
+
+5. Cross-Source / Multi-Document Synthesis
+These require pulling from multiple source files — a good stress test for NAC+DC+LBC compression quality:
+
+"Across all the materials available, what sensory-related guidance is given for managing ASD patients?" (query #25 — quality OK; pulled from handbook + PDF + JSON; tests that compression preserves cross-source info)
+
+"What does the research say about the relationship between parental age and ASD risk, and does the patient dataset support this with its data on parental ages?" (query #24 — quality OK; involves both literature PDF and patient dataset JSON)
+
+"Compare the social communication deficits described in the DSM-5 criteria with the communication challenges listed in the patient management handbook and the ASD information file." (query #23 — only 1 chunk retrieved despite 4 sub-queries; tests whether INSUFFICIENT triggers better sub-query variants)
+
+6. compress_context Enforcement (LLM Skips It)
+Any query where retrieval returns ≥ 500 tokens is a candidate for testing the synthetic injection. Use a large-context query:
+
+"What causes harmonic distortion in an Adjustable Speed Drive and why is it a problem?" (query #11 — 5 sub-queries, 3 chunks; fat enough context to cross the 500-token gate; confirm compress_context fires even if LLM tries to skip it)
+
+"What are the different types of Adjustable Speed Drives and when would you use each one?" (query #10 — similar context size)
+
+7. USER_THUMBSDOWN — Regression Check
+These were previously thumbed down, meaning the answer was produced but judged poor by the user. Run them to verify the new JUDGE phase's check_answer_quality function catches low-quality answers:
+
+"Does ASD affect males and females equally?" (query #6 — thumbsdown; the new pipeline should either produce a better answer or correctly return INSUFFICIENT)
+
+"Who manufactures the most widely used Adjustable Speed Drives in Europe?" (query #22 — thumbsdown; KB likely doesn't cover brand rankings, should hit empty or get INSUFFICIENT)
+
+
+
+Modification and Restructuring of the Pipeline is required:
+
+remove "check_answer_quality" as a tool, instead we will use it as a simple function.
+Once the LLM is done with retrieve_documents tool_calls and if the accumulated_chunks is EMPTY, then no further LLM should be called, and a certain message is written and recorded as the answer.
+Once the LLM is done with retrieve_documents tool_calls, it should just request the compress_context only.
+For uniformity and validation: even if LLM doesnt call it after all the retrieve_documents calls, the calling of compress_context must be enforced.
+When compress_context is called, it first checks the total tokens of the accumulated_chunks. If it is less than 500 tokens, then DO NOT compress.
+Once the compress_context tool_call has completed, the LLM is supposed to be manually called with the context/chat (messages) and compressed chunks etc to generate answer's draft WITHOUT any tool_schema.
+Then, manually apply check_answer_quality (no need to be requested).
+If check_answer_quality returns Ok then, generate final answer as usual. If it returns INSUFFICIENT, there are still retrieve_documents are present, and iterations havent exceeded the limit, then request more retrieve_documents tool_calls with better newer variants of the original queriesa
+Show less
+13 May
+
+Read the file-reading skill to understand how to read uploaded files
+Read the file-reading skill to understand how to read uploaded files
+Good - the uploaded Python files are plain text, so I can read them directly. I already have tools.py and most other files in context. Let me read agent_query.py since it's the main file I need to rewrite.
+
+
+Read agent_query.py
+Read agent_query.py
+Now I have the complete picture. I can see the current agent_query.py has check_answer_quality still wired as a tool (called via callables), and the orchestration is a single tangled loop. I need to rewrite run_agent as a clean 4-phase state machine. Let me also check validators.py and context_compression.py for completeness:
+
+
+Ran 2 commands
+Ran 2 commands
+Good — I have everything I need. Now let me write the new agent_query.py with the clean 4-phase state machine:
+
+
+Ran 4 commands, created a file
+Ran 4 commands, created a file
+All checks pass. Let me copy to outputs:
+
+
+Ran a command, read a file
+Ran a command, read a file
+Here's a summary of every change made and why.
+
+What changed and why
+tools.py (already updated in your uploads)
+The uploaded tools.py already had all the required changes from your requirements doc:
+
+check_answer_quality removed from tool schemas — it's now exported only via make_check_answer_quality(judge_llm) as a plain factory function. The orchestrator builds and holds it; the LLM never sees it as a callable tool.
+_approx_token_count helper — chars/4 heuristic since tiktoken isn't in deps.
+COMPRESS_MIN_TOKENS = 500 gate — inside compress_context(), if the accumulated chunks are below ~500 tokens, the NAC→DC→LBC pipeline is skipped entirely. The bookkeeping (state flag, message scrubbing, formatted-context return) still runs so callers always see the same contract.
+agent_query.py — full rewrite of run_agent
+The old single tangled loop was replaced with a 4-phase state machine. The main() function and all helpers outside run_agent are unchanged except that check_answer_quality is now passed into run_agent as a parameter.
+
+New signature:
+
+python
+run_agent(query, llm, merge_llm, judge_llm, tool_schemas, callables,
+          check_answer_quality,   # ← new plain-function parameter
+          retriever, agent_state, blocked_variants, prior_thumbdowns)
+Phase 1 — RETRIEVE: LLM is offered only retrieve_documents + compress_context schemas. The loop stays in this phase until: (a) LLM emits text with no tool calls, (b) retrieval cap is hit, or (c) LLM calls compress_context itself (in which case we skip straight to DRAFT).
+
+Phase 2 — COMPRESS: If accumulated_chunks is empty, the canned NO_CONTEXT_ANSWER is returned immediately — zero further LLM calls. Otherwise, if the LLM never called compress_context, it's injected synthetically. Then transitions to DRAFT.
+
+Phase 3 — DRAFT: LLM is called with tools=None — no schemas at all. It writes a plain-prose answer from the compressed context. The draft is appended to the message history as an assistant turn.
+
+Phase 4 — JUDGE: check_answer_quality(answer, context, query) is called directly as a Python function. If OK → return the draft as the final answer. If INSUFFICIENT and budget remains → a user message is injected explaining the failure reason and asking for fresh query variants, compress_done is reset to False, and the state machine loops back to RETRIEVE for another round.
+
+
+Agent query
+PY 
+
+Tools
+PY 
+
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\agent_query.py Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads. Loading weights: 100%|████████████████████████████████████████████████████████
+
+pasted
+
+Check
+
+13 May
+The pipeline is working correctly. Here's a quick health check across the four test cases:
+
+Query 1 — "What is ASD and what are its main characteristics?" All 4 phases executed cleanly. RETRIEVE → LLM batched 3 retrievals + compress_context in one turn → COMPRESS skipped (LLM called it itself, transitioned straight to DRAFT) → DRAFT produced clean prose → JUDGE returned OK. 3 iterations, quality OK. ✅
+
+Query 2 — "What ASD components are responsible for protecting the motor during faults?" All 5 retrievals returned zero chunks. When the LLM called compress_context on empty chunks, the tool returned the "no chunks" message but the phase transition went to DRAFT instead of bailing out immediately. This is the one gap to fix: when compress_context is called by the LLM with 0 chunks, the orchestrator should still bail to the canned message rather than proceeding to DRAFT (which then produces a hallucinated answer). The JUDGE correctly caught the hallucination, and the loop-back retrieved 2 more empty variants before exhausting budget. The final answer is returned as INSUFFICIENT, which is correct — but the hallucinated "best-effort" answer is not ideal. The fix is to intercept the empty-chunks case at the phase transition point.
+
+Query 3 — "Can ASD be caused by vaccines?" Token gate fired correctly: 139 approx tokens < 500 → NAC→DC→LBC pipeline skipped, raw chunk passed through. DRAFT → JUDGE returned OK. 3 iterations. ✅
+
+Query 4 — "ASD severity levels mild/moderate/severe" Correct behavior: the knowledge base genuinely doesn't have this information. Retrieval kept finding tangentially related chunks, the judge correctly flagged INSUFFICIENT twice, budget exhausted, returned best-effort with quality=INSUFFICIENT. ✅
+
+The one fix needed: when compress_context is called by the LLM itself but accumulated_chunks is empty, the current code transitions to DRAFT. It should instead return the canned answer immediately, the same as the COMPRESS phase does. Here's the patch:
+
+
+Viewed 3 files
+Viewed 3 files
+Found it. The fix is at line 628: when compress_called_this_iter is True but accumulated chunks are empty, we should bail to the canned answer instead of going to DRAFT.
+
+
+Edited a file, ran a command, read a file
+Edited a file, ran a command, read a file
+Overall: the pipeline is working correctly. One bug was found and patched.
+
+The bug — hallucination on zero-chunk compress
+
+When the LLM batched all 5 retrieval calls plus compress_context in a single turn and all retrievals came back empty, the old code transitioned to DRAFT because it only checked compress_called_this_iter = True, not whether chunks actually existed. This let the DRAFT LLM invent plausible-sounding but completely fabricated content ("Overcurrent protection devices... [Source: Electrical Engineering Handbook]"), which the JUDGE correctly flagged as INSUFFICIENT. But the loop-back then wasted 2 more retrieval iterations and token budget before exhausting and returning that hallucinated text as the "best-effort" answer.
+
+The fix adds an empty-chunks check at the compress_called_this_iter branch — if accumulated chunks are empty at that point, it immediately returns NO_CONTEXT_ANSWER with no further LLM calls, identical to what the COMPRESS phase already does. With this patch, query 2 would have returned the canned answer after iteration 1 (3 retrievals, all empty, compress on zero chunks → bail), saving the 2 wasted retrieval iterations and the hallucinated draft.
+
+Everything else — phase transitions, token-gate bypass, JUDGE loop-back, budget exhaustion — all behaved exactly as designed.
+
+
+
+Bug 1 — Thumbdown feedback is injected into the prompt, but the agent ignores it. The "self-learning from thumbdowns" loop produces zero behavior change. The system did find the thumbdown record and did inject it. But the LLM's first response (the three retrieval queries) is byte-for-byte identical to the thumbdown one's. Root cause. The injection is structurally correct but operationally inert. Three contributing factors: The instructions in _build_system_prompt only tell the model what to avoid, not what to seek. The block in agent_query reads: "AVOID re-using the same query reformulations… AVOID grounding your answer in the same chunks… Try genuinely different angles." It never says "the user's specific feedback below is the priority signal — generate at least one query that directly targets the missing content." So the LLM sees the feedback text as a passive avoidance hint, not as an active retrieval target. _PROCESS_INSTRUCTIONS is appended last with the comment "PROCESS goes LAST — closest to the user message". That puts the avoid-these-old-queries instruction far from the user message, and the process steps nearest it. Recency biases the model toward the process steps over the thumbdown context. The "blocked variants" list is empty on Q83 even though the prior failure exists. Look at how failed_variants_store is written: in _handle_retrieve_documents_call (lines 314–316, 354–356), a variant is only added to newly_failed when retrieval returns "No relevant..." or when validate-retrieval drops every chunk. On Q81, only "ASD evaluation components" was recorded as a failed variant. The other two queries ("ASD diagnostic process" and "ASD assessment tools") retrieved chunks and were judged PASS — so they were treated as "good" reformulations and never blocked. On Q83 the LLM is therefore free to (and does) reuse them. Fix: When a thumbdown is recorded, add all variants from that run to failed_variants_store[norm], not just the ones that returned zero chunks. The user has just told you these reformulations led to a bad answer — that's the definition of a failed variant. In _build_system_prompt, when prior_thumbdowns is non-empty, prepend the user_feedback as an explicit positive instruction near the user message, e.g.: "PRIORITY — the user has provided specific feedback about what was missing. You MUST generate at least one retrieve_documents query that directly targets the following concepts: [extract noun phrases from user_feedback]." Consider running a one-shot LLM call to extract those noun phrases (e.g. "chromosomal microarray", "ACMGG", "PTEN", "MECP2", "control unit fault detection") and inject them as required search topics. Bug 2 — check_answer_quality has no access to the thumbdown history, so it green-lights the re-asked answer even when it's still missing the user-flagged content. Root cause. make_check_answer_quality in tools.py takes only (answer, context, query). There is no prior_thumbdowns parameter, and the orchestrator never passes the user's prior feedback in. So the judge has no idea what "good" should look like for this specific question and rubber-stamps any reasonably-grounded answer. The result is that the system appears to have learned (it injected context, it generated a longer answer) but the JUDGE phase can't detect that the user's actual complaint wasn't addressed — meaning the loop will not retry retrieval with different angles, which would be the natural escape hatch when Bug 1 fails. Fix. Plumb prior_thumbdowns (or at least the user_feedback strings) through to check_answer_quality, and have the grounding prompt explicitly check: "The user previously flagged an answer to this same question as bad with this feedback: '…'. Does the new answer address that specific feedback? If not, return INSUFFICIENT." When INSUFFICIENT is returned for this reason, the orchestrator should reset to RETRIEVE with the unused query angles, which is already the wired-up code path for INSUFFICIENT verdicts.
+
+Show less
+15 May
+
+Viewed 3 files
+Viewed 3 files
+Now I have a full picture of the codebase. Let me implement both fixes.
+
+Fix 1 touches agent_query.py in two places:
+
+_build_system_prompt: rewrite the thumbdown block to be an active positive instruction with extracted noun-phrase targets, placed before _PROCESS_INSTRUCTIONS but immediately above the user message.
+The newly_failed accumulation in main(): when a thumbdown is recorded, add all variants (not just zero-chunk ones) to failed_variants_store.
+Fix 2 touches tools.py:
+
+make_check_answer_quality: add a prior_thumbdowns parameter and bake the user feedback into the grounding prompt.
+Wire the updated signature through run_agent in agent_query.py.
+
+Edited 2 files, ran a command
+Edited 2 files, ran a command
+Now fix 2a — update make_check_answer_quality in tools.py to accept and use prior thumbdown feedback:
+
+
+Edited 2 files
+Edited 2 files
+Now wire prior_thumbdowns through run_agent to the check_answer_quality call site:
+
+
+Viewed 2 files, edited a file
+Viewed 2 files, edited a file
+Now let's verify the final state of both files looks correct and there are no syntax errors:
+
+
+Ran 3 commands
+Ran 3 commands
+All tests pass. Let me copy the files to the output directory:
+
+
+Ran a command, read a file
+Ran a command, read a file
+Here's a summary of every change made and the reasoning behind each decision.
+
+Bug 1 — agent_query.py (two sub-fixes)
+1a — _build_system_prompt: passive avoidance → active positive instruction
+The old block told the model what not to do. The model treated it as a soft hint and reproduced the same queries anyway, because _PROCESS_INSTRUCTIONS (placed last, nearest the user message) dominated its attention.
+
+What changed:
+
+Added _extract_target_concepts(user_feedback) — a fast, dependency-free heuristic that pulls quoted phrases and capitalised tokens from the feedback string (e.g. "ACMG", "PTEN", "MECP2" from the ASD example). These become explicit retrieval targets.
+Rewrote the thumbdown block to lead with a bolded PRIORITY INSTRUCTION header and a REQUIRED RETRIEVAL TARGETS list that tells the model it must generate at least one query targeting those specific concepts — not just avoid the old ones.
+Previously-tried queries (all variants, now — see 1b) are still listed as PREVIOUSLY TRIED QUERIES but are subordinate to the positive instruction.
+The block sits between _ROLE_AND_RULES and _PROCESS_INSTRUCTIONS, so _PROCESS_INSTRUCTIONS still lands closest to the user message, but the priority block is visually demarcated with ══ borders to resist being overshadowed.
+1b — main(): only zero-chunk variants were blocked; now all variants from a thumbdown run are blocked
+The old code only added a query to newly_failed (and thus failed_variants_store) when retriever.retrieve() returned nothing or validate_retrieval dropped every chunk. Queries that retrieved chunks but produced a bad answer were never blocked, so on the re-ask the LLM was free to reuse them.
+
+What changed: When the user types bad and provides ≥10 characters of feedback, all query strings from last_result["variants"] are added to failed_variants_store[norm] — not just the ones that returned zero chunks. This is correct because the user has just told you that this entire set of reformulations led to a bad answer; that's the definition of a failed variant regardless of whether they retrieved anything.
+
+Bug 2 — tools.py: judge had no access to thumbdown history
+check_answer_quality only knew whether the answer was grounded in the retrieved context. It had no way to know that a user had specifically complained about missing content, so it happily green-lit answers that still omitted what the user needed.
+
+What changed:
+
+GROUNDING_PROMPT is now a template with two new optional fields: {thumbdown_section} and {thumbdown_criterion}.
+A _THUMBDOWN_SECTION_TEMPLATE is inserted into the prompt when prior_thumbdowns is non-empty. It shows the judge the user's exact prior complaint(s) and adds a third evaluation criterion: "does the new answer address the prior complaint? If not, return INSUFFICIENT."
+check_answer_quality gains a prior_thumbdowns: list[dict] | None = None parameter (default None keeps all existing call sites backward-compatible).
+The JUDGE phase in run_agent now passes prior_thumbdowns=prior_thumbdowns through to check_answer_quality, closing the loop: when the judge returns INSUFFICIENT because the user's complaint is unresolved, the existing INSUFFICIENT → reset to RETRIEVE code path fires, giving the agent another retrieval round with different angles.

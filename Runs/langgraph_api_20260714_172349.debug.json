@@ -1,0 +1,38 @@
+{
+  "Sub-Query Generation": [
+    0.0003
+  ],
+  "Total DB Retrieval Time": [
+    0.7292
+  ],
+  "Total DB Retrieval Validation Time": [
+    0.0021,
+    0.0016
+  ],
+  "Total Merge Time for Retrieved Chunks": [
+    0.1618,
+    3.7019
+  ],
+  "Total Validation Time for Merged Chunks": [
+    0.0007,
+    9.8977
+  ],
+  "Compression": [
+    10.1401,
+    21.623,
+    0.0078,
+    17.823,
+    0.0007,
+    0.0047,
+    0.0008
+  ],
+  "Draft Generation": [
+    3.6909
+  ],
+  "CAQ": [
+    1.7592
+  ],
+  "Final Generation": [
+    2.7625
+  ]
+}

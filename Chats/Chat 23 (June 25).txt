@@ -1,0 +1,729 @@
+Does the log verify the requests are following the architecture?25 JunClaude responded: Let me read the file and analyze the logs against the architecture.Let me read the file and analyze the logs against the architecture.Viewed 2 filesViewed 2 filesNow I have everything I need. Here's a thorough analysis:
+
+Yes — with one significant caveat
+The log largely confirms the architecture works correctly, but it also exposes a bypass of your FIFO gate for the VALUE-VERIFY 429 retry.
+
+✅ What the log correctly demonstrates
+Layer 1 — FIFO Gate
+The gate sequencing is exactly right. VALIDATE-RETRIEVAL acquires immediately (no queue message), fires, succeeds. VALUE-VERIFY then enters and acquires immediately too — correct, because VALIDATE-RETRIEVAL already released the gate at 12:18:46. When AGENT-RETRIEVE arrives at 12:18:47 and VALUE-VERIFY is mid-retry holding the gate, it correctly prints queued — waiting for FIFO gate…, then prints FIFO gate acquired only after VALUE-VERIFY fully finishes at 12:18:54. That's perfect FIFO hand-off.
+Layer 2 — Token-Reset Deadline
+The deadline mechanism fires correctly too. VALUE-VERIFY's 429 at 12:18:46 had x-ratelimit-reset-tokens: 51.45s, so _update_token_reset writes a ~51s deadline. AGENT-RETRIEVE acquires the gate at 12:18:54 (8 seconds into that window), then fires and immediately gets another 429 with x-ratelimit-reset-tokens: 59.78s — updating the deadline further. After the Groq SDK's own 32s retry-after wait, AGENT-RETRIEVE's second attempt at 12:19:27 succeeds at 12:19:35, with x-ratelimit-remaining-tokens: 2654 — the window had clearly refilled. The architecture's claim that the reset wait is "paid exactly once by the front-of-queue thread" is borne out.
+Layer 3 — Adaptive Cooldown
+No cooldown log lines appear, which is consistent: when VALUE-VERIFY finishes and releases, AGENT-RETRIEVE is the only waiter, and after AGENT-RETRIEVE finishes there's no waiter at all — so _apply_cooldown resets the floor to 0.0 and returns without sleeping, exactly as specified.
+
+⚠️ The caveat: Groq's own retry is bypassing your gate
+Look at VALUE-VERIFY's 429 at 12:18:46:
+groq._base_client | Retrying request to /openai/v1/chat/completions in 8.000000 seconds
+Then at 12:18:54 (8 seconds later), the Groq SDK fires the retry directly — without going through _wait_for_token_window or any of your gate logic. The log line [VALUE-VERIFY] LLM call attempt 1 took 8.554s confirms _invoke_once blocked for the full 8 seconds internally, inside a single attempt 1 call.
+This matters because _invoke_once is calling llm.invoke() (a LangChain ChatGroq wrapper), and the Groq SDK has its own built-in retry loop that handles 429s transparently before ever raising RateLimitError to your code. Your llm_invoke only sees the 429 after the SDK has exhausted its retries. Until then, the thread holds the gate idle while the SDK sleeps — meaning no other thread can proceed even though Groq isn't being called.
+You can see the same pattern again with AGENT-RETRIEVE: groq._base_client | Retrying... in 32.000000 seconds, and _invoke_once blocks for 40.273s on attempt 1.
+The fix is to disable the Groq SDK's built-in retry by passing max_retries=0 when constructing your ChatGroq (or Groq) client. That way every 429 surfaces immediately as a RateLimitError, your llm_invoke catches it, updates _token_reset_until with the correct header, and loops back through _wait_for_token_window as designed. Right now the SDK's retry-after value happens to be a reasonable approximation, but it's the least accurate of your three header sources — and during the SDK's sleep, the gate is locked to all other threads.You said: Explain this to me.excerpt_from_previous_claude_message.txt1 linetxtExplain this to me. I m learning this for the first time and many things terms etc are new to me25 JunClaude responded: Sure!Sure! Let me build it up from scratch.
+
+The core problem: a shared budget
+Groq gives you a token budget — think of it like a prepaid phone balance. Every API call you make spends some of that balance. Groq refills it on a fixed timer (roughly every 60 seconds). If you spend it all before the timer resets, Groq says "stop, wait" — that's the 429 error (HTTP's way of saying "Too Many Requests").
+Now your server is handling multiple user requests at the same time, and each one is making LLM calls. They're all drawing from the same shared balance simultaneously. That's the problem.
+
+The FIFO gate: taking turns
+To prevent everyone from hitting Groq at once, the code makes all threads line up and take turns — like a single checkout lane. Only one thread gets to call Groq at a time. This is the FIFO gate (First In, First Out — whoever waited longest goes next).
+
+What a 429 means in practice
+When a thread gets a 429, Groq also tells you when the budget will refill — it includes a timestamp in the response headers. One of those headers is x-ratelimit-reset-tokens, and it says something like "51.45s" — meaning: the token budget resets in 51.45 seconds from now.
+The code stores that deadline globally as _token_reset_until. Before any thread is allowed to call Groq, it checks: has that deadline passed yet? If not, it sleeps until it has. This is _wait_for_token_window.
+
+Now reading the excerpt step by step
+"VALUE-VERIFY's 429 at 12:18:46 had x-ratelimit-reset-tokens: 51.45s, so _update_token_reset writes a ~51s deadline."
+VALUE-VERIFY was the thread at the front of the line. It called Groq, got a 429, and Groq's response said "my token budget resets in 51.45 seconds." The code took that number, added it to the current clock time, and wrote that future moment as the global deadline. No one should call Groq again until that moment arrives.
+"AGENT-RETRIEVE acquires the gate at 12:18:54 (8 seconds into that window)"
+AGENT-RETRIEVE had been waiting in line. 8 seconds after the 429, VALUE-VERIFY finished and released the gate (it had already succeeded on its retry by then). AGENT-RETRIEVE moved to the front. At this point, roughly 43 seconds of the 51.45s deadline still remain — _wait_for_token_window should have caught this and slept. But it didn't, because of the SDK bypass bug described earlier. So AGENT-RETRIEVE fired immediately.
+"then fires and immediately gets another 429 with x-ratelimit-reset-tokens: 59.78s — updating the deadline further"
+Predictably, Groq said no again — the budget still hadn't refilled. This new 429 came with a longer reset time (59.78s), so _update_token_reset pushed the deadline forward again. The code always takes the later deadline, never shortening it — that's the "never backward" rule in the implementation.
+"After the Groq SDK's own 32s retry-after wait, AGENT-RETRIEVE's second attempt at 12:19:27 succeeds at 12:19:35"
+Here the Groq SDK's internal retry waited 32 seconds and tried again. That 32 seconds happened to be enough for the token budget to start refilling partially.
+"with x-ratelimit-remaining-tokens: 2654 — the window had clearly refilled"
+The response showed 2,654 tokens remaining out of 6,000 — so the budget was nearly half full again. Groq had done its reset in the background, and this call went through cleanly.
+"The architecture's claim that the reset wait is 'paid exactly once by the front-of-queue thread' is borne out."
+This is saying: the design intended that only the thread at the front of the line needs to sit and wait for the budget to refill. All the threads behind it are just waiting for the gate — not burning time on Groq's clock. By the time they get to the front, the waiting is already done. In this log that mostly held true — the wait was concentrated in AGENT-RETRIEVE's turn, not spread across multiple threads colliding with Groq independently.
+
+The one thing the excerpt glosses over is that the wait was actually done by the SDK internally, not by _wait_for_token_window as designed. The end result was the same, but the mechanism was the wrong one — which is what the SDK bypass bug is about.You said: And what about the cooldown time?And what about the cooldown time? When I gave the logs here I was asking about whether after the 429 error of one LLM call, wait, and then successfully completing its retry, did the architecture add the cool down time?25 JunClaude responded: Great question.Great question. Let me trace through the log precisely.
+
+What should have happened
+According to the architecture, after any terminal result (success or non-retryable failure), the sequence is:
+_apply_cooldown()        ← sleep the cooldown floor if queue is non-empty
+_gate_release_to_next()  ← only then hand the gate to the next waiter
+And the cooldown rule for a thread that recovered from a 429 is: double the floor.
+
+What the log actually shows
+There are two threads that recovered from a 429 and succeeded:
+VALUE-VERIFY — got a 429 on attempt 1, retried, succeeded at 12:18:54. At that moment, AGENT-RETRIEVE was sitting in the queue waiting. So the queue was non-empty, meaning cooldown should have fired and doubled.
+AGENT-RETRIEVE — got a 429 on attempt 1, retried, succeeded at 12:19:35. At that moment, the queue was empty (no other thread was waiting), so cooldown correctly resets to 0 and skips sleeping.
+
+The problem: the log doesn't tell us
+For VALUE-VERIFY's recovery, the log jumps from this:
+12:18:54 | [VALUE-VERIFY] LLM call attempt 1 took 8.554s
+directly to:
+12:18:54 | [AGENT-RETRIEVE] FIFO gate acquired.
+Both timestamps are 12:18:54 — there is no cooldown log line in between. The cooldown would have logged something like:
+[VALUE-VERIFY] inter-call cooldown X.XXs (token_base=..., had_429=True, streak=0)…
+That line is absent.
+
+Why it's absent — and what that means
+There are two possible explanations:
+1. The cooldown floor was 0.0 at that moment. _apply_cooldown only sleeps if _cooldown_floor > 0. If this was the very first 429-recovery in the session and _cooldown_floor started at 0.0, the doubling logic does this:
+pythoncurrent = current * 2.0 if current > 0 else token_base * 2.0
+So it falls to token_base * 2.0. If _parse_token_headers returned (0, 0, 0) — which happens when the headers aren't reachable through the LangChain response object — then token_base is also 0.0, and current stays 0.0. After clamping to [MIN_COOLDOWN_TIME, MAX_COOLDOWN_TIME], if MIN_COOLDOWN_TIME is 0.0, the floor stays 0.0 and no sleep happens.
+2. The SDK bypass ate the 429. Because the Groq SDK retried internally, _invoke_once returned a success result to llm_invoke, not a RATE_LIMIT error. That means had_429 in llm_invoke was never set to True — the flag only gets set when your code catches the 429, not when the SDK handles it silently. So _apply_cooldown was called with had_429=False, and the doubling rule never triggered at all.
+
+The short answer
+No — the cooldown doubling did not fire for VALUE-VERIFY's 429 recovery. The SDK bypass is almost certainly the reason: since the SDK absorbed the 429 internally and handed back a success, llm_invoke never knew a 429 had occurred, so had_429 stayed False, and _apply_cooldown treated it as a clean success rather than a recovery. The cooldown system is effectively blind to any 429 that the SDK handles before your code sees it. This is a second consequence of the same SDK bypass bug — it doesn't just block the gate unnecessarily, it also prevents the adaptive cooldown from responding to rate limit pressure.You said: Give me a list involving:llm_caller.pypyGive me a list involving: the things that need to be fixedreasoncurrent situation25 JunClaude responded: Let me re-read the file carefully before compiling the list.Let me re-read the file carefully before compiling the list.Viewed 2 filesViewed 2 filesHere's the complete list:
+
+Issue 1 — Groq SDK internal retries bypass your entire architecture
+Current situation: _invoke_once calls llm.invoke(), which is a LangChain ChatGroq wrapper. LangChain hands off to the Groq SDK, and the Groq SDK has its own built-in retry loop. When a 429 hits, the SDK silently sleeps (for whatever retry-after says) and fires again — all inside a single call to llm.invoke(). Your code never sees the 429 at all. It only gets an error if the SDK exhausts its own retries first.
+Reason this is a problem: All three layers of your architecture — the FIFO gate, the token-reset deadline, and the adaptive cooldown — are triggered by your code catching a 429. If the SDK swallows it, none of them activate. Concretely:
+
+The gate stays locked the entire time the SDK is sleeping, blocking every other thread from proceeding even though Groq isn't being called.
+_token_reset_until never gets updated with the accurate header values, so _wait_for_token_window has nothing to act on.
+had_429 in llm_invoke stays False, so _apply_cooldown never doubles the floor.
+
+Fix: When constructing the ChatGroq / Groq client, pass max_retries=0. This disables the SDK's internal retry loop so every 429 surfaces immediately as a RateLimitError to your code, which already handles it correctly.
+
+Issue 2 — _apply_cooldown reads _cooldown_floor outside the lock before sleeping
+Current situation: Look at lines 253 and 256:
+python        _cooldown_floor = current        # written inside _cooldown_lock
+                                         # lock is released here
+    if _cooldown_floor > 0:              # read OUTSIDE the lock
+        ...
+        time.sleep(_cooldown_floor)      # read OUTSIDE the lock again
+The lock is released at the end of the with _cooldown_lock block. The sleep check and the sleep itself happen after the lock is gone.
+Reason this is a problem: Another thread could theoretically write _cooldown_floor between the lock release and the sleep check. In practice with the FIFO gate only one thread runs this code at a time, so it won't cause a real bug today — but it's technically a race condition and it's inconsistent with how the rest of the locking is done.
+Fix: Capture the value inside the lock into a local variable and use that for the sleep:
+python        _cooldown_floor = current
+        floor_to_sleep  = current       # capture while holding the lock
+
+    if floor_to_sleep > 0:
+        time.sleep(floor_to_sleep)
+
+Issue 3 — _parse_token_headers silently returns zeros when headers aren't found, making token_base invisible
+Current situation: _parse_token_headers tries two different paths to find the response headers — response_metadata["headers"] and _raw_response.headers. If neither works it returns (0, 0, 0), which makes _compute_cooldown_base return 0.0. No log message is emitted. You have no way of knowing whether the cooldown base is zero because the token window is healthy, or because the header lookup silently failed.
+Reason this is a problem: The token-state base is the "always a hard floor" component of the cooldown. If it's silently zero due to a header lookup failure (which can happen across LangChain versions), the cooldown floor can drift down to _COOLDOWN_MIN even when the token window is nearly exhausted. This is a silent degradation — the system looks like it's working but is flying blind on actual token pressure.
+Fix: Add a single logger.debug when both paths fail, e.g.:
+pythonlogger.debug(f"[{caller_tag}] could not extract rate-limit headers — cooldown base will be 0")
+This costs nothing at runtime and makes the failure visible in logs.
+
+Issue 4 — _cooldown_floor doubling formula has a dead-code branch when floor is zero and token_base is also zero
+Current situation: Line 238:
+pythoncurrent = current * 2.0 if current > 0 else token_base * 2.0
+If both _cooldown_floor and token_base are 0.0 (which happens whenever Issue 3's header lookup fails), this produces 0.0 * 2.0 = 0.0. The floor stays at zero. Then after clamping to [_COOLDOWN_MIN, _COOLDOWN_MAX], if _COOLDOWN_MIN is 0.0, the floor is still 0.0 and no sleep happens at all — even after a 429 recovery with another thread queued.
+Reason this is a problem: The doubling rule exists specifically for the 429-recovery case to be cautious. If the floor starts at zero and headers are unavailable, the rule silently does nothing. A 429 just happened, the system knows it's under pressure, but no extra spacing is enforced between the next calls.
+Fix: Introduce a small non-zero fallback constant (e.g. _COOLDOWN_FALLBACK = 1.0 second) to use when both current and token_base are zero on a 429 recovery:
+pythonif had_429:
+    if current > 0:
+        current = current * 2.0
+    elif token_base > 0:
+        current = token_base * 2.0
+    else:
+        current = _COOLDOWN_FALLBACK   # guarantee something after a 429
+
+Issue 5 — import statements are split across the file
+Current situation: from config import MIN_COOLDOWN_TIME, MAX_COOLDOWN_TIME is at line 16–19, but from config import LLM_RATE_LIMIT_* is at lines 264–272 — in the middle of the file, between _apply_cooldown and the exception classes.
+Reason this is a problem: Not a runtime bug, but it means LLM_RATE_LIMIT_MAX_ATTEMPTS and friends are used as default argument values in llm_invoke (line 641–644), which are evaluated at import time. If anything goes wrong with config at startup, the error appears in the middle of the file rather than at the top where you'd expect it. It also makes the file harder to read — a reader has to hunt for where constants come from.
+Fix: Move all from config import ... to the top of the file with the other imports.
+
+
+Can u please explain what SDKs are and what is the following issue? I m new to all this
+
+Issue: Groq SDK internal retries bypass your entire architecture
+Current situation: _invoke_once calls llm.invoke(), which is a LangChain ChatGroq wrapper. LangChain hands off to the Groq SDK, and the Groq SDK has its own built-in retry loop. When a 429 hits, the SDK silently sleeps (for whatever retry-after says) and fires again — all inside a single call to llm.invoke(). Your code never sees the 429 at all. It only gets an error if the SDK exhausts its own retries first.
+Reason this is a problem: All three layers of your architecture — the FIFO gate, the token-reset deadline, and the adaptive cooldown — are triggered by your code catching a 429. If the SDK swallows it, none of them activate. Concretely:
+
+The gate stays locked the entire time the SDK is sleeping, blocking every other thread from proceeding even though Groq isn't being called.
+_token_reset_until never gets updated with the accurate header values, so _wait_for_token_window has nothing to act on.
+had_429 in llm_invoke stays False, so _apply_cooldown never doubles the floor.
+
+Fix: When constructing the ChatGroq / Groq client, pass max_retries=0. This disables the SDK's internal retry loop so every 429 surfaces immediately as a RateLimitError to your code, which already handles it correctly.
+
+Absolutely. This is one of those things that seems complicated because there are multiple layers involved. Let's start from the beginning.
+
+Part 1: What is an SDK?
+
+SDK stands for Software Development Kit.
+
+Think of an SDK as a toolbox provided by a company so that developers can easily use their service.
+
+Imagine Groq says:
+
+"You want to talk to our AI models? Instead of manually creating HTTP requests, parsing JSON, handling authentication, handling errors, etc., here's a library that does everything for you."
+
+That library is the Groq SDK.
+
+Without an SDK
+
+If SDKs didn't exist, every request would look something like this:
+
+Your Python code
+        │
+        ▼
+Create HTTP request
+        │
+        ▼
+Add Authorization header
+        │
+        ▼
+Serialize JSON
+        │
+        ▼
+Send request
+        │
+        ▼
+Receive response
+        │
+        ▼
+Parse JSON
+        │
+        ▼
+Handle errors
+        │
+        ▼
+Return answer
+
+You would write all of this yourself.
+
+With an SDK
+
+Instead you simply write
+
+from groq import Groq
+
+client = Groq(api_key="...")
+
+response = client.chat.completions.create(...)
+
+That's it.
+
+The SDK handles everything else.
+
+SDKs usually provide
+Authentication
+HTTP requests
+JSON serialization
+Error handling
+Timeouts
+Retries
+File uploads
+Streaming
+Rate limit parsing
+Pagination
+
+Basically all the annoying plumbing.
+
+Part 2: Your Architecture
+
+Your project has multiple layers.
+
+Something like
+
+Your API
+
+        │
+
+llm_invoke()
+
+        │
+
+_invoke_once()
+
+        │
+
+LangChain ChatGroq
+
+        │
+
+Groq SDK
+
+        │
+
+Internet
+
+        │
+
+Groq Servers
+
+Notice that your code never directly talks to Groq.
+
+It talks to LangChain.
+
+LangChain talks to Groq SDK.
+
+Groq SDK talks to Groq.
+
+Part 3: What happens normally?
+
+Suppose everything is fine.
+
+User
+
+↓
+
+llm_invoke()
+
+↓
+
+_invoke_once()
+
+↓
+
+ChatGroq.invoke()
+
+↓
+
+Groq SDK
+
+↓
+
+Groq API
+
+↓
+
+200 OK
+
+↓
+
+SDK returns response
+
+↓
+
+LangChain returns response
+
+↓
+
+Your code receives answer
+
+Everything works.
+
+Part 4: What happens when Groq returns 429?
+
+A 429 means
+
+"You're sending too many requests."
+
+Without any retries, this would happen:
+
+Groq
+
+↓
+
+429
+
+↓
+
+Groq SDK
+
+↓
+
+raises RateLimitError
+
+↓
+
+LangChain
+
+↓
+
+raises RateLimitError
+
+↓
+
+_invoke_once()
+
+↓
+
+except RateLimitError
+
+↓
+
+Your recovery logic runs
+
+Perfect.
+
+But that's NOT what's happening.
+
+The SDK has built-in retries.
+
+So instead:
+
+Groq
+
+↓
+
+429
+
+↓
+
+Groq SDK
+
+↓
+
+"Oh...
+I'll wait 20 seconds..."
+
+↓
+
+sleep(20)
+
+↓
+
+Retry
+
+↓
+
+Groq
+
+↓
+
+200 OK
+
+↓
+
+Return response
+
+↓
+
+Your code never even knows
+there was a 429.
+
+Your program thinks
+
+"Everything succeeded."
+
+Why would SDK authors do this?
+
+Because for most applications it's helpful.
+
+Suppose the internet glitches.
+
+Without retries:
+
+One tiny network issue
+
+↓
+
+Application crashes
+
+With retries
+
+Network issue
+
+↓
+
+Retry
+
+↓
+
+Works
+
+↓
+
+User never notices
+
+That's great for simple applications.
+
+But your architecture is NOT simple.
+
+You already built your own retry system.
+
+Now you have:
+
+Your Retry System
+
+↓
+
+LangChain
+
+↓
+
+Groq SDK Retry System
+
+Now there are TWO retry systems.
+
+That causes problems.
+
+Part 5: Why does this break your architecture?
+
+Let's go through each point.
+
+Problem 1
+
+The gate stays locked.
+
+Suppose you have
+
+FIFO Gate
+
+↓
+
+Request A
+
+↓
+
+llm.invoke()
+
+Now Groq replies
+
+429
+
+Instead of returning immediately...
+
+SDK does
+
+sleep(30)
+
+But your request is still inside
+
+llm.invoke()
+
+So
+
+FIFO Gate
+
+↓
+
+Request A
+
+↓
+
+(waiting...)
+
+↓
+
+sleep(30)
+
+Every other request
+
+Request B
+
+Request C
+
+Request D
+
+is blocked.
+
+Even though nothing is happening.
+
+Problem 2
+
+Token reset never updates.
+
+Groq usually sends headers like
+
+Retry-After: 22
+
+or
+
+X-RateLimit-Reset: ...
+
+Your code wants to read those.
+
+For example
+
+except RateLimitError as e:
+
+    reset = e.headers["Retry-After"]
+
+    _token_reset_until = ...
+
+But...
+
+Your code never gets the exception.
+
+SDK swallowed it.
+
+So
+
+_token_reset_until
+
+never changes.
+
+Problem 3
+
+Adaptive cooldown never activates.
+
+Your code apparently does something like
+
+had_429 = False
+
+try:
+
+    invoke()
+
+except RateLimitError:
+
+    had_429 = True
+
+...
+
+_apply_cooldown(had_429)
+
+But since
+
+RateLimitError
+
+never reaches your code
+
+had_429
+
+remains
+
+False
+
+So
+
+_apply_cooldown()
+
+never increases the cooldown.
+
+Part 6: The SDK is hiding information
+
+Imagine this conversation.
+
+Groq says
+
+Slow down.
+
+SDK says
+
+Don't worry, I got this.
+
+(wait 20 seconds)
+
+SDK asks Groq again.
+
+Groq answers.
+
+SDK tells your code
+
+Everything is fine.
+
+Your code never hears
+
+Slow down.
+
+That's the entire problem.
+
+Part 7: Why set max_retries=0?
+
+If you do
+
+client = Groq(
+    api_key=...,
+    max_retries=0
+)
+
+Now the SDK behaves differently.
+
+Instead of
+
+429
+
+↓
+
+sleep
+
+↓
+
+retry
+
+↓
+
+retry
+
+↓
+
+retry
+
+↓
+
+finally fail
+
+It immediately does
+
+429
+
+↓
+
+Raise RateLimitError
+
+Now your architecture sees it.
+
+429
+
+↓
+
+Your code catches it
+
+↓
+
+Update token window
+
+↓
+
+Update cooldown
+
+↓
+
+Release gate
+
+↓
+
+Wait properly
+
+↓
+
+Retry later
+
+Exactly what you designed.
+
+Part 8: Why is this considered better?
+
+Because only one layer should own retries.
+
+Good software architecture usually follows this rule:
+
+Application
+        │
+Retry Logic
+        │
+SDK
+        │
+HTTP
+
+NOT
+
+Application Retry
+
+↓
+
+SDK Retry
+
+↓
+
+HTTP Retry
+
+↓
+
+Load Balancer Retry
+
+↓
+
+Reverse Proxy Retry
+
+Multiple independent retry layers can lead to:
+
+unpredictable delays,
+redundant retries,
+longer request times,
+blocked resources,
+and difficulty understanding system behavior.
+
+When your application already has sophisticated retry logic (FIFO queueing, adaptive cooldowns, rate-limit tracking), it's generally better for the SDK to surface failures immediately and let your code make the decisions.
+
+In short
+
+An SDK is a library provided by a service (like Groq) that hides the low-level details of communicating with that service. The Groq SDK includes an automatic retry mechanism for transient failures such as rate limits. In your architecture, however, you've already implemented a smarter, centralized retry strategy. The SDK's hidden retries prevent your code from seeing 429 errors, so your queue management, token-window tracking, and adaptive cooldown logic never activate. Setting max_retries=0 disables the SDK's automatic retries, allowing every 429 RateLimitError to reach your code immediately, where your architecture can handle it consistently and efficiently.

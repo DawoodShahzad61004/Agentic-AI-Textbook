@@ -1,0 +1,84 @@
+I want to add "self-learning" mechanism in this Agentic RAG; such that, its accuracy will improve  after N-number of user  interactions
+
+01:59
+Claude responded: Good.
+
+Reading project files
+Reading project files
+Good. I have a clear picture of your codebase. Here's my plan before writing any code:
+
+Self-Learning Design
+The mechanism works in 3 layers:
+
+1. Interaction Memory (feedback_store.py)
+Every Q&A interaction is logged with: query, answer, sources used, and implicit quality signal (was check_answer_quality OK or INSUFFICIENT?). Stored as a JSON ledger.
+
+2. Synthetic QA Distillation (self_learner.py)
+After every N interactions, a distillation job runs:
+
+Takes the last N interactions where quality was OK
+Uses those verified (query → answer → source chunks) triples to generate synthetic Q&A pairs via the LLM
+Embeds those synthetic pairs and adds them back into ChromaDB as a new collection layer (learned_qa)
+3. Hybrid Retrieval (retriever.py update)
+The retriever queries both the original documents collection and the learned_qa collection, then merges and re-ranks results. This means past good answers become first-class retrieval targets — reducing hallucination on repeated/similar queries.
+
+Let me build this:
+
+
+Created 4 files, read a file
+Created 4 files, read a file
+Here's what was built and how all the pieces connect:
+
+What's new — 3 files added, 2 updated
+feedback_store.py (new)
+A lightweight JSONL ledger at ../data/feedback/interactions.jsonl. Every query-answer pair is appended with a quality signal (OK / INSUFFICIENT / USER_THUMBSDOWN) and the top retrieved chunks. This is the ground truth the self-learner trains from.
+
+self_learner.py (new)
+The distillation engine. When triggered it:
+
+Takes the last N OK-quality interactions
+Calls the LLM to generate 1–3 semantically distinct rephrasings of each Q&A pair, strictly grounded in the stored source chunks (no hallucination)
+Embeds those synthetic pairs and upserts them into a separate learned_qa ChromaDB collection (deduplication by SHA-256 content hash)
+retriever.py (updated)
+Now does hybrid retrieval — queries both documents (original) and learned_qa (distilled), then merges and re-ranks by score. It also stores the last retrieved chunks so FeedbackStore can log them.
+
+agent_query.py (updated)
+Wires everything together:
+
+Logs every interaction after it completes
+Checks should_learn() after each OK answer — fires distillation when good_count % N == 0
+Exposes three CLI commands: bad (flag last answer), stats (learning status), learn (force distillation now)
+How accuracy improves over time
+Interaction 1–4:  queries hit only original docs
+Interaction 5:    distillation fires → 5-15 QA pairs enter learned_qa
+Interaction 6+:   similar future queries now surface distilled answers
+                  as top results (pre-verified, source-grounded)
+Interaction 10:   another distillation round — compounding
+The key insight: distilled pairs embed as "Q: … A: …" text, which scores highly against future queries phrased similarly — effectively turning your best past answers into a fast-retrieval cache that bypasses re-reasoning from scratch.
+
+
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\agent_query.py Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads. Loading weights: 100%|████████████████████████████████████████████████████████
+
+02:46
+Claude responded: The error is clear: checkanswerquality is receiving a context string that's just a concatenation of query strings (not actual retrieved content), and Groq's to…
+The error is clear: check_answer_quality is receiving a context string that's just a concatenation of query strings (not actual retrieved content), and Groq's tool-call parser chokes on the malformed call. Two bugs to fix:
+
+context is wrong — last_context holds the raw retrieval result string, but when the agent calls check_answer_quality after multiple retrievals, last_context only has the last retrieval, not the combined context. We should pass all accumulated context.
+Groq 400 on tool schema — check_answer_quality requires context as a parameter in the schema, which confuses the LLM into trying to fill it. Since we inject context server-side, it should be hidden from the LLM's tool schema entirely.
+
+Viewed a file, created a file
+Viewed a file, created a file
+Now fix agent_query.py to accumulate all retrieved context (not just the last chunk) before injecting it:
+
+
+Viewed a file, edited a file, read a file
+Viewed a file, edited a file, read a file
+Two bugs fixed across two files. Here's exactly what was wrong and why:
+
+Bug 1 — tools.py: context exposed in the LLM schema
+
+The check_answer_quality schema listed context as a required parameter, so Groq's LLM tried to fill it. It fabricated a value (a concatenation of query strings), which then failed Groq's own tool-call validation and returned the 400 tool_use_failed error. The fix: remove context from the schema entirely. The LLM now only sends answer; your agent loop injects context server-side before calling the function. The LLM never needs to know context exists.
+
+Bug 2 — agent_query.py: last_context was overwritten on each retrieval
+
+When the agent called retrieve_documents three times, last_context was reassigned each time, so check_answer_quality only ever saw the final retrieval's results. Changed last_context (single string, overwritten) to accumulated_context (a list that appends), and the quality check now joins all retrieval results with a separator before injecting them.

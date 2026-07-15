@@ -1,0 +1,1230 @@
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\agent_query.py
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights: 100%|████████████████████████████████████████████████████████████████████████████████████████████████| 103/103 [00:00<00:00, 7018.44it/s]
+BertModel LOAD REPORT from: sentence-transformers/all-MiniLM-L6-v2
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+Model 'all-MiniLM-L6-v2' loaded on cuda. Embedding dimension: 384
+GPU: NVIDIA GeForce RTX 5050 Laptop GPU
+Vector store initialized: collection='documents', path='../data/vector_store'
+Existing documents in collection: 237
+[SelfLearner] learned_qa collection has 0 entries.
+
+=== Agentic RAG — Self-Learning Query Interface ===
+Self-learning triggers every 5 successful interactions.
+
+Commands: 'bad' to flag last answer | 'stats' for learning stats | 'learn' to force distillation | 'quit' to exit
+
+Your question: Explain the relationship between ASD and Neurology in detail, with examples from the source documents.
+
+══════════════════════════════════════════════════════════════════════
+  STEP 1 — USER QUERY RECEIVED
+══════════════════════════════════════════════════════════════════════
+  Input : "Explain the relationship between ASD and Neurology in detail, with examples from the source documents."
+  Length: 102 chars
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  FULL MESSAGE SENT TO LLM  [Iteration 1 / max 6]
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS:
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+
+PROCESS:
+1....
+
+  [1] role=user
+      content: Explain the relationship between ASD and Neurology in detail, with examples from the source documents.
+
+  Tool schemas available: ['retrieve_documents', 'check_answer_quality']
+══════════════════════════════════════════════════════════════════════
+
+  [CONTEXT SIZE @ iter 1]
+    messages in payload    : 2
+    total content chars    : 1,450
+    ~tokens (chars/4 est.) : 362
+    actual prompt tokens   : 715  (from API)
+    cumulative prompt tok  : 715
+[CTXSIZE] iter=1 msgs=2 chars=1450 prompt_tokens=715 cum_prompt_tokens=715
+
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 1]
+══════════════════════════════════════════════════════════════════════
+  Tokens this call : 715 prompt + 89 completion = 804 total
+  content (0 chars):
+    
+
+  tool_calls requested (3):
+    → name : retrieve_documents
+      id   : gbb6725ng
+      args : {
+      "query": "ASD neurology relationship",
+      "top_k": 5
+}
+    → name : retrieve_documents
+      id   : 2k7cdd6xj
+      args : {
+      "query": "autism spectrum disorder neurology",
+      "top_k": 5
+}
+    → name : retrieve_documents
+      id   : f7ka2k8f8
+      args : {
+      "query": "ASD neurological basis",
+      "top_k": 5
+}
+══════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "ASD neurology relationship",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "ASD neurology relationship"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.047945, -0.068144, -0.047712, 0.037678, -0.08366, 0.055094, 0.02628, -0.042434]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 4 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.3181  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. O…
+    Doc 1 — score: 0.2706  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i…
+    Doc 2 — score: 0.2161  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestin…
+    Doc 3 — score: 0.2080  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: for a definitive diagnosis and comprehensive neuropsychological assessment. Children with ASD should also be screened fo…
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("ASD neurology relationship")
+  4 chunk(s) | 1520 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.318]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.271]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.216]
+Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.208]
+for a definitive diagnosis and comprehensive neuropsychological assessment. Children with ASD should also be screened for common co-morbid diagnoses. While no clear biomarkers or diagnostic measures exist, clinical genetic testing is recommended as part of the initial medical evaluation. Further medical work up or subspecialist referrals may be pursued based on specific patient characteristics.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=1/5 | accumulated_context=4 chunk(s) across 1 retrieval(s)
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "autism spectrum disorder neurology",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "autism spectrum disorder neurology"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.002631, -0.071354, -0.052194, 0.007875, -0.054766, 0.004503, 0.082209, 0.009104]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.4685  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restrict…
+    Doc 1 — score: 0.4413  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and th…
+    Doc 2 — score: 0.4045  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i…
+    Doc 3 — score: 0.3591  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: 10. Hartley-McAndrew M, Mertz J, Hoffman M, et al. Rates of autism spectrum disorder diagnosis under the DSM- 5 criteria…
+    Doc 4 — score: 0.3539  [..\data\html\asd_disparities_gender_race_essay.html]
+            preview: Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, re…
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("autism spectrum disorder neurology")
+  5 chunk(s) | 2229 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.469]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.441]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors (1). In 2013, the Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) (Table 1) (1,2).
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.405]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.359]
+10. Hartley-McAndrew M, Mertz J, Hoffman M, et al. Rates of autism spectrum disorder diagnosis under the DSM- 5 criteria compared to DSM-IV-TR criteria in a hospital- based clinic. Pediatr Neurol 2016;57:34-8.
+
+[Source: ..\data\html\asd_disparities_gender_race_essay.html, score: 0.354]
+Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, restricted interests, repetitive behaviors, and sensory processing. Although ASD has received increasing clinical and public attention, the experience of being identified, diagnosed, and treated is not the same for all patients. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=2/5 | accumulated_context=9 chunk(s) across 2 retrieval(s)
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "ASD neurological basis",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "ASD neurological basis"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.035189, -0.097121, -0.002146, 0.046961, -0.045828, 0.021153, 0.050932, 0.010158]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.4565  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. O…
+    Doc 1 — score: 0.3502  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: transport (52). Ultimately, ASD remains one of the most genetically heterogeneous neuropsychiatric disorders with rarer …
+    Doc 2 — score: 0.3132  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i…
+    Doc 3 — score: 0.2798  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: for a definitive diagnosis and comprehensive neuropsychological assessment. Children with ASD should also be screened fo…
+    Doc 4 — score: 0.2642  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestin…
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("ASD neurological basis")
+  5 chunk(s) | 1820 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.457]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.350]
+transport (52). Ultimately, ASD remains one of the most genetically heterogeneous neuropsychiatric disorders with rarer de novo and inherited variants in over 700 genes (53).
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.313]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.280]
+for a definitive diagnosis and comprehensive neuropsychological assessment. Children with ASD should also be screened for common co-morbid diagnoses. While no clear biomarkers or diagnostic measures exist, clinical genetic testing is recommended as part of the initial medical evaluation. Further medical work up or subspecialist referrals may be pursued based on specific patient characteristics.
+
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.264]
+Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=3/5 | accumulated_context=14 chunk(s) across 3 retrieval(s)
+
+══════════════════════════════════════════════════════════════════════
+  FULL MESSAGE SENT TO LLM  [Iteration 2 / max 6]
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS:
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+
+PROCESS:
+1....
+
+  [1] role=user
+      content: Explain the relationship between ASD and Neurology in detail, with examples from the source documents.
+
+  [2] role=assistant
+      content: 
+      tool_call → retrieve_documents  args={"query": "ASD neurology relationship", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "autism spectrum disorder neurology", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "ASD neurological basis", "top_k": 5}
+
+  [3] role=tool  tool_call_id=gbb6725ng
+      content: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.318]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.271]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communic...
+
+  [4] role=tool  tool_call_id=2k7cdd6xj
+      content: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.469]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.441]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and...
+
+  [5] role=tool  tool_call_id=f7ka2k8f8
+      content: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.457]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.350]
+transport (52). Ultimately, ASD remains one of the most genetically heterog...
+
+  Tool schemas available: ['retrieve_documents', 'check_answer_quality']
+══════════════════════════════════════════════════════════════════════
+
+  [CONTEXT SIZE @ iter 2]
+    messages in payload    : 6
+    total content chars    : 7,019
+    ~tokens (chars/4 est.) : 1,754
+    actual prompt tokens   : 1,981  (from API)
+    cumulative prompt tok  : 2,696
+[CTXSIZE] iter=2 msgs=6 chars=7019 prompt_tokens=1981 cum_prompt_tokens=2696
+
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 2]
+══════════════════════════════════════════════════════════════════════
+  Tokens this call : 1981 prompt + 202 completion = 2183 total
+  content (0 chars):
+    
+
+  tool_calls requested (1):
+    → name : check_answer_quality
+      id   : 3vd2pze91
+      args : {
+      "answer": "Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated. Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures. The experience of being identified, diagnosed, and treated is not the same for all patients. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care."
+}
+══════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: check_answer_quality
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "answer": "Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated. Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures. The experience of being identified, diagnosed, and treated is not the same for all patients. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care."
+}
+──────────────────────────────────────────────────────────────────────
+  [AGENT] injecting 5583 chars of accumulated context into check_answer_quality
+  [AGENT STATE] final_quality set to: OK
+
+══════════════════════════════════════════════════════════════════════
+  FULL MESSAGE SENT TO LLM  [Iteration 3 / max 6]
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS:
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+
+PROCESS:
+1....
+
+  [1] role=user
+      content: Explain the relationship between ASD and Neurology in detail, with examples from the source documents.
+
+  [2] role=assistant
+      content: 
+      tool_call → retrieve_documents  args={"query": "ASD neurology relationship", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "autism spectrum disorder neurology", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "ASD neurological basis", "top_k": 5}
+
+  [3] role=tool  tool_call_id=gbb6725ng
+      content: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.318]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.271]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communic...
+
+  [4] role=tool  tool_call_id=2k7cdd6xj
+      content: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.469]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.441]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and...
+
+  [5] role=tool  tool_call_id=f7ka2k8f8
+      content: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.457]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.350]
+transport (52). Ultimately, ASD remains one of the most genetically heterog...
+
+  [6] role=assistant
+      content: 
+      tool_call → check_answer_quality  args={"answer": "Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated. Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures. The experience of being identified, diagnosed, and treated is not the same for all patients. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care."}
+
+  [7] role=tool  tool_call_id=3vd2pze91
+      content: OK — now write your final answer. Expand it using all retrieved chunks. Cite each source inline as [Source: filename].
+
+  Tool schemas available: ['retrieve_documents', 'check_answer_quality']
+══════════════════════════════════════════════════════════════════════
+
+  [CONTEXT SIZE @ iter 3]
+    messages in payload    : 8
+    total content chars    : 7,137
+    ~tokens (chars/4 est.) : 1,784
+    actual prompt tokens   : 2,219  (from API)
+    cumulative prompt tok  : 4,915
+[CTXSIZE] iter=3 msgs=8 chars=7137 prompt_tokens=2219 cum_prompt_tokens=4915
+
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 3]
+══════════════════════════════════════════════════════════════════════
+  Tokens this call : 2219 prompt + 761 completion = 2980 total
+  content (3715 chars):
+    Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing [Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+
+Many ASD patients experience co-occurring conditi...
+
+  tool_calls: none  →  this is the FINAL ANSWER
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  FINAL ANSWER
+══════════════════════════════════════════════════════════════════════
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing [Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+
+Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues [Source: ..\data\word\ASD_Patient_Management_Handbook.docx]. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures [Source: ..\data\word\ASD_Patient_Management_Handbook.docx].
+
+The experience of being identified, diagnosed, and treated is not the same for all patients [Source: ..\data\html\asd_disparities_gender_race_essay.html]. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available [Source: ..\data\html\asd_disparities_gender_race_essay.html]. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care [Source: ..\data\html\asd_disparities_gender_race_essay.html].
+
+ASD is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. In 2013, the Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities [Source: ..\data\word\ASD_Patient_Management_Handbook.docx]. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals [Source: ..\data\word\ASD_Patient_Management_Handbook.docx].
+
+Transport (52). Ultimately, ASD remains one of the most genetically heterogeneous neuropsychiatric disorders with rarer de novo and inherited variants in over 700 genes (53) [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+
+For a definitive diagnosis and comprehensive neuropsychological assessment, children with ASD should also be screened for common co-morbid diagnoses [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. While no clear biomarkers or diagnostic measures exist, clinical genetic testing is recommended as part of the initial medical evaluation [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Further medical work up or subspecialist referrals may be pursued based on specific patient characteristics [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+══════════════════════════════════════════════════════════════════════
+  Iterations used : 3 / 6
+  Quality signal  : OK
+  Tokens (total)  : 4915 prompt + 1052 completion = 5967 total
+  Sources searched:
+    • "ASD neurology relationship"
+      preview: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evalua...
+    • "autism spectrum disorder neurology"
+      preview: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.469]
+Autism Spectrum Disorder i...
+    • "ASD neurological basis"
+      preview: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evalua...
+══════════════════════════════════════════════════════════════════════
+Your question: bad 
+
+Why was this answer bad? (optional — press Enter to skip).
+If you provide at least 10 characters, this query, all its
+LLM-generated reformulations, and the chunks they retrieved will be saved
+so the agent avoids repeating the same failure next time.
+Your feedback: Not structured enough
+Last answer flagged as bad and persisted to user_thumbdowns.json (3 variant(s) captured).
+
+Your question: Explain the relationship between ASD and Neurology in detail, with examples from the source documents.
+
+══════════════════════════════════════════════════════════════════════
+  STEP 1 — USER QUERY RECEIVED
+══════════════════════════════════════════════════════════════════════
+  Input : "Explain the relationship between ASD and Neurology in detail, with examples from the source documents."
+  Length: 102 chars
+══════════════════════════════════════════════════════════════════════
+  [USER THUMBDOWN HISTORY] 1 prior bad-answer record(s) found for this query — injecting context (with variants + chunks + user feedback) into system prompt.
+
+══════════════════════════════════════════════════════════════════════
+  FULL MESSAGE SENT TO LLM  [Iteration 1 / max 6]
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS:
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+
+PROCESS:
+1....
+
+  [1] role=user
+      content: Explain the relationship between ASD and Neurology in detail, with examples from the source documents.
+
+  Tool schemas available: ['retrieve_documents', 'check_answer_quality']
+══════════════════════════════════════════════════════════════════════
+
+  [CONTEXT SIZE @ iter 1]
+    messages in payload    : 2
+    total content chars    : 4,432
+    ~tokens (chars/4 est.) : 1,108
+    actual prompt tokens   : 1,318  (from API)
+    cumulative prompt tok  : 1,318
+[CTXSIZE] iter=1 msgs=2 chars=4432 prompt_tokens=1318 cum_prompt_tokens=1318
+
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 1]
+══════════════════════════════════════════════════════════════════════
+  Tokens this call : 1318 prompt + 89 completion = 1407 total
+  content (0 chars):
+    
+
+  tool_calls requested (3):
+    → name : retrieve_documents
+      id   : dvzv82hrt
+      args : {
+      "query": "ASD neurology relationship",
+      "top_k": 5
+}
+    → name : retrieve_documents
+      id   : paz32hm3t
+      args : {
+      "query": "autism spectrum disorder neurology",
+      "top_k": 5
+}
+    → name : retrieve_documents
+      id   : br15z8zn9
+      args : {
+      "query": "ASD neurological basis",
+      "top_k": 5
+}
+══════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "ASD neurology relationship",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "ASD neurology relationship"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.047945, -0.068144, -0.047712, 0.037678, -0.08366, 0.055094, 0.02628, -0.042434]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 4 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.3181  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. O…
+    Doc 1 — score: 0.2706  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i…
+    Doc 2 — score: 0.2161  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestin…
+    Doc 3 — score: 0.2080  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: for a definitive diagnosis and comprehensive neuropsychological assessment. Children with ASD should also be screened fo…
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("ASD neurology relationship")
+  4 chunk(s) | 1520 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.318]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.271]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.216]
+Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.208]
+for a definitive diagnosis and comprehensive neuropsychological assessment. Children with ASD should also be screened for common co-morbid diagnoses. While no clear biomarkers or diagnostic measures exist, clinical genetic testing is recommended as part of the initial medical evaluation. Further medical work up or subspecialist referrals may be pursued based on specific patient characteristics.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=1/5 | accumulated_context=4 chunk(s) across 1 retrieval(s)
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "autism spectrum disorder neurology",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "autism spectrum disorder neurology"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.002631, -0.071354, -0.052194, 0.007875, -0.054766, 0.004503, 0.082209, 0.009104]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.4685  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restrict…
+    Doc 1 — score: 0.4413  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and th…
+    Doc 2 — score: 0.4045  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i…
+    Doc 3 — score: 0.3591  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: 10. Hartley-McAndrew M, Mertz J, Hoffman M, et al. Rates of autism spectrum disorder diagnosis under the DSM- 5 criteria…
+    Doc 4 — score: 0.3539  [..\data\html\asd_disparities_gender_race_essay.html]
+            preview: Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, re…
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("autism spectrum disorder neurology")
+  5 chunk(s) | 2229 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.469]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.441]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors (1). In 2013, the Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) (Table 1) (1,2).
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.405]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.359]
+10. Hartley-McAndrew M, Mertz J, Hoffman M, et al. Rates of autism spectrum disorder diagnosis under the DSM- 5 criteria compared to DSM-IV-TR criteria in a hospital- based clinic. Pediatr Neurol 2016;57:34-8.
+
+[Source: ..\data\html\asd_disparities_gender_race_essay.html, score: 0.354]
+Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, restricted interests, repetitive behaviors, and sensory processing. Although ASD has received increasing clinical and public attention, the experience of being identified, diagnosed, and treated is not the same for all patients. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=2/5 | accumulated_context=9 chunk(s) across 2 retrieval(s)
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "ASD neurological basis",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "ASD neurological basis"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.035189, -0.097121, -0.002146, 0.046961, -0.045828, 0.021153, 0.050932, 0.010158]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.4565  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. O…
+    Doc 1 — score: 0.3502  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: transport (52). Ultimately, ASD remains one of the most genetically heterogeneous neuropsychiatric disorders with rarer …
+    Doc 2 — score: 0.3132  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i…
+    Doc 3 — score: 0.2798  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: for a definitive diagnosis and comprehensive neuropsychological assessment. Children with ASD should also be screened fo…
+    Doc 4 — score: 0.2642  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestin…
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("ASD neurological basis")
+  5 chunk(s) | 1820 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.457]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.350]
+transport (52). Ultimately, ASD remains one of the most genetically heterogeneous neuropsychiatric disorders with rarer de novo and inherited variants in over 700 genes (53).
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.313]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.280]
+for a definitive diagnosis and comprehensive neuropsychological assessment. Children with ASD should also be screened for common co-morbid diagnoses. While no clear biomarkers or diagnostic measures exist, clinical genetic testing is recommended as part of the initial medical evaluation. Further medical work up or subspecialist referrals may be pursued based on specific patient characteristics.
+
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.264]
+Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=3/5 | accumulated_context=14 chunk(s) across 3 retrieval(s)
+
+══════════════════════════════════════════════════════════════════════
+  FULL MESSAGE SENT TO LLM  [Iteration 2 / max 6]
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS:
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+
+PROCESS:
+1....
+
+  [1] role=user
+      content: Explain the relationship between ASD and Neurology in detail, with examples from the source documents.
+
+  [2] role=assistant
+      content: 
+      tool_call → retrieve_documents  args={"query": "ASD neurology relationship", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "autism spectrum disorder neurology", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "ASD neurological basis", "top_k": 5}
+
+  [3] role=tool  tool_call_id=dvzv82hrt
+      content: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.318]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.271]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communic...
+
+  [4] role=tool  tool_call_id=paz32hm3t
+      content: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.469]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.441]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and...
+
+  [5] role=tool  tool_call_id=br15z8zn9
+      content: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.457]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.350]
+transport (52). Ultimately, ASD remains one of the most genetically heterog...
+
+  Tool schemas available: ['retrieve_documents', 'check_answer_quality']
+══════════════════════════════════════════════════════════════════════
+
+  [CONTEXT SIZE @ iter 2]
+    messages in payload    : 6
+    total content chars    : 10,001
+    ~tokens (chars/4 est.) : 2,500
+    actual prompt tokens   : 2,584  (from API)
+    cumulative prompt tok  : 3,902
+[CTXSIZE] iter=2 msgs=6 chars=10001 prompt_tokens=2584 cum_prompt_tokens=3902
+
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 2]
+══════════════════════════════════════════════════════════════════════
+  Tokens this call : 2584 prompt + 202 completion = 2786 total
+  content (0 chars):
+    
+
+  tool_calls requested (1):
+    → name : check_answer_quality
+      id   : 0rnryx5jg
+      args : {
+      "answer": "Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated. Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures. The experience of being identified, diagnosed, and treated is not the same for all patients. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care."
+}
+══════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: check_answer_quality
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "answer": "Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated. Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures. The experience of being identified, diagnosed, and treated is not the same for all patients. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care."
+}
+──────────────────────────────────────────────────────────────────────
+  [AGENT] injecting 5583 chars of accumulated context into check_answer_quality
+  [AGENT STATE] final_quality set to: OK
+
+══════════════════════════════════════════════════════════════════════
+  FULL MESSAGE SENT TO LLM  [Iteration 3 / max 6]
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS:
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+
+PROCESS:
+1....
+
+  [1] role=user
+      content: Explain the relationship between ASD and Neurology in detail, with examples from the source documents.
+
+  [2] role=assistant
+      content: 
+      tool_call → retrieve_documents  args={"query": "ASD neurology relationship", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "autism spectrum disorder neurology", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "ASD neurological basis", "top_k": 5}
+
+  [3] role=tool  tool_call_id=dvzv82hrt
+      content: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.318]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.271]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communic...
+
+  [4] role=tool  tool_call_id=paz32hm3t
+      content: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.469]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.441]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and...
+
+  [5] role=tool  tool_call_id=br15z8zn9
+      content: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.457]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.350]
+transport (52). Ultimately, ASD remains one of the most genetically heterog...
+
+  [6] role=assistant
+      content: 
+      tool_call → check_answer_quality  args={"answer": "Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated. Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures. The experience of being identified, diagnosed, and treated is not the same for all patients. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care."}
+
+  [7] role=tool  tool_call_id=0rnryx5jg
+      content: OK — now write your final answer. Expand it using all retrieved chunks. Cite each source inline as [Source: filename].
+
+  Tool schemas available: ['retrieve_documents', 'check_answer_quality']
+══════════════════════════════════════════════════════════════════════
+
+  [CONTEXT SIZE @ iter 3]
+    messages in payload    : 8
+    total content chars    : 10,119
+    ~tokens (chars/4 est.) : 2,529
+    actual prompt tokens   : 2,822  (from API)
+    cumulative prompt tok  : 6,724
+[CTXSIZE] iter=3 msgs=8 chars=10119 prompt_tokens=2822 cum_prompt_tokens=6724
+
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 3]
+══════════════════════════════════════════════════════════════════════
+  Tokens this call : 2822 prompt + 687 completion = 3509 total
+  content (3334 chars):
+    Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing [Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+
+Many ASD patients experience co-occurring conditi...
+
+  tool_calls: none  →  this is the FINAL ANSWER
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  FINAL ANSWER
+══════════════════════════════════════════════════════════════════════
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing [Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+
+Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues [Source: ..\data\word\ASD_Patient_Management_Handbook.docx]. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures [Source: ..\data\word\ASD_Patient_Management_Handbook.docx].
+
+The experience of being identified, diagnosed, and treated is not the same for all patients [Source: ..\data\html\asd_disparities_gender_race_essay.html]. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available [Source: ..\data\html\asd_disparities_gender_race_essay.html]. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care [Source: ..\data\html\asd_disparities_gender_race_essay.html].
+
+ASD is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. In 2013, the Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+
+ASD remains one of the most genetically heterogeneous neuropsychiatric disorders with rarer de novo and inherited variants in over 700 genes [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Ultimately, transport [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+
+Children with ASD should also be screened for common co-morbid diagnoses [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. While no clear biomarkers or diagnostic measures exist, clinical genetic testing is recommended as part of the initial medical evaluation [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Further medical work up or subspecialist referrals may be pursued based on specific patient characteristics [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+══════════════════════════════════════════════════════════════════════
+  Iterations used : 3 / 6
+  Quality signal  : OK
+  Tokens (total)  : 6724 prompt + 978 completion = 7702 total
+  Sources searched:
+    • "ASD neurology relationship"
+      preview: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evalua...
+    • "autism spectrum disorder neurology"
+      preview: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.469]
+Autism Spectrum Disorder i...
+    • "ASD neurological basis"
+      preview: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evalua...
+══════════════════════════════════════════════════════════════════════
+Your question: bad
+
+Why was this answer bad? (optional — press Enter to skip).
+If you provide at least 10 characters, this query, all its
+LLM-generated reformulations, and the chunks they retrieved will be saved
+so the agent avoids repeating the same failure next time.
+Your feedback: Need to be more organized
+Last answer flagged as bad and persisted to user_thumbdowns.json (3 variant(s) captured).
+
+Your question: Explain the relationship between ASD and Neurology in detail, with examples from the source documents.
+
+══════════════════════════════════════════════════════════════════════
+  STEP 1 — USER QUERY RECEIVED
+══════════════════════════════════════════════════════════════════════
+  Input : "Explain the relationship between ASD and Neurology in detail, with examples from the source documents."
+  Length: 102 chars
+══════════════════════════════════════════════════════════════════════
+  [USER THUMBDOWN HISTORY] 2 prior bad-answer record(s) found for this query — injecting context (with variants + chunks + user feedback) into system prompt.
+
+══════════════════════════════════════════════════════════════════════
+  FULL MESSAGE SENT TO LLM  [Iteration 1 / max 6]
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS:
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+
+PROCESS:
+1....
+
+  [1] role=user
+      content: Explain the relationship between ASD and Neurology in detail, with examples from the source documents.
+
+  Tool schemas available: ['retrieve_documents', 'check_answer_quality']
+══════════════════════════════════════════════════════════════════════
+
+  [CONTEXT SIZE @ iter 1]
+    messages in payload    : 2
+    total content chars    : 6,892
+    ~tokens (chars/4 est.) : 1,723
+    actual prompt tokens   : 1,805  (from API)
+    cumulative prompt tok  : 1,805
+[CTXSIZE] iter=1 msgs=2 chars=6892 prompt_tokens=1805 cum_prompt_tokens=1805
+
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 1]
+══════════════════════════════════════════════════════════════════════
+  Tokens this call : 1805 prompt + 288 completion = 2093 total
+  content (0 chars):
+    
+
+  tool_calls requested (4):
+    → name : retrieve_documents
+      id   : gsyg48j1v
+      args : {
+      "query": "ASD neurology relationship",
+      "top_k": 5
+}
+    → name : retrieve_documents
+      id   : 0s16y7xxj
+      args : {
+      "query": "autism spectrum disorder neurology",
+      "top_k": 5
+}
+    → name : retrieve_documents
+      id   : mek214k35
+      args : {
+      "query": "ASD neurological basis",
+      "top_k": 5
+}
+    → name : check_answer_quality
+      id   : 4hbpxv4qw
+      args : {
+      "answer": "Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms. For instance, studies have identified rare de novo and inherited variants in over 700 genes associated with ASD (Source: Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf). Furthermore, research suggests that ASD exists on a spectrum, with individuals exhibiting a range of symptoms and challenges in social communication, restricted interests, and repetitive behaviors (Source: ASD_Patient_Management_Handbook.docx). Ultimately, ASD remains one of the most genetically heterogeneous neuropsychiatric disorders, highlighting the complexity of its neurological basis (Source: Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf)."
+}
+══════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "ASD neurology relationship",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "ASD neurology relationship"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.047945, -0.068144, -0.047712, 0.037678, -0.08366, 0.055094, 0.02628, -0.042434]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 4 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.3181  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. O…
+    Doc 1 — score: 0.2706  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i…
+    Doc 2 — score: 0.2161  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestin…
+    Doc 3 — score: 0.2080  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: for a definitive diagnosis and comprehensive neuropsychological assessment. Children with ASD should also be screened fo…
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("ASD neurology relationship")
+  4 chunk(s) | 1520 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.318]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.271]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.216]
+Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.208]
+for a definitive diagnosis and comprehensive neuropsychological assessment. Children with ASD should also be screened for common co-morbid diagnoses. While no clear biomarkers or diagnostic measures exist, clinical genetic testing is recommended as part of the initial medical evaluation. Further medical work up or subspecialist referrals may be pursued based on specific patient characteristics.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=1/5 | accumulated_context=4 chunk(s) across 1 retrieval(s)
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "autism spectrum disorder neurology",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "autism spectrum disorder neurology"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.002631, -0.071354, -0.052194, 0.007875, -0.054766, 0.004503, 0.082209, 0.009104]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.4685  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restrict…
+    Doc 1 — score: 0.4413  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and th…
+    Doc 2 — score: 0.4045  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i…
+    Doc 3 — score: 0.3591  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: 10. Hartley-McAndrew M, Mertz J, Hoffman M, et al. Rates of autism spectrum disorder diagnosis under the DSM- 5 criteria…
+    Doc 4 — score: 0.3539  [..\data\html\asd_disparities_gender_race_essay.html]
+            preview: Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, re…
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("autism spectrum disorder neurology")
+  5 chunk(s) | 2229 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.469]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.441]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and the presence of restricted interests and repetitive behaviors (1). In 2013, the Diagnostic and Statistical Manual of Mental Disorders—5th edition (DSM-5) was published, updating the diagnostic criteria for ASD from the previous 4th edition (DSM-IV) (Table 1) (1,2).
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.405]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.359]
+10. Hartley-McAndrew M, Mertz J, Hoffman M, et al. Rates of autism spectrum disorder diagnosis under the DSM- 5 criteria compared to DSM-IV-TR criteria in a hospital- based clinic. Pediatr Neurol 2016;57:34-8.
+
+[Source: ..\data\html\asd_disparities_gender_race_essay.html, score: 0.354]
+Autism spectrum disorder (ASD) is a neurodevelopmental condition associated with differences in social communication, restricted interests, repetitive behaviors, and sensory processing. Although ASD has received increasing clinical and public attention, the experience of being identified, diagnosed, and treated is not the same for all patients. Gender and racial factors shape who is recognized early, who is overlooked, who receives appropriate services, and who must overcome greater barriers before support becomes available. These disparities matter because delayed identification can postpone therapy, school accommodations, family guidance, and access to specialized care.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=2/5 | accumulated_context=9 chunk(s) across 2 retrieval(s)
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "query": "ASD neurological basis",
+    "top_k": 5
+}
+──────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "ASD neurological basis"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [-0.035189, -0.097121, -0.002146, 0.046961, -0.045828, 0.021153, 0.050932, 0.010158]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────
+
+  Querying vector store — top_k=5, score_threshold=0.2
+
+  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.4565  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. O…
+    Doc 1 — score: 0.3502  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: transport (52). Ultimately, ASD remains one of the most genetically heterogeneous neuropsychiatric disorders with rarer …
+    Doc 2 — score: 0.3132  [C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]
+            preview: Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social i…
+    Doc 3 — score: 0.2798  [..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]
+            preview: for a definitive diagnosis and comprehensive neuropsychological assessment. Children with ASD should also be screened fo…
+    Doc 4 — score: 0.2642  [..\data\word\ASD_Patient_Management_Handbook.docx]
+            preview: Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestin…
+
+──────────────────────────────────────────────────────────────────────
+  CONTEXT APPENDED — retrieve_documents("ASD neurological basis")
+  5 chunk(s) | 1820 chars total
+──────────────────────────────────────────────────────────────────────
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.457]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.350]
+transport (52). Ultimately, ASD remains one of the most genetically heterogeneous neuropsychiatric disorders with rarer de novo and inherited variants in over 700 genes (53).
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.313]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.280]
+for a definitive diagnosis and comprehensive neuropsychological assessment. Children with ASD should also be screened for common co-morbid diagnoses. While no clear biomarkers or diagnostic measures exist, clinical genetic testing is recommended as part of the initial medical evaluation. Further medical work up or subspecialist referrals may be pursued based on specific patient characteristics.
+
+[Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.264]
+Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures.
+──────────────────────────────────────────────────────────────────────
+
+  [AGENT STATE] total_retrievals=3/5 | accumulated_context=14 chunk(s) across 3 retrieval(s)
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: check_answer_quality
+──────────────────────────────────────────────────────────────────────
+  args: {
+    "answer": "Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms. For instance, studies have identified rare de novo and inherited variants in over 700 genes associated with ASD (Source: Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf). Furthermore, research suggests that ASD exists on a spectrum, with individuals exhibiting a range of symptoms and challenges in social communication, restricted interests, and repetitive behaviors (Source: ASD_Patient_Management_Handbook.docx). Ultimately, ASD remains one of the most genetically heterogeneous neuropsychiatric disorders, highlighting the complexity of its neurological basis (Source: Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf)."
+}
+──────────────────────────────────────────────────────────────────────
+  [AGENT] injecting 5583 chars of accumulated context into check_answer_quality
+  [AGENT STATE] final_quality set to: OK
+
+══════════════════════════════════════════════════════════════════════
+  FULL MESSAGE SENT TO LLM  [Iteration 2 / max 6]
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS:
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+
+PROCESS:
+1....
+
+  [1] role=user
+      content: Explain the relationship between ASD and Neurology in detail, with examples from the source documents.
+
+  [2] role=assistant
+      content: 
+      tool_call → retrieve_documents  args={"query": "ASD neurology relationship", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "autism spectrum disorder neurology", "top_k": 5}
+      tool_call → retrieve_documents  args={"query": "ASD neurological basis", "top_k": 5}
+      tool_call → check_answer_quality  args={"answer": "Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms. For instance, studies have identified rare de novo and inherited variants in over 700 genes associated with ASD (Source: Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf). Furthermore, research suggests that ASD exists on a spectrum, with individuals exhibiting a range of symptoms and challenges in social communication, restricted interests, and repetitive behaviors (Source: ASD_Patient_Management_Handbook.docx). Ultimately, ASD remains one of the most genetically heterogeneous neuropsychiatric disorders, highlighting the complexity of its neurological basis (Source: Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf)."}
+
+  [3] role=tool  tool_call_id=gsyg48j1v
+      content: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.318]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json, score: 0.271]
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communic...
+
+  [4] role=tool  tool_call_id=0s16y7xxj
+      content: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.469]
+Autism Spectrum Disorder is a neurodevelopmental condition characterized by challenges in social communication, restricted interests, repetitive behaviors, and sensory sensitivities. ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.441]
+Autism spectrum disorder (ASD) is a neurodevelopmental disorder characterized by deficits in social communication and...
+
+  [5] role=tool  tool_call_id=mek214k35
+      content: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.457]
+ASD is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated.
+
+[Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf, score: 0.350]
+transport (52). Ultimately, ASD remains one of the most genetically heterog...
+
+  [6] role=tool  tool_call_id=4hbpxv4qw
+      content: OK — now write your final answer. Expand it using all retrieved chunks. Cite each source inline as [Source: filename].
+
+  Tool schemas available: ['retrieve_documents', 'check_answer_quality']
+══════════════════════════════════════════════════════════════════════
+
+  [CONTEXT SIZE @ iter 2]
+    messages in payload    : 7
+    total content chars    : 12,579
+    ~tokens (chars/4 est.) : 3,144
+    actual prompt tokens   : 3,302  (from API)
+    cumulative prompt tok  : 5,107
+[CTXSIZE] iter=2 msgs=7 chars=12579 prompt_tokens=3302 cum_prompt_tokens=5107
+
+══════════════════════════════════════════════════════════════════════
+  LLM RESPONSE  [Iteration 2]
+══════════════════════════════════════════════════════════════════════
+  Tokens this call : 3302 prompt + 463 completion = 3765 total
+  content (2278 chars):
+    Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing [Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+
+ASD exists on a spectrum, meaning symptoms and su...
+
+  tool_calls: none  →  this is the FINAL ANSWER
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+  FINAL ANSWER
+══════════════════════════════════════════════════════════════════════
+Autism Spectrum Disorder (ASD) is a neurodevelopmental condition characterized by differences in communication, social interaction, behavior patterns, and sensory processing [Source: C:\Users\LOQ\Desktop\Projects\RAG-work\data\json\asd_information.json]. It is a neurobiological disorder influenced by both genetic and environmental factors affecting the developing brain [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Ongoing research continues to deepen our understanding of potential etiologic mechanisms in ASD, but currently no single unifying cause has been elucidated [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+
+ASD exists on a spectrum, meaning symptoms and support needs vary significantly between individuals [Source: ..\data\word\ASD_Patient_Management_Handbook.docx]. Many ASD patients experience co-occurring conditions such as anxiety, ADHD, epilepsy, sleep disorders, or gastrointestinal issues [Source: ..\data\word\ASD_Patient_Management_Handbook.docx]. Healthcare providers should use patient-centered approaches and consider sensory needs during examinations or procedures [Source: ..\data\word\ASD_Patient_Management_Handbook.docx].
+
+For a definitive diagnosis and comprehensive neuropsychological assessment, children with ASD should also be screened for common co-morbid diagnoses [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. While no clear biomarkers or diagnostic measures exist, clinical genetic testing is recommended as part of the initial medical evaluation [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf]. Further medical work up or subspecialist referrals may be pursued based on specific patient characteristics [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+
+Ultimately, ASD remains one of the most genetically heterogeneous neuropsychiatric disorders with rarer de novo and inherited variants in over 700 genes [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evaluation.pdf].
+══════════════════════════════════════════════════════════════════════
+  Iterations used : 2 / 6
+  Quality signal  : OK
+  Tokens (total)  : 5107 prompt + 751 completion = 5858 total
+  Sources searched:
+    • "ASD neurology relationship"
+      preview: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evalua...
+    • "autism spectrum disorder neurology"
+      preview: [Source: ..\data\word\ASD_Patient_Management_Handbook.docx, score: 0.469]
+Autism Spectrum Disorder i...
+    • "ASD neurological basis"
+      preview: [Source: ..\data\pdfs\Autism spectrum disorder definition, epidemiology, causes, and clinical evalua...
+══════════════════════════════════════════════════════════════════════
+Your question:

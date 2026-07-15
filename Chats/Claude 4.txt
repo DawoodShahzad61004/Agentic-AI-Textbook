@@ -1,0 +1,272 @@
+Explain how everything is working
+
+02:59
+Claude responded: I'll walk you through how this RAG pipeline works end-to-end, covering all the components and how they connect.
+I'll walk you through how this RAG pipeline works end-to-end, covering all the components and how they connect.
+
+Here's a full walkthrough of how this pipeline works, from document ingestion to self-learning retrieval.
+
+
+
+Click any box to ask a follow-up. Here's how every piece fits together:
+
+Ingestion (run once with ingest.py)
+
+ingest.py discovers files across several data directories, handles each type differently — PDFs/HTML/text go through UnstructuredLoader, while CSV/Excel files are first converted to JSON — then uses RecursiveCharacterTextSplitter to cut everything into 1000-character chunks with 200-character overlap. EmbeddingManager wraps a sentence-transformers model (all-MiniLM-L6-v2) and turns each chunk into a 384-dimensional vector. Those vectors land in ChromaDB via VectorStore, which persists them to disk.
+
+Query loop (every question in agent_query.py)
+
+The agent runs a tool-calling loop with Groq's llama-3.3-70b-versatile. It has access to two tools defined in tools.py: retrieve_documents (which delegates to RAGRetriever) and check_answer_quality (a heuristic that checks for red-flag phrases and whether any context was actually retrieved). The agent is prompted to call retrieve at most 5 times total, never repeat a query, and call the quality check exactly once before returning its final answer.
+
+RAGRetriever is hybrid — it queries both the main documents collection and the learned_qa collection (if it has entries), merges the results, deduplicates by ID, and re-ranks by cosine similarity score. This means as the system learns, its retrieval quality improves automatically.
+
+A key design detail in tools.py: the context parameter of check_answer_quality is deliberately hidden from the LLM's tool schema. The agent loop injects the full accumulated retrieval context server-side before calling it, preventing Groq from hallucinating or sending stale context in that field (which caused tool_use_failed 400 errors).
+
+Feedback and self-learning
+
+Every completed query is written to a JSONL ledger by FeedbackStore, recording the query, answer, quality signal (OK / INSUFFICIENT), and the top 3 retrieved chunks. Users can also type bad to retroactively downgrade the last answer to USER_THUMBSDOWN.
+
+When the count of OK interactions hits a multiple of LEARN_EVERY_N (default 5), SelfLearner.run_distillation() fires. It reads the most recent good interactions, sends each one to the LLM with a structured prompt asking it to generate 1–3 distinct rephrasings of the question paired with a clean, chunk-grounded answer. Those synthetic QA pairs are embedded and upserted into the learned_qa ChromaDB collection using a SHA-256-based stable ID to avoid duplicates. From that point on, the hybrid retriever finds them alongside raw document chunks — so the system essentially accumulates a growing layer of pre-verified answers that bootstrap future queries.
+
+You said: How does this function check the quality of the output received from the LLM:
+How does this function check the quality of the output received from the LLM:
+
+def check_answer_quality(answer: str, context: str = "") -> str:
+        """
+        Heuristic quality check.
+        `context` is injected by the agent loop — NOT supplied by the LLM.
+        """
+        red_flags = ["i don't know", "i cannot", "no information", "not mentioned"]
+        if any(f in answer.lower() for f in red_flags):
+            return "INSUFFICIENT — agent should retry with a different query."
+        if not context or len(context.strip()) < 50:
+            return "INSUFFICIENT — no supporting context was retrieved."
+        return "OK"
+
+    # ── Tool schemas exposed to the LLM ──────────────────────────────────────
+    # IMPORTANT: `context` is intentionally omitted from check_answer_quality's
+    # schema. The LLM only supplies `answer`; the agent loop injects `context`
+    # from accumulated retrieval results before calling the function. Exposing
+    # `context` in the schema causes Groq to attempt filling it with stale or
+    # fabricated text, producing 400 tool_use_failed errors.
+    tool_schemas = [
+        {
+            "type": "function",
+            "function": {
+                "name": "retrieve_documents",
+                "description": (
+                    "Search the knowledge base for chunks relevant to a query. "
+                    "Call this first, and again with rephrased queries if results are poor."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query.",
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "description": "Number of results to return (default 5).",
+                            "default": 5,
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "check_answer_quality",
+                "description": (
+                    "Verify that your drafted answer is grounded in retrieved documents. "
+                    "Pass your full drafted answer as `answer`. Returns OK or INSUFFICIENT."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "answer": {
+                            "type": "string",
+                            "description": "The answer you have drafted so far.",
+                        },
+                    },
+                    "required": ["answer"],
+                },
+            },
+        },
+    ]
+Show more
+14:37
+Claude responded: The function uses two simple heuristic checks, applied in order:
+The function uses two simple heuristic checks, applied in order:
+
+Check 1 — Red flag phrases in the answer
+
+python
+red_flags = ["i don't know", "i cannot", "no information", "not mentioned"]
+if any(f in answer.lower() for f in red_flags):
+    return "INSUFFICIENT — agent should retry with a different query."
+It lowercases the LLM's answer and scans it for phrases that signal the model admitted it couldn't find anything. If any match, it immediately returns INSUFFICIENT. The idea is: if the LLM itself is hedging, the retrieval probably failed.
+
+Check 2 — Was any context actually retrieved?
+
+python
+if not context or len(context.strip()) < 50:
+    return "INSUFFICIENT — no supporting context was retrieved."
+This checks whether the accumulated retrieval results (injected by the agent loop, not the LLM) are non-empty and at least 50 characters long. If the vector store returned nothing meaningful, the answer is groundless regardless of how confident it sounds.
+
+If both checks pass → "OK"
+
+The hidden context parameter trick
+
+This is the most interesting design decision here. The function signature has context as a parameter, but it's deliberately absent from the tool schema exposed to the LLM:
+
+python
+# LLM only sees this:
+"parameters": {
+    "properties": {
+        "answer": { "type": "string", ... }
+    },
+    "required": ["answer"]
+}
+Then in agent_query.py, the agent loop intercepts the tool call and injects context itself before invoking the function:
+
+python
+elif name == "check_answer_quality":
+    full_context = "\n\n---\n\n".join(accumulated_context)
+    args["context"] = full_context          # injected here
+    result = callables[name](**args)
+The reason: if context were in the schema, Groq would try to fill it — either sending stale text from earlier in the conversation, or hallucinating content entirely, causing tool_use_failed 400 errors. By keeping it invisible to the LLM and filling it server-side from accumulated_context (which tracks every retrieve_documents call across all iterations), the check always sees the full, real retrieval results.
+
+Limitations worth knowing
+
+This is a purely heuristic check — it has no semantic understanding. It won't catch cases where the LLM sounds confident but fabricated an answer, or where retrieved context is 50+ characters but completely irrelevant to the question. A stronger version would pass the answer and context back through an LLM judge to verify actual grounding.
+
+You said: Questions:
+Questions:
+What is a sentence transformer model? We used "all-MiniLM-L6-v2"
+What is a vector database? How is it different from other (relational and non-relational) databases? We used chromadb. How does it stores data?
+why does some functions in my files follow the naming convention of starting with "_" while others start with a letter?
+what does this do: llm = ChatGroq(api_key=os.getenv("GROQ_API_KEY"), model_name="llama-3.3-70b-versatile", temperature=0.1, max_tokens=2048)
+
+15:17
+Claude responded: Great set of questions.
+Great set of questions. Let me answer each one clearly.
+
+1. What is a sentence transformer model?
+A regular language model reads text and predicts the next word. A sentence transformer does something different — it reads a piece of text and compresses its entire meaning into a fixed-size list of numbers called an embedding vector.
+
+For all-MiniLM-L6-v2 specifically:
+
+MiniLM — a distilled (compressed) version of a larger Microsoft model, designed to be fast and lightweight while preserving most of the accuracy
+L6 — it has 6 transformer layers (larger models have 12 or 24)
+v2 — second version
+It outputs a vector of 384 numbers for any input text, regardless of whether the input is 3 words or 300 words
+The key property is that semantically similar texts produce numerically similar vectors. So "What causes ASD?" and "What are the symptoms of autism?" will produce vectors that are close together in 384-dimensional space, even though they share almost no words. This is what makes semantic search possible — you embed the user's question and find whichever document chunks have the closest vectors.
+
+2. What is a vector database?
+A normal database stores and retrieves data by exact matching — WHERE id = 5 or WHERE name = 'Alice'. Even NoSQL databases that store flexible JSON documents still look things up by exact keys or field values.
+
+A vector database stores embedding vectors and retrieves them by similarity — "find me the 5 vectors closest to this query vector." That's a fundamentally different operation called nearest neighbour search.
+
+Relational (Postgres)	NoSQL (MongoDB)	Vector (ChromaDB)
+Stores	Rows & columns	JSON documents	Embedding vectors
+Retrieves by	Exact match / JOIN	Key / field query	Similarity / distance
+Query type	SELECT WHERE	find({field: val})	query(embedding, top_k=5)
+Use case	Structured business data	Flexible documents	Semantic search, RAG
+How ChromaDB stores data in your project
+
+ChromaDB persists to disk at ../data/vector_store/. For each document chunk it stores four things together:
+
+id          → a unique string (UUID) you assign
+document    → the raw text of the chunk
+embedding   → the 384-number vector
+metadata    → dict of extra info (source file, page number, etc.)
+When you query it, you pass a query embedding and ask for n_results. ChromaDB computes the cosine distance between your query vector and every stored vector, then returns the closest ones. Your code converts that distance to a similarity score with 1 - dist (so 0 = totally different, 1 = identical).
+
+3. Why do some functions start with _?
+This is a Python naming convention for visibility intent. It doesn't enforce anything technically, but it signals to other developers (and tools like linters and IDEs):
+
+No underscore → public API, meant to be called from outside the class
+Single underscore _ → internal/private, meant to only be called from within the same class
+In your code, RAGRetriever is a good example:
+
+python
+# Public — called from agent_query.py and tools.py
+def retrieve(self, query, top_k=5, score_threshold=0.0): ...
+def get_last_chunks(self): ...
+
+# Private — only called internally by retrieve()
+def _query_collection(self, collection, query_embedding, top_k): ...
+_query_collection is a helper that does the low-level ChromaDB call. Nothing outside the class needs to touch it directly — retrieve() calls it twice (once for documents, once for learned_qa) and assembles the result. The underscore tells anyone reading the code "don't call this from outside, it's an implementation detail."
+
+Same pattern in VectorStore:
+
+python
+def _initialize_store(self): ...       # called only in __init__
+def _sanitize_metadata(self): ...      # called only in add_document
+def _sanitize_metadata_value(self): ...
+
+def add_document(self, ...): ...       # public
+def add_documents_in_batches(self, ...): ...  # public
+4. What does that ChatGroq(...) line do?
+python
+llm = ChatGroq(
+    api_key=os.getenv("GROQ_API_KEY"),
+    model_name="llama-3.3-70b-versatile",
+    temperature=0.1,
+    max_tokens=2048,
+)
+It creates a configured LLM client object. Breaking down each argument:
+
+api_key=os.getenv("GROQ_API_KEY") — reads your secret API key from the .env file (loaded earlier by load_dotenv()). Groq is a cloud inference provider — you're not running the model locally, you're sending requests to their API. The key authenticates you.
+
+model_name="llama-3.3-70b-versatile" — specifies which model to use. This is Meta's Llama 3.3 with 70 billion parameters, the "versatile" variant (optimised for general instruction-following including tool/function calling, which your agent loop depends on).
+
+temperature=0.1 — controls randomness in the model's output. 0.0 = fully deterministic (always picks the highest-probability token), 1.0 = very creative/random. At 0.1 the model is nearly deterministic — good for a research assistant where you want consistent, factual answers rather than creative variation.
+
+max_tokens=2048 — caps how long the model's response can be. One token ≈ ¾ of a word, so 2048 tokens is roughly 1500 words. This prevents runaway responses and controls cost.
+
+The resulting llm object is then used two ways in your project — in the agent loop via llm.invoke(messages, tools=tool_schemas), and in SelfLearner via llm.invoke([{"role": "user", "content": prompt}]) for distillation.
+
+You said: What is Hugging Face?
+What is Hugging Face? And how was it linked to this project?
+
+15:47
+Claude responded: What is Hugging Face?
+What is Hugging Face?
+Hugging Face is a company and open-source platform that hosts machine learning models, datasets, and tools — think of it as GitHub but for AI models. Anyone can upload a trained model, and anyone else can download and use it with a few lines of code.
+
+Their core library is called transformers, which provides a standardized interface to thousands of models regardless of who originally trained them. They also maintain sentence-transformers (the library your project uses directly), tokenizers, datasets, and several others.
+
+How it connects to your project
+The link is indirect but essential. When your EmbeddingManager runs this:
+
+python
+self.model = SentenceTransformer("all-MiniLM-L6-v2", device=self.device)
+Here is what actually happens under the hood:
+
+Step 1 — sentence-transformers talks to Hugging Face
+
+The SentenceTransformer class, on its first run, checks whether all-MiniLM-L6-v2 exists in your local cache. If it doesn't, it automatically downloads the model from https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2. This is a model that Microsoft originally trained and sentence-transformers published on the Hub.
+
+Step 2 — The model files land in local cache
+
+Hugging Face downloads several files — the model weights, tokenizer config, vocabulary file, and metadata — into a local cache folder (typically ~/.cache/huggingface/). Every subsequent run loads from there, so no internet is needed after the first download.
+
+Step 3 — Your code uses it normally
+
+From that point your code just calls self.model.encode(text) and gets back a numpy array of 384 numbers. The Hugging Face infrastructure is completely invisible at that point.
+
+You can also see Hugging Face's presence in your requirements.txt directly — several of the installed packages are theirs:
+
+huggingface_hub        # the download/cache layer that fetches models
+sentence-transformers  # the high-level wrapper your code imports
+transformers           # the underlying model architecture library
+tokenizers             # fast tokenization (a Hugging Face library)
+safetensors            # their format for storing model weights safely
+huggingface_hub in particular is the package that handles authentication, downloading, caching, and versioning of models from the Hub. sentence-transformers calls it internally — you never call it directly, but it's doing the heavy lifting of fetching all-MiniLM-L6-v2 from the internet on first use.
+
+So in short: Hugging Face is the distribution platform and tooling layer that makes it possible to write one line of code and get a production-quality embedding model without training anything yourself.
+

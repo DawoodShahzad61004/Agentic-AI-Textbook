@@ -1,0 +1,3317 @@
+I dont want my logs to go out of my network.
+Can Langsmith store my logs locally? For example, I m using mongodb in a project with its server locally running on my system. Can Langsmith do something like that? If yes, how? If not, then what are my options?
+
+I’ll separate this into: what LangSmith officially supports, what “local” would realistically mean, and practical alternatives for private tracing/logging in an agent/RAG system.
+
+Thought for 5s
+
+Yes, but not like MongoDB local by default.
+
+LangSmith’s normal mode is SaaS/cloud, meaning traces/logs leave your machine and go to LangSmith servers.
+
+LangSmith does support self-hosting, but it is an Enterprise add-on, meant for Kubernetes/cloud/on-prem infrastructure, not a simple local MongoDB-style server you casually run beside your app. Official docs say self-hosted LangSmith lets you host LangSmith in your own infrastructure, but requires an Enterprise license/trial.
+
+So practically:
+
+Option	Logs leave network?	Good for you?
+LangSmith Cloud	Yes	No, if privacy is strict
+Self-hosted LangSmith Enterprise	No, if deployed inside your infra	Yes, but expensive/heavy
+Disable LangSmith tracing	No	Good simple option
+Use local/open-source observability	No	Best practical option
+
+For your case, I would not use LangSmith Cloud if prompts, retrieved chunks, user queries, model outputs, or internal agent state must stay private.
+
+At minimum:
+
+LANGSMITH_TRACING=false
+
+LangChain/LangGraph docs also mention tracing can be disabled with LANGSMITH_TRACING=false.
+
+Your best options:
+
+Build your own local trace logger
+Store every RAG/agent step in local MongoDB:
+request_id, user_query, retrieved_chunks, selected_context, LLM_input, LLM_output, latency, token_count, errors, validator_results.
+Use OpenTelemetry locally
+Use OpenTelemetry traces + Jaeger/Grafana Tempo locally. This is more production-style, but less LLM-specific.
+Use Langfuse self-hosted
+Langfuse is a popular open-source LangSmith-like alternative that can be self-hosted with Docker/Postgres. Better fit if you want a UI.
+Use Phoenix by Arize
+Good for local LLM/RAG tracing and eval workflows.
+Redact before sending
+Only safe if partial leakage is acceptable. For strict privacy, avoid cloud tracing entirely.
+
+My recommendation for your project:
+Use MongoDB for raw local traces first. Add a simple dashboard later. For example:
+
+{
+  request_id,
+  timestamp,
+  user_query,
+  rewritten_queries,
+  retrieved_docs,
+  final_context,
+  llm_calls: [
+    {
+      step: "retrieval_validation",
+      prompt,
+      response,
+      latency_ms,
+      model
+    }
+  ],
+  final_answer,
+  errors
+}
+
+For your current local RAG/agent system, local MongoDB logging is the cleanest, cheapest, most controllable approach. LangSmith self-hosting is real, but probably overkill unless your company has Enterprise budget and Kubernetes infrastructure.
+
+For a production ready app, list the benefits that LangSmith provides, including but not limited to:
+- LangSmith provides a GUI for a detailed log of all traces. Each trace is divided into separate runs.
+- Each trace has a description of errors. 
+- Each trace has its tree/flow of execution. 
+- Each run has its own time-taken. 
+- Each trace's each run provides what goes into and out of it.
+- The number of tokens and the cost for each trace's each run
+- Graphical representation of monitoring
+- Alerts
+- Evaluations
+- Database creation and usage
+- Evaluations: using gold-standard free datasets, own python scripts, prompts from LangChain Hub etc
+- Store prompts etc
+
+I’ll structure this as a production-focused checklist, separating observability, debugging, evaluation, monitoring, prompt management, and datasets so it’s easy to reuse in notes or docs.
+
+Thought for 4s
+
+For a production-ready LLM/Agentic AI app, LangSmith provides:
+
+Detailed tracing GUI
+Every user request becomes a trace.
+Each trace is broken into separate runs: LLM calls, retriever calls, tools, chains, agents, validators, etc.
+You can inspect the full execution tree/flow.
+Debugging support
+Shows errors, stack traces, failed runs, and where the failure happened.
+Helps identify whether the issue came from retrieval, prompt formatting, tool call, LLM response, parser, or final generation.
+Input/output visibility
+Each run shows its inputs and outputs.
+Useful for checking prompts, retrieved chunks, tool arguments, model responses, and intermediate agent decisions.
+Latency tracking
+Each run has its own time taken.
+Helps find slow steps such as retrievers, LLM calls, tools, or long agent loops.
+Token and cost tracking
+Tracks token usage and cost for traces/runs where supported.
+Useful for production budgeting and identifying expensive chains, prompts, tools, or users.
+Monitoring dashboards
+Graphical dashboards for latency, cost, errors, token usage, feedback scores, and quality metrics.
+Useful for observing production behavior over time.
+Alerts
+Alerts can be configured for metrics like error rate, latency, cost, or feedback thresholds.
+Supports integrations such as webhooks or PagerDuty.
+Evaluations
+Supports offline evals before deployment and online evals on production traffic.
+Can evaluate correctness, helpfulness, relevance, hallucination, retrieval quality, tool usage, etc.
+Datasets
+You can create datasets of inputs and reference outputs.
+Datasets can be versioned, filtered, split, shared, and reused for experiments.
+Custom evaluators
+You can use prebuilt evaluators, LLM-as-judge evaluators, human feedback, or your own Python/TypeScript scripts.
+Useful when generic metrics are not enough for your app’s domain.
+Prompt testing and prompt management
+Prompts can be created, tested, versioned, and evaluated.
+Helpful for comparing prompt versions before pushing changes to production.
+Experiment comparison
+Compare different models, prompts, retrievers, chunking strategies, tools, or agent architectures.
+Useful for deciding whether a new version is actually better before deployment.
+Human feedback and annotation
+Production traces can be reviewed and labeled by humans.
+Useful for collecting failure cases and turning them into future evaluation datasets.
+Production improvement loop
+Real user traces → identify failures → create datasets → run evals → improve prompts/code/retrieval → compare experiments → deploy safer version.
+
+In simple words: LangSmith gives you observability, debugging, monitoring, evaluation, prompt management, dataset management, and cost/latency tracking for LLM apps in production.
+
+
+I m a beginner in all this...tell me everything u can on the following:
+
+OpenInference semconv
+OTel
+OpenTelemetry
+
+These three terms are closely related, but they solve different problems.
+
+Think of them like this:
+
+OpenTelemetry (OTel) = The universal observability framework (collects telemetry from applications)
+OpenInference = AI/LLM extension built on top of OpenTelemetry
+OpenInference Semantic Conventions (semconv) = The standardized names and formats OpenInference uses for AI-related telemetry
+
+Let's go through everything from the ground up.
+
+1. Why do these exist?
+
+Imagine you build an Agentic AI application.
+
+User
+   │
+   ▼
+FastAPI
+   │
+   ▼
+LangGraph
+   │
+   ├── Retriever
+   ├── Vector DB
+   ├── LLM
+   ├── Tool
+   └── Memory
+
+Suppose a user says
+
+"What are the symptoms of Autism?"
+
+The application performs
+
+API receives request
+Retrieval
+Embedding generation
+Vector search
+Prompt creation
+LLM call
+Output parser
+Response
+
+Now imagine something goes wrong.
+
+Questions you may have:
+
+Which node was slow?
+Which prompt caused hallucination?
+Which tool failed?
+Which LLM produced the answer?
+How many tokens?
+Which retriever returned irrelevant chunks?
+Which user query caused the error?
+
+Without logging, you have no idea.
+
+Observability solves this.
+
+2. What is Observability?
+
+Observability means
+
+Being able to understand what your software is doing internally.
+
+Instead of only knowing
+
+Program crashed.
+
+You know
+
+Request started
+
+↓
+
+Retriever took 1.2 sec
+
+↓
+
+LLM took 6 sec
+
+↓
+
+Output parser failed
+
+↓
+
+Retry happened
+
+↓
+
+Second attempt succeeded
+
+↓
+
+Returned response
+
+This is observability.
+
+3. Three pillars of observability
+
+Almost every observability platform revolves around three kinds of telemetry:
+
+Logs
+
+Human-readable messages.
+
+Example
+
+Starting retrieval...
+
+Retriever finished.
+
+Calling GPT-4...
+
+Response received.
+Metrics
+
+Numerical values.
+
+Example
+
+Average latency
+
+CPU usage
+
+Memory
+
+Number of requests
+
+Requests/sec
+
+Error rate
+
+Usually shown as graphs.
+
+Traces
+
+The most important for AI.
+
+A trace records the entire lifecycle of a request.
+
+Example
+
+User Request
+
+│
+
+├── Retrieval
+
+├── Embedding
+
+├── LLM
+
+├── Tool
+
+├── Memory
+
+└── Response
+
+Every step is recorded.
+
+4. What is OpenTelemetry?
+
+OpenTelemetry (often abbreviated OTel) is the industry-standard, vendor-neutral framework for collecting telemetry (traces, metrics, and logs) from applications.
+
+It is maintained by the Cloud Native Computing Foundation (CNCF).
+
+Think of OTel as:
+
+"The USB standard for observability."
+
+Just like USB lets many devices work with many computers, OTel lets many applications send telemetry to many observability backends without changing your application logic.
+
+Why was OpenTelemetry created?
+
+Before OTel:
+
+Datadog SDK
+
+Zipkin SDK
+
+Jaeger SDK
+
+New Relic SDK
+
+Elastic SDK
+
+Each vendor required different instrumentation.
+
+If you changed vendors...
+
+You rewrote everything.
+
+OTel standardized this.
+
+Now you instrument once.
+
+Then export anywhere.
+
+OTel Architecture
+Application
+
+      │
+
+Instrumentation
+
+      │
+
+Spans
+
+      │
+
+Tracer
+
+      │
+
+OTLP Exporter
+
+      │
+
+Collector
+
+      │
+
+Backend
+5. What is telemetry?
+
+Telemetry simply means
+
+Data describing how software behaves.
+
+Examples
+
+Start time
+
+End time
+
+Latency
+
+Errors
+
+Token count
+
+Memory usage
+
+Prompt
+
+Response
+
+HTTP status
+
+Database query
+
+CPU
+
+All telemetry.
+
+6. OTel Traces
+
+Suppose
+
+User asks
+
+↓
+
+API
+
+↓
+
+Retriever
+
+↓
+
+LLM
+
+↓
+
+Response
+
+OTel records
+
+Trace
+
+├── Span 1
+│   API Request
+│
+├── Span 2
+│   Retrieval
+│
+├── Span 3
+│   Embedding
+│
+├── Span 4
+│   GPT call
+│
+└── Span 5
+    Response
+
+A trace is made of spans.
+
+7. What is a Span?
+
+A span represents one unit of work during a request.
+
+Example
+
+Span
+
+Name:
+Retriever
+
+Start:
+10:00:02
+
+End:
+10:00:03
+
+Duration:
+1 second
+
+Status:
+Success
+
+Another
+
+Span
+
+LLM
+
+Duration
+
+Tokens
+
+Cost
+
+Prompt
+
+Completion
+
+Every operation becomes a span.
+
+8. Trace vs Span
+
+Imagine ordering food.
+
+Trace
+
+Entire order process
+
+Spans
+
+Placed order
+
+↓
+
+Restaurant accepted
+
+↓
+
+Cooking
+
+↓
+
+Delivery
+
+↓
+
+Received
+
+One trace.
+
+Multiple spans.
+
+9. Context Propagation
+
+How does OTel know
+
+Retriever
+
+↓
+
+LLM
+
+↓
+
+Tool
+
+
+all belong to one user request?
+
+It attaches a trace context (typically a trace ID and span IDs) to the work as it flows through your application.
+
+Every child span inherits the same trace.
+
+So later the backend reconstructs
+
+Entire tree
+
+instead of isolated events.
+
+10. Exporters
+
+OTel itself doesn't store anything.
+
+Instead it exports.
+
+Example
+
+OTLP
+
+↓
+
+Jaeger
+
+↓
+
+Datadog
+
+↓
+
+Grafana
+
+↓
+
+Phoenix
+
+↓
+
+LangSmith
+
+↓
+
+Arize
+
+Think
+
+OTel
+
+↓
+
+Courier
+
+↓
+
+Backend
+11. What is OpenInference?
+
+OpenTelemetry is generic.
+
+It understands
+
+HTTP
+
+Database
+
+Kafka
+
+Redis
+
+Filesystem
+
+But it knows nothing about AI.
+
+For example
+
+Prompt
+
+Temperature
+
+Tool Calls
+
+Messages
+
+LLM Provider
+
+Tokens
+
+Embeddings
+
+Vector Search
+
+RAG
+
+Agents
+
+OTel has no built-in meaning for these.
+
+OpenInference fills this gap.
+
+OpenInference
+
+OpenInference is an open standard for AI observability built on top of OpenTelemetry.
+
+Instead of inventing a completely different system...
+
+It extends OTel.
+
+Think
+
+OpenTelemetry
+
++
+
+LLM vocabulary
+
+=
+
+OpenInference
+Why OpenInference?
+
+Without OpenInference
+
+A prompt could be logged as
+
+field1
+
+field2
+
+message
+
+input
+
+payload
+
+data
+
+Every company invents different names.
+
+Impossible to compare tools.
+
+OpenInference standardizes them.
+
+12. What are Semantic Conventions (semconv)?
+
+This is probably the biggest concept.
+
+Semantic convention means
+
+Standard names for telemetry fields.
+
+Suppose Company A logs
+
+prompt
+
+Company B logs
+
+user_input
+
+Company C logs
+
+question
+
+Same thing.
+
+Different names.
+
+Very messy.
+
+Semantic conventions define
+
+Always call it:
+
+llm.input_messages
+
+(or whatever the agreed standard specifies)
+
+Everyone uses the same names.
+
+Example
+
+Instead of
+
+gpt
+
+openai
+
+model_name
+
+chat_model
+
+
+Use
+
+llm.model_name
+
+Now dashboards work everywhere.
+
+13. OpenInference Semantic Conventions
+
+These conventions define standardized telemetry for AI systems.
+
+Examples include categories such as:
+
+LLM requests and responses
+Chat messages
+Prompts
+Tool calls
+Embedding generation
+Vector database operations
+Retrieval
+Agents
+RAG workflows
+Token usage
+Costs
+Model metadata
+
+This consistency allows observability tools to understand AI-specific operations without custom parsing.
+
+14. Example
+
+Without OpenInference
+
+{
+ "prompt":"hello",
+ "temp":0.7,
+ "model":"gpt4"
+}
+
+Another library
+
+{
+ "question":"hello",
+ "temperature":0.7,
+ "engine":"gpt4"
+}
+
+Impossible to build universal dashboards.
+
+With semantic conventions
+
+model
+
+temperature
+
+prompt
+
+completion
+
+token counts
+
+tool metadata
+
+
+all use the same standardized attribute names.
+
+15. How OpenTelemetry and OpenInference fit together
+                    OpenTelemetry
+
+        Generic Observability Platform
+
+        HTTP
+
+        Database
+
+        Redis
+
+        Kafka
+
+        Metrics
+
+        Traces
+
+        Logs
+
+                ▲
+
+                │
+
+         OpenInference
+
+        AI-specific conventions
+
+        Prompt
+
+        LLM
+
+        Embeddings
+
+        Tool Calls
+
+        Agents
+
+        RAG
+
+        Vector DB
+
+        Tokens
+
+        Cost
+
+OpenInference does not replace OTel.
+
+It extends it.
+
+16. Complete Flow
+
+Suppose a LangGraph agent answers a question.
+
+User
+
+↓
+
+FastAPI
+
+↓
+
+LangGraph
+
+↓
+
+Retriever
+
+↓
+
+Embedding Model
+
+↓
+
+Vector DB
+
+↓
+
+Prompt Builder
+
+↓
+
+OpenAI
+
+↓
+
+Parser
+
+↓
+
+Response
+
+Instrumentation records spans for each step.
+
+OpenInference adds AI-specific attributes (prompt, model, tokens, retrieval details, tool calls, etc.) to those spans.
+
+OTel exports the trace.
+
+The backend (for example, an AI observability platform) visualizes it as
+
+Trace
+
+API
+
+↓
+
+Retriever
+
+↓
+
+Embedding
+
+↓
+
+Vector Search
+
+↓
+
+LLM
+
+↓
+
+Parser
+
+↓
+
+Response
+
+Clicking on the LLM span might reveal:
+
+Model used
+Prompt/messages
+Completion
+Token counts
+Latency
+Estimated cost
+
+Clicking on the retrieval span might show:
+
+Retrieved document IDs
+Similarity scores
+Number of retrieved chunks
+Vector database latency
+17. Where you'll encounter these in Agentic AI
+
+As you build more advanced AI systems, you'll frequently see:
+
+OpenTelemetry (OTel): The foundation that creates and exports traces, metrics, and logs.
+OpenInference: AI-specific instrumentation layered on top of OTel.
+OpenInference semantic conventions (semconv): The agreed-upon field names and structures that make telemetry consistent across AI frameworks and observability platforms.
+
+Many modern AI frameworks and observability tools support these standards because they enable a common language for monitoring complex LLM applications.
+
+telemetry from applications
+
+what is this?
+
+Great question. The phrase "telemetry from applications" sounds more complicated than it actually is.
+
+What is telemetry?
+
+Telemetry is simply information about what your application is doing while it is running.
+
+Think of it as your application's health reports and activity reports.
+
+For example, suppose you have this FastAPI endpoint:
+
+@app.post("/chat")
+def chat():
+    docs = retriever.search(query)
+    answer = llm.invoke(docs)
+    return answer
+
+A user sends:
+
+"What is LangGraph?"
+
+While this request is running, your application produces lots of information.
+
+For example:
+
+Request started
+Retriever searched 5 documents
+Retriever took 230 ms
+Calling GPT-4o...
+Input tokens: 1,250
+Output tokens: 312
+LLM latency: 2.8 seconds
+Request completed successfully
+
+All of this information is telemetry.
+
+What does "telemetry from applications" mean?
+
+It means:
+
+Collecting information about how an application behaves while it is running.
+
+An application could be:
+
+A FastAPI backend
+A Flask app
+A Django website
+A Node.js server
+A Java microservice
+A LangGraph agent
+A RAG pipeline
+Basically any software
+An analogy
+
+Imagine your car.
+
+While you're driving, the dashboard continuously shows:
+
+Speed
+Fuel level
+Engine temperature
+RPM
+Check engine light
+
+These aren't controlling the car.
+
+They're telling you how the car is doing.
+
+That's telemetry.
+
+Your software is exactly the same.
+
+Instead of:
+
+Speed = 80 km/h
+
+it reports things like:
+
+API latency = 420 ms
+
+Instead of:
+
+Fuel = 60%
+
+it reports:
+
+Memory usage = 3.2 GB
+
+Instead of:
+
+Engine temperature
+
+it reports:
+
+CPU usage = 78%
+What kind of telemetry can an application produce?
+
+Here are some common examples:
+
+Telemetry	Example
+Logs	"User logged in"
+Metrics	CPU usage = 45%
+Metrics	150 requests/second
+Metrics	Average response time = 320 ms
+Traces	API → Retriever → LLM → Response
+Errors	Database connection failed
+Warnings	Retry attempt #2
+Token usage	Input: 2,400 tokens
+Cost	$0.0032 for an LLM call
+In an Agentic AI application
+
+Suppose your workflow is:
+
+User
+
+↓
+
+FastAPI
+
+↓
+
+LangGraph
+
+↓
+
+Retriever
+
+↓
+
+Vector DB
+
+↓
+
+LLM
+
+↓
+
+Tool
+
+↓
+
+Response
+
+The telemetry collected might look like:
+
+Request started
+
+↓
+
+Retriever span
+Duration: 180 ms
+
+↓
+
+Vector DB span
+Returned 6 chunks
+
+↓
+
+LLM span
+Model: GPT-4o
+Input tokens: 2,145
+Output tokens: 483
+Latency: 3.4 sec
+
+↓
+
+Tool span
+Weather API called
+Duration: 120 ms
+
+↓
+
+Response returned
+
+Total request time: 3.8 sec
+
+This entire record is telemetry from your application.
+
+Why do we collect telemetry?
+
+Without telemetry, if a user says:
+
+"Your AI is slow."
+
+You have no idea why.
+
+With telemetry, you can immediately see:
+
+Retriever: 120 ms ✅
+
+Vector DB: 90 ms ✅
+
+LLM: 8.4 sec ❌
+
+Tool call: 150 ms ✅
+
+Now you know the bottleneck is the LLM call—not the retriever, vector database, or tool.
+
+One-sentence definition
+
+Telemetry from applications is the collection of data about an application's behavior, performance, health, and execution while it is running, so developers can monitor, debug, and optimize it.
+
+
+Consider the following as metrics to compare LangSmith and Langfuse
+
+Detailed tracing GUI
+Every user request becomes a trace.
+Each trace is broken into separate runs: LLM calls, retriever calls, tools, chains, agents, validators, etc.
+You can inspect the full execution tree/flow.
+Debugging support
+Shows errors, stack traces, failed runs, and where the failure happened.
+Helps identify whether the issue came from retrieval, prompt formatting, tool call, LLM response, parser, or final generation.
+Input/output visibility
+Each run shows its inputs and outputs.
+Useful for checking prompts, retrieved chunks, tool arguments, model responses, and intermediate agent decisions.
+Latency tracking
+Each run has its own time taken.
+Helps find slow steps such as retrievers, LLM calls, tools, or long agent loops.
+Token and cost tracking
+Tracks token usage and cost for traces/runs where supported.
+Useful for production budgeting and identifying expensive chains, prompts, tools, or users.
+Monitoring dashboards
+Graphical dashboards for latency, cost, errors, token usage, feedback scores, and quality metrics.
+Useful for observing production behavior over time.
+Alerts
+Alerts can be configured for metrics like error rate, latency, cost, or feedback thresholds.
+Supports integrations such as webhooks or PagerDuty.
+Evaluations
+Supports offline evals before deployment and online evals on production traffic.
+Can evaluate correctness, helpfulness, relevance, hallucination, retrieval quality, tool usage, etc.
+Datasets
+You can create datasets of inputs and reference outputs.
+Datasets can be versioned, filtered, split, shared, and reused for experiments.
+Custom evaluators
+
+You can use prebuilt evaluators, LLM-as-judge evaluators, human feedback, or your own Python/TypeScript scripts.
+Useful when generic metrics are not enough for your app’s domain.
+
+Prompt testing and prompt management
+
+Prompts can be created, tested, versioned, and evaluated.
+Helpful for comparing prompt versions before pushing changes to production.
+
+Experiment comparison
+
+Compare different models, prompts, retrievers, chunking strategies, tools, or agent architectures.
+Useful for deciding whether a new version is actually better before deployment.
+
+Human feedback and annotation
+
+Production traces can be reviewed and labeled by humans.
+Useful for collecting failure cases and turning them into future evaluation datasets.
+
+Production improvement loop
+
+Real user traces → identify failures → create datasets → run evals → improve prompts/code/retrieval → compare experiments → deploy safer version.
+
+Show less
+
+Synthesized fourteen metrics into comparative table format conversationally
+Synthesized fourteen metrics into comparative table format conversationally
+Here's how LangSmith and Langfuse stack up on each of these 14 dimensions, based on their current (mid-2026) feature sets:
+
+#	Metric	LangSmith	Langfuse
+1	Tracing GUI	Run-tree model tied to LangChain's execution structure — parent run (chain/agent) with child runs for prompt formatting, tool calls, LLM calls, parsers. Tracing is largely automatic for LangChain-based applications, and the UI allows inspection of each run in the tree.	Built on OpenTelemetry, so traces from different systems or frameworks can appear in the same view as spans/generations/events, giving a nested parent-agent → child-tool → LLM-generation view regardless of framework.
+2	Debugging support	Deep for LangChain/LangGraph apps specifically — errors and failed runs are easy to trace to a specific node in the graph.	Framework-agnostic equivalent; since it's span-based, it can also stitch in non-LLM (e.g. backend/microservice) traces via OTEL, which helps when a failure originates outside the LLM call itself.
+3	Input/output visibility	Full input/output capture per run, including token usage, cost, and timing.	Captures inputs/outputs with rich metadata like model parameters, token counts, and cost per generation/span.
+4	Latency tracking	Per-run timing shown in the trace tree; also surfaced in dashboards.	Per-span timing; both platforms are roughly comparable here.
+5	Token/cost tracking	Tracked per run and rolled up into dashboards.	Tracked per generation; both platforms track latency, token usage, cost, and error rates for production monitoring, 
+Laminar
+ at similar maturity.
+6	Monitoring dashboards	Pre-built dashboards auto-generated per project (trace counts, error rates, token usage, costs, tool performance) plus custom dashboards.	Solid dashboards (latency, cost, errors, scores) but generally described as less mature/out-of-the-box than LangSmith's — LangSmith has "a more mature, out-of-the-box monitoring and alerting solution."
+7	Alerts	Native alerting — you define conditions (e.g. >5% error rate over 5 minutes) and get notified via Slack, email, or webhook; hooks into an automation engine; includes an "Insights" section for anomaly detection.	Includes spend alerts with configurable thresholds; 
+Laminar
+ for broader custom alerting, Langfuse currently relies on webhooks or its Metrics API rather than a built-in native alerting UI.
+8	Evaluations	Supports offline evaluation (Datasets in Studio) and online evaluation attached to production traffic, with built-in exact-match, code-based, and LLM-as-judge evaluators. Helicone/Braintrust aside, LangSmith is generally regarded as ahead here for evaluator breadth (30+ evaluator template library covering trajectory evals, safety checks, multimodal outputs per LangChain's own comparison). 
+LangChain
+Offers LLM-as-judge (fully open-source under MIT since June 2025), human annotation, and code-based checks; in May 2026 added Code Evaluators — Python/TypeScript functions written directly in the Langfuse UI for deterministic checks (JSON schema, regex, tool-argument validation) without a judge-model call. 
+Laminar
+ Online deterministic evals specifically were, per one source, still "on the roadmap" rather than GA as of that writing — worth double-checking current docs.
+9	Datasets	Versioned, filterable datasets; direct export/import for migration; supported at Plus/Enterprise tiers.	Also core: "Both give you tracing, evaluation, datasets, and prompt management" as first-class features, with the same versioning/reuse workflow. 
+ZenML
+10	Custom evaluators	Prebuilt + LLM-as-judge + human feedback + custom code; strong template library per LangChain's own materials.	Prebuilt + LLM-as-judge + human feedback + the new Code Evaluators (Python/TS) for deterministic domain-specific checks.
+11	Prompt testing/management	Playground lets you open LLM runs directly from traces and experiment with different prompts/models/parameters while preserving original context; as of April 2026, LangGraph Studio integrates with the Playground so changes can be applied directly back to the agent. Prompt Hub for versioning.	Prompt Management via an "agnostic playground that doesn't lock you into a specific framework's syntax." 
+Qaskills
+ Versioned prompts, but tighter agent-deployment integration is LangSmith's edge.
+12	Experiment comparison	Tagging system lets you label runs by feature, prompt version, or experiment name, then compare traces by tag — combined with datasets, supports systematic regression testing.	Comparable dataset-driven experiment comparisons; less tag-centric UI than LangSmith's, based on available descriptions.
+13	Human feedback/annotation	Annotation Queue for human reviewers to label traces and provide feedback scores. Automation Rules can route low-quality runs to human review, promote high-confidence runs to datasets, or trigger webhooks — annotation queues have routing/priority logic.	Also has annotation queues, but (per LangChain's own comparison, so read with the source's bias in mind) "no routing or assignment logic" is documented — queue management may become more manual as review volume grows.
+14	Production improvement loop	Positioned as covering the "full agent engineering lifecycle" end-to-end — production traces feed automatically into datasets and evals via Automation Rules, closing the loop with less manual glue.	The same loop is achievable, but stitching production traces → dataset → eval → redeploy currently requires more manual/DIY wiring (webhooks, Metrics API) than LangSmith's automation rules, per third-party writeups.
+The bigger-picture split, consistent across independent sources: Langfuse is the leading open-source, self-hostable platform — pick it for data ownership, compliance, framework neutrality, and OpenTelemetry compatibility, with a managed cloud available too. LangSmith is LangChain's hosted platform — pick it for a fully managed, LangChain/LangGraph-native experience where tracing is nearly automatic and the eval-to-deployment loop is tightly integrated. 
+ZenML
+
+On pricing, which often ends up deciding it in practice: Langfuse charges per event/observation (Core plan ~$29/month, unlimited seats) while LangSmith charges per trace with tiered retention (Plus ~$39/seat/month); at scale (around 1M traces/month) Langfuse Cloud runs roughly a third of LangSmith's cost, and self-hosted Langfuse is cheaper still. That said, one important caveat: some of the "LangSmith is ahead on evals/alerting/annotation routing" claims above come from LangChain's own comparison page, so it's worth cross-checking those specific points against Langfuse's current docs if they matter for your decision — vendor-authored comparisons tend to favor the vendor. 
+Leanware
+
+If you want, I can dig deeper into any one row (e.g. pricing at your expected trace volume, or which one integrates more cleanly with your two agent pipelines — LangChain's tool-calling loop vs the LangGraph StateGraph — given the codebase in this project).
+
+
+Currently, I have run logs for each execution/trace in persistent local folder as *.debug.log files. Also, I m using LangSmith now too. However, I dont want my logs to go out of my network. LangSmith does support self-hosting, but it is an Enterprise add-on, and thus expensive. I was suggested the following:
+
+OpenTelemetry
+Langfuse
+Phoenix Assess these on my usecase for student-learning app and give more options
+Show less
+Short answer: Langfuse self-hosted (OSS core) is the default choice for your case. Phoenix if you're eval/experiment-heavy. OTel is not an alternative — it's the transport layer underneath both.
+
+The category error first
+OpenTelemetry is not a competitor to Langfuse/Phoenix. It's a spec + SDK + wire protocol (OTLP). You still need a backend to receive, store, and render traces. So the real decision is:
+
+Instrumentation: OTel GenAI semconv (vendor-neutral) vs. a vendor SDK
+Backend: Langfuse / Phoenix / Jaeger / Grafana Tempo / SigNoz / Datadog
+The strategic move is: instrument once with OTel, keep the backend swappable. Both Langfuse and Phoenix accept OTLP. That means you never repeat the migration you're doing right now.
+
+Caveat from production: OTel's GenAI semantic conventions are still churning. Attribute names (gen_ai.prompt vs gen_ai.input.messages, etc.) have moved multiple times. If you go pure-OTel, pin your semconv version and expect a breaking rename per year. Vendor SDKs shield you from this at the cost of lock-in.
+
+The three, on your constraints (self-hosted, no data egress, student-learning app, presumably small team + tight budget)
+Langfuse
+License: MIT core. Self-host is genuinely free — not a crippled tier. Enterprise gate is on SSO enforcement, RBAC granularity, audit logs, data retention policies. For a student app, none of that matters day one.
+Deploy: Docker Compose gets you running in ~10 min. Prod stack is Postgres + ClickHouse + Redis + S3-compatible blob store (MinIO). That ClickHouse dependency is real operational weight — it landed in v3 for ingestion scale. If you're a solo dev, this is the sharpest edge.
+Strength: Production observability. Sessions, users, cost tracking, prompt management with versioning + deploy labels, LLM-as-judge evals, human annotation queues. The prompt management piece is the sleeper feature for your use case — you'll be iterating on tutoring prompts constantly, and shipping prompt changes without redeploying the app is a real quality-of-life win.
+Weakness: Trace UI is good but not as sharp as Phoenix's for deep debugging. Self-host upgrade path has historically been bumpy across major versions (v2 → v3 ClickHouse migration bit people; check the GitHub issues).
+OTel: First-class OTLP endpoint. Native @observe() decorator for Python, plus OpenTelemetry ingest.
+Phoenix (Arize)
+License: Apache 2.0 (Phoenix), ELv2 for some Arize bits. Free self-host.
+Deploy: Meaningfully lighter. pip install arize-phoenix and run — SQLite for dev, Postgres for prod. No ClickHouse. This is a genuine advantage if you're one person and don't want to babysit an OLAP store.
+Strength: It's OTel-native by architecture — built on OpenInference semconv, which is itself an OTel convention. Evals library is excellent and well-benchmarked. Best-in-class for the experimentation loop: dataset → run → eval → compare. Embedding/retrieval analysis (UMAP drift, cluster inspection) is unique and directly relevant if you're doing RAG over course material.
+Weakness: Weaker on the production-ops side. Cost tracking is thinner. No prompt management to speak of. The nudge toward Arize AX (paid cloud) exists for anything at scale.
+OpenTelemetry + generic backend (Jaeger / Tempo / SigNoz)
+Only if you already run an observability stack and want LLM traces to live next to your HTTP spans, DB spans, and infra metrics. Correlating a slow tutoring response to a slow Postgres query in one trace view is genuinely valuable.
+But: Jaeger will show you a span tree. It will not render a chat conversation, diff two prompt versions, compute token cost, or run an eval. You lose the entire domain-specific layer. Don't do this as a primary LLM observability solution.
+Options you weren't given
+Tool	License	Take
+SigNoz	MIT, self-host	Full OTel-native APM (traces + metrics + logs) with LLM support. If you want one backend for everything and accept a weaker LLM UX. ClickHouse-backed.
+Openlit	Apache 2.0	OTel-native, very lightweight, includes GPU metrics. Smaller community, thinner UI.
+Traceloop OpenLLMetry	Apache 2.0	Pure instrumentation library, not a backend. Emits standard OTel → ship to anything. This is the strongest "avoid lock-in forever" instrumentation choice. Pair it with Langfuse or Phoenix.
+Helicone	Apache 2.0	Proxy-based (sits in front of provider API). Zero code change. But: proxy on the request path = new SPOF and added latency. Good for cost/caching, weak for deep agent traces.
+Laminar	Apache 2.0	Rust backend, OTel-native, fast. Newer, smaller ecosystem.
+LangWatch	OSS core	Strong eval + guardrails story. Less mature.
+DIY: OTLP → ClickHouse + Grafana	—	You have the ops budget of ~0.5 FTE forever. Don't.
+What I'd actually build
+Given student-learning app, on-prem/no-egress requirement, likely small team:
+
+App
+ └─ OpenLLMetry / OpenInference instrumentation (OTel semconv)
+      └─ OTLP exporter
+           └─ OTel Collector  ← PII redaction processor here
+                ├─ Langfuse (LLM observability, primary)
+                └─ [optional] Tempo/Jaeger (infra correlation)
+Why the Collector in the middle, non-negotiable for your domain: you're processing student data. FERPA/COPPA/GDPR territory. The Collector is where you run a transform or redaction processor to strip PII from prompt payloads before it hits any storage. Doing this in app code means every new call site is a leak waiting to happen. Doing it at the Collector means one enforcement point.
+
+This is the single most important architectural point in your whole setup, and none of the three tools you were suggested makes it obvious. Instrument → Collector → backend. Not app → backend directly.
+
+Second reason for the Collector: fan-out and swap. You can run Langfuse and Phoenix in parallel for two weeks, decide, and kill one. Zero app changes.
+
+On your existing *.debug.log files
+Don't throw them away and don't keep them as the source of truth. Two things:
+
+They're your fallback. Tracing backends go down. Traces get dropped (OTel batch processors drop on backpressure by design — queue_size exceeded → span dropped, silently). A structured JSONL log on local disk is a durable, boring, always-works record. Keep writing it.
+Migrate the format, not the practice. Move from freeform .debug.log to structured JSONL where each line carries trace_id and span_id from the active OTel context. Now your logs and your traces join. When something goes wrong at 2am, you grep the log, pull the trace_id, and paste it into Langfuse. This is the pattern every mature observability setup converges on and almost nobody sets up on day one.
+python
+# rough shape
+from opentelemetry import trace
+ctx = trace.get_current_span().get_span_context()
+log.info(json.dumps({
+    "trace_id": format(ctx.trace_id, "032x"),
+    "span_id": format(ctx.span_id, "016x"),
+    "event": "retrieval_complete",
+    "n_docs": len(docs),
+}))
+Tradeoff that will actually bite you
+Sampling. A student-learning app has bursty load (everyone opens the app at 8pm). LLM traces are fat — full prompt + full completion + retrieved chunks. A single RAG trace can be 50–200KB. At scale, storage cost is not the LLM API cost, but it's not nothing, and ClickHouse ingestion is where Langfuse v2 users hit walls.
+
+Do not use head-based sampling (traceidratio). You'll sample away exactly the pathological traces you need. Use tail-based sampling in the Collector: keep 100% of errors, 100% of high-latency, 100% of low-eval-score, and ~5% of the boring successful ones. This is a Collector tail_sampling processor. It requires all spans for a trace to hit the same Collector instance, so if you scale to multiple Collectors you need a load-balancing exporter in front, keyed on trace_id. That's the gotcha nobody mentions until you've already scaled out.
+
+Decision
+You want production observability, cost tracking, prompt iteration, and you can run 4 containers → Langfuse.
+You are solo, want minimal ops, and your main pain is "is my RAG retrieving the right chunks and are my answers good" → Phoenix.
+Either way: instrument with OTel semconv, route through a Collector, keep the JSONL logs correlated by trace_id.
+Start with Phoenix if you want to be running in an hour. Move to Langfuse when you need prompt versioning and per-student cost attribution. The Collector makes that move cost you a config file, not a sprint.
+
+
+excerpt_from_previous_claude_message.txt
+1 line
+
+txt
+
+Answer briefly
+what is this?
+
+"OTel-native APM" — Application Performance Monitoring built directly on OpenTelemetry rather than a proprietary agent/wire format.
+
+It means the tool ingests OTLP as its primary path, stores standard OTel data (traces/metrics/logs, resource + span attributes as-is), and doesn't require a vendor-specific SDK. Practically: you instrument once, and swapping the backend is a config change rather than a reinstrumentation.
+
+That was in reference to SigNoz — contrast with Datadog or New Relic, which accept OTLP but are built around their own agents and internal data models, so you inherit lock-in anyway.
+
+
+excerpt_from_previous_claude_message.txt
+17 lines
+
+txt
+
+From the selected, how do they perform on the following metrics:
+
+Detailed tracing GUI
+Every user request becomes a trace.
+Each trace is broken into separate runs: LLM calls, retriever calls, tools, chains, agents, validators, etc.
+You can inspect the full execution tree/flow.
+Debugging support
+Shows errors, stack traces, failed runs, and where the failure happened.
+Helps identify whether the issue came from retrieval, prompt formatting, tool call, LLM response, parser, or final generation.
+Input/output visibility
+Each run shows its inputs and outputs.
+Useful for checking prompts, retrieved chunks, tool arguments, model responses, and intermediate agent decisions.
+Latency tracking
+Each run has its own time taken.
+Helps find slow steps such as retrievers, LLM calls, tools, or long agent loops.
+Token and cost tracking
+Tracks token usage and cost for traces/runs where supported.
+Useful for production budgeting and identifying expensive chains, prompts, tools, or users.
+Monitoring dashboards
+Graphical dashboards for latency, cost, errors, token usage, feedback scores, and quality metrics.
+Useful for observing production behavior over time.
+Alerts
+Alerts can be configured for metrics like error rate, latency, cost, or feedback thresholds.
+Supports integrations such as webhooks or PagerDuty.
+Evaluations
+Supports offline evals before deployment and online evals on production traffic.
+Can evaluate correctness, helpfulness, relevance, hallucination, retrieval quality, tool usage, etc.
+Datasets
+You can create datasets of inputs and reference outputs.
+Datasets can be versioned, filtered, split, shared, and reused for experiments.
+Custom evaluators
+
+You can use prebuilt evaluators, LLM-as-judge evaluators, human feedback, or your own Python/TypeScript scripts.
+Useful when generic metrics are not enough for your app’s domain.
+
+Prompt testing and prompt management
+
+Prompts can be created, tested, versioned, and evaluated.
+Helpful for comparing prompt versions before pushing changes to production.
+
+Experiment comparison
+
+Compare different models, prompts, retrievers, chunking strategies, tools, or agent architectures.
+Useful for deciding whether a new version is actually better before deployment.
+
+Human feedback and annotation
+
+Production traces can be reviewed and labeled by humans.
+Useful for collecting failure cases and turning them into future evaluation datasets.
+
+Production improvement loop
+
+Real user traces → identify failures → create datasets → run evals → improve prompts/code/retrieval → compare experiments → deploy safer version.
+
+Show more
+
+Architected comprehensive comparison across observability platforms
+Architected comprehensive comparison across observability platforms
+Scoping this to the tools where the answer is actually differentiated — Langfuse, Phoenix, SigNoz get full ratings. Traceloop, Helicone, Openlit, Laminar, LangWatch get short verdicts because most of these categories don't apply to them by design (Traceloop isn't a backend; Helicone is proxy-scoped; the others are thinner on eval/dataset tooling).
+
+Scale: ✅ strong · 🟡 partial/basic · ❌ absent
+
+#	Metric	Langfuse	Phoenix	SigNoz
+1	Detailed tracing GUI (nested tree)	✅ full nested tree, per-run typing (llm/retriever/tool/chain)	✅ full nested tree, same granularity, arguably cleaner for agent loops	🟡 span tree is generic APM-style; LLM-specific run typing is weaker
+2	Debugging support (errors, failure localization)	✅ error status per span, stack trace capture, filter by error	✅ same, plus strong visual diffing across a run	🟡 good for infra errors; LLM-semantic failure ("bad retrieval" vs "bad prompt") not distinguished automatically
+3	I/O visibility per run	✅ full prompt/completion/tool-args/retrieved chunks	✅ same, plus embedding/cluster view for retrieval	🟡 shows raw span attributes; not rendered as chat/prompt UI
+4	Latency per run	✅	✅	✅ — this is APM's core strength, arguably best here
+5	Token/cost tracking	✅ strong — per-trace, per-user, per-model cost	🟡 present, thinner breakdown, less cost-attribution tooling	🟡 possible via custom metrics/attributes, not native
+6	Monitoring dashboards	✅ built-in dashboards (cost, latency, scores, volume)	🟡 basic; dashboards weaker than Langfuse's	✅ this is SigNoz's home turf — full APM dashboarding
+7	Alerts (error rate, latency, cost, webhooks/PagerDuty)	🟡 basic alerting; maturing, not as rich as APM tools	❌ minimal/no native alerting	✅ full alert manager, PagerDuty/Slack/webhook native
+8	Evaluations (offline + online)	✅ both, native LLM-as-judge, running evals on live traces	✅ both — Phoenix's evals library is best-in-class here	❌ no LLM eval framework
+9	Datasets (versioned, filterable, reusable)	✅ built-in dataset objects, versioning, linked to experiments	✅ built-in, strong integration with experiment runs	❌ not a concept in SigNoz
+10	Custom evaluators (prebuilt, LLM-judge, human, code)	✅ all four types supported	✅ all four types supported, plus strongest code-eval ergonomics	❌ none
+11	Prompt testing/versioning/management	✅ strong — dedicated prompt registry, versions, deploy labels	🟡 exists but thinner, no first-class prompt "deploy" workflow	❌ none
+12	Experiment comparison (models/prompts/retrievers)	✅ good, tied to datasets	✅ this is Phoenix's headline feature — side-by-side experiment runs	❌ none
+13	Human feedback/annotation	✅ annotation queues, scores, review workflow	✅ annotation UI present, slightly less workflow-mature	❌ none
+14	Production improvement loop (trace→dataset→eval→deploy)	✅ fully closed loop, this is the product's design center	✅ fully closed loop, arguably tighter for the eval-iteration part specifically	❌ no loop — you'd have to bolt this on with something else
+Reading the pattern: Langfuse and Phoenix are near-identical on 1–4 (both are OTel-native LLM tools, so the tracing/debugging/IO/latency layer converges). They diverge on 5–14 — the "LLM product lifecycle" layer. Langfuse leans production-ops (cost, prompt management, alerting maturity). Phoenix leans experimentation (evals, dataset/experiment comparison, embedding analysis). SigNoz is strong exactly where 1–7 overlap with generic APM and essentially absent from 8–14 — it has no concept of evals, datasets, or prompts at all. That's the tradeoff from my earlier answer made concrete: SigNoz buys you unified infra observability and real alerting, at the cost of the entire LLM-specific improvement loop.
+
+Quick verdicts on the rest, since they don't warrant a full row each:
+
+Traceloop (OpenLLMetry): N/A across the board — it's instrumentation only, not a UI/backend. It feeds 1–5 data into whatever backend you point it at.
+Helicone: ✅ on 4/5 (latency, cost — this is its strength as a proxy), 🟡 on 1/2/3 (trace tree exists but shallower than agent-native tools since it sees the API call, not your internal agent structure), ❌ on 8–14 (no eval/dataset/experiment framework).
+Openlit: 🟡 on 1–5 (functional, thinner UI), 🟡 on 6 (basic dashboards), ❌ on 7–14 (no eval/dataset/prompt tooling; adds GPU/hardware metrics Langfuse/Phoenix don't have).
+Laminar: 🟡–✅ on 1–5 (solid, fast, smaller ecosystem so fewer integrations), 🟡 on 8/9/12 (evals and datasets exist but less mature/documented), 🟡 on 11 (prompt management present).
+LangWatch: ✅ on 7/8 (alerts and guardrails/evals are its actual strength), 🟡 elsewhere — less mature tracing depth than Langfuse/Phoenix.
+For your case specifically (student-learning app, need 8–14 for iterating on tutoring quality, need 5–6 for budget-watching a cost-sensitive app, don't need 7's PagerDuty-grade alerting on day one): Langfuse or Phoenix both clear the bar; SigNoz alone would leave you blind on the entire second half of this list.
+
+
+
+Currently, I have run logs for each execution/trace in persistent local folder as *.debug.log files. Also, I m using LangSmith now too. However, I dont want my logs to go out of my network. LangSmith does support self-hosting, but it is an Enterprise add-on, and thus expensive. 
+
+Compare both:
+https://langfuse.com/self-hosting
+https://arize.com/docs/phoenix/self-hosting/deployment-options/docker
+
+Which one would be the best for my project. Consider the markdown files in the project files before answering.
+
+
+Weighed Langfuse versus Phoenix for self-hosted observability within network constraints
+Weighed Langfuse versus Phoenix for self-hosted observability within network constraints
+Both are fully open-source and self-hostable with no data leaving your network, but they solve different halves of the problem you actually have — worth looking at through the lens of your two-pipeline architecture rather than in the abstract.
+
+Infra footprint
+Langfuse (self-host)	Arize Phoenix (self-host)
+Required components	Web + Worker containers, Postgres (transactional), Clickhouse (traces/OLAP), Redis/Valkey (queue+cache), S3/blob store	Single container; SQLite by default, Postgres optional
+Minimal setup	Docker Compose "low-scale" mode exists but still pulls in the above stack	docker run -p 6006:6006 -p 4317:4317 arizephoenix/phoenix — literally two commands
+License gating	Core tracing/evals/datasets are open-source; SSO, UI customization, org-creator controls, and the Instance Management API are Enterprise-key-gated	No self-host feature paywall at all — Arize's paid product is a separate hosted "Arize AX," not a gate on the OSS server
+For a solo, local, single-user setup (which is what your README.md/Architecture.md describe — one MongoDB instance, one vector store, no multi-tenant/SSO need), Langfuse's Clickhouse+S3+Redis+Postgres stack is real operational weight for a benefit (HA, horizontal scale) you don't need yet. Phoenix's single-container model matches your project's actual scale much better — you're already running MongoDB + ChromaDB locally; adding a 4-service Langfuse stack on top is a heavier lift than adding one more container.
+
+Fit to your architecture specifically
+Your Architecture.md describes things that map unevenly onto each tool:
+
+Two independent pipelines, same store (app/ hand-rolled state machine vs app_workflow/ ~30-node LangGraph graph) — Langfuse has first-class LangChain and LangGraph callback-handler integrations, and its trace/session model (nested spans, named "generations" per LLM role) maps directly onto your llm / merge_llm / judge_llm / json_fix_llm role separation and your existing request_id tracing (_RequestIdFilter, ContextVar). You'd essentially get what timing_tracker.py + logger_config.py do by hand, for free, with a UI.
+Two-track retrieval + NAC/DC/LBC compression + validators — this is where Phoenix is unusually strong, since it grew out of embedding/RAG debugging: retrieval relevance visualization, embedding projections, and eval templates built specifically for retrieval-quality problems (the kind your validate_retrieval/BUG-035 minority-verdict issue is exactly about).
+Custom OpenAI-compatible endpoint (CUSTOM_API_BASE, your July 8 consolidation) — both tools support arbitrary OTLP/OpenAI-shaped tracing, so no real difference here.
+Recommendation
+Given your emphasis on avoiding Enterprise cost and keeping things simple to run locally, Arize Phoenix is the better fit to start with: zero feature-gating, one container, and its retrieval/eval tooling lines up with the exact problems your Architecture.md "Known Gaps" section flags (BUG-031 truncated judge context, BUG-035 verdict-vs-per-chunk mismatch) more directly than Langfuse's general-purpose tracing does.
+
+If, once you're using it, you find you want richer nested-trace replay across your two agent implementations, prompt-version management (which could subsume your hand-rolled prompts.py), or dataset-based regression testing across pipeline changes — Langfuse's LangGraph-native integration is worth the heavier ops cost. But that's a step up you can take later; it's not something you need on day one, and the free tier of self-hosted Langfuse doesn't remove that infra weight even though it removes the license cost.
+
+One practical note either way: since you're already writing structured .debug.log + .json timing files, both tools are additive, not a replacement — you'd keep your local file logs as the durable source of truth and point OTLP/callback traces at whichever tool for the UI/analysis layer.
+
+
+
+
+Can i view logger's ((module) logging  Logging package for Python. Based on PEP 282 and comments thereto in comp.lang.python.) in LangSmith and Phoenix?
+Bash Check for graphify knowledge graph output
+IN
+ls graphify-out 2>/dev/null && echo "---" && git log --oneline -5
+
+OUT
+GRAPH_REPORT.md
+cache
+cost.json
+graph.html
+graph.json
+manifest.json
+---
+24cd3f6 Phoenix and LangSmith added
+797009f Execution Time Comparison Completed
+16e99b8 update readme
+d423124 Execution Time file complete
+c4fde06 Removed tool from query variant generation and made changes according to it; Execution Time Check Runs
+Grep "langsmith|phoenix|logging"
+61 lines of output
+Bash Query graphify knowledge graph for logger concept
+IN
+graphify explain "logger" 2>&1 | head -100
+
+OUT
+Node: logger_config.py
+  ID:        app_logger_config
+  Source:    app/logger_config.py L1
+  Type:      code
+  Community: 10
+  Degree:    7
+
+Connections (7):
+  --> setup_logging() [contains] [EXTRACTED]
+  <-- run_combinations.py [imports_from] [EXTRACTED]
+  --> _DynamicStdoutHandler [contains] [EXTRACTED]
+  --> _RequestIdFilter [contains] [EXTRACTED]
+  --> get_request_id() [contains] [EXTRACTED]
+  --> set_request_id() [contains] [EXTRACTED]
+  <-- Central logging configuration for the RAG application. [rationale_for] [EXTRACTED]
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\phoenix_tracing.py
+Grep "langsmith|LANGCHAIN_TRACING|LANGSMITH"
+18 lines of output
+Grep "LANGCHAIN_TRACING|LANGSMITH_API|LANGCHAIN_API|LANGSMITH_TRACING|LANGCHAIN_PROJECT"
+1 line of output
+Bash Look for .env files that might configure LangSmith tracing
+IN
+find . -iname "*.env*" -not -path "*/node_modules/*" -not -path "*/.git/*" 2>/dev/null
+
+OUT
+./.env
+Bash Check .env for LangSmith/Phoenix config keys (not values)
+IN
+grep -iE "LANGCHAIN|LANGSMITH|PHOENIX" .env 2>/dev/null || grep -i "langchain\|langsmith\|phoenix" .env
+
+OUT
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_ENDPOINT='https://api.smith.langchain.com'
+LANGCHAIN_API_KEY='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'
+LANGCHAIN_PROJECT='rag-test3'
+PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
+PHOENIX_PROJECT_NAME=rag-test3
+Bash Check whether .env is gitignored and never committed
+Reason: its in .gitignore
+IN
+git check-ignore -v .env; echo "exit:$?"; git log --all --oneline -- .env | head -5
+
+Short answer: no, not directly — the stdlib logging output from logger_config.py (and its app/logger_config.py counterpart) is a separate channel from what LangSmith/Phoenix show.
+
+What each system actually captures:
+
+logger_config.py wires up plain Python logging: a console handler and a per-run .debug.log file under run_logs/, tagged with request_id. This is just text logs on disk/stdout — nothing forwards these LogRecords anywhere else.
+LangSmith — enabled via .env (LANGCHAIN_TRACING_V2=true, LANGCHAIN_PROJECT='rag-test3'). It hooks into LangChain's callback system and captures traces (chains/LLM calls/tool calls as structured runs), not your logging module output.
+Phoenix — set up in phoenix_tracing.py via LangChainInstrumentor().instrument() (OpenInference/OTel). Same idea: it auto-instruments LangChain to emit OpenTelemetry spans, sent to the local collector at localhost:4317. Also not logging records.
+So the two systems trace LangChain execution (prompts, LLM calls, retrievals, latencies), while your logger_config produces separate human-readable log files. They run in parallel and aren't connected — a message you log with logging.info(...) won't show up as a LangSmith run or a Phoenix span, and vice versa.
+
+If you want log records inside LangSmith/Phoenix, the standard way is to attach them as span attributes/events on the current trace (e.g. call logging.getLogger().addHandler(...) with a custom handler that does opentelemetry.trace.get_current_span().add_event(...) for Phoenix, or use LangSmith's run_tree to add tags/metadata) — that's not implemented here currently. Want me to add that?
+
+One separate note: your .env has a live LANGCHAIN_API_KEY in it — you confirmed it's gitignored, so that's fine, just flagging in case it wasn't intentional to leave a real key there.
+
+c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+I want the logs to be in the LangSmith and the Phoenix. So modify the @app_workflow/services/logger_config.py file
+Bash Inspect installed langsmith SDK API for run tree event/log methods
+IN
+python -c "import langsmith; print(langsmith.__file__)" 2>&1
+python -c "from langsmith.run_helpers import get_current_run_tree; print('ok')" 2>&1
+python -c "from langsmith.run_trees import RunTree; print([m for m in dir(RunTree) if not m.startswith('_')])" 2>&1
+
+OUT
+C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langsmith\__init__.py
+ok
+['add_event', 'add_inputs', 'add_metadata', 'add_outputs', 'add_tags', 'client', 'construct', 'copy', 'create_child', 'dict', 'end', 'ensure_dotted_order', 'from_dotted_order', 'from_headers', 'from_orm', 'from_runnable_config', 'get_url', 'infer_defaults', 'json', 'latency', 'metadata', 'model_computed_fields', 'model_config', 'model_construct', 'model_copy', 'model_dump', 'model_dump_json', 'model_extra', 'model_fields', 'model_fields_set', 'model_json_schema', 'model_parametrized_name', 'model_post_init', 'model_rebuild', 'model_validate', 'model_validate_json', 'model_validate_strings', 'parse_file', 'parse_obj', 'parse_raw', 'patch', 'post', 'revision_id', 'schema', 'schema_json', 'set', 'to_headers', 'trace_start_time', 'update_forward_refs', 'validate', 'wait']
+Bash Inspect OpenTelemetry Span API for adding events
+IN
+python -c "import opentelemetry.trace as t; print([m for m in dir(t.Span) if not m.startswith('_')])" 2>&1
+
+OUT
+['add_event', 'add_link', 'end', 'get_span_context', 'is_recording', 'record_exception', 'set_attribute', 'set_attributes', 'set_status', 'update_name']
+Bash Check RunTree.add_event signature and source
+IN
+python -c "
+from langsmith.run_trees import RunTree
+import inspect
+print(inspect.signature(RunTree.add_event))
+print(inspect.getsource(RunTree.add_event))
+" 2>&1
+
+OUT
+(self, events: 'Union[ls_schemas.RunEvent, Sequence[ls_schemas.RunEvent], Sequence[dict], dict, str]') -> 'None'
+    def add_event(
+        self,
+        events: Union[
+            ls_schemas.RunEvent,
+            Sequence[ls_schemas.RunEvent],
+            Sequence[dict],
+            dict,
+            str,
+        ],
+    ) -> None:
+        """Add an event to the list of events.
+
+        Args:
+            events: The event(s) to be added. It can be a single event, a sequence
+                of events, a sequence of dictionaries, a dictionary, or a string.
+
+        Returns:
+            None
+        """
+        if self.events is None:
+            self.events = []
+        if isinstance(events, dict):
+            self.events.append(events)  # type: ignore[arg-type]
+        elif isinstance(events, str):
+            self.events.append(
+                {
+                    "name": "event",
+                    "time": datetime.now(timezone.utc).isoformat(),
+                    "message": events,
+                }
+            )
+        else:
+            self.events.extend(events)  # type: ignore[arg-type]
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+Now I'll add a handler that mirrors each log record onto the active LangSmith run (via add_event) and the active Phoenix/OTel span (via add_event) — attaching only when a trace is actually in progress, so it's a no-op otherwise.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+Modified
+That's expected — timezone gets used in the next edit when I add the tracing handler.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+Added 45 lines
+Now wiring it into setup_logging.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+Added 5 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+Added 1 line
+Let me verify the final file and sanity-check it imports/runs cleanly.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+Bash Sanity-check logger_config.py loads and logs without an active trace
+IN
+python -c "
+import sys
+sys.path.insert(0, '.')
+from app_workflow.services.logger_config import setup_logging
+import logging
+setup_logging(log_dir='.scratch_test_logs', app_name='test')
+logging.getLogger('demo').info('hello world, no active trace')
+print('OK - no crash')
+"
+
+OUT
+2026-07-09 18:18:24 | INFO     | [-] | hello world, no active trace
+OK - no crash
+Bash Remove test log directory created during sanity check
+IN
+rm -rf .scratch_test_logs
+
+OUT
+(Bash completed with no output)
+Sanity-checked: it loads and logs without crashing when there's no active trace (both mirrors just no-op, as designed).
+
+What changed in logger_config.py:
+
+Added _TracingHandler, a third handler attached to the root logger alongside the console/file handlers.
+On each log record it tries two things, independently and safely:
+LangSmith: langsmith.run_helpers.get_current_run_tree() — if a LangChain run is active (i.e. you're inside a traced chain/tool call with LANGCHAIN_TRACING_V2=true), the log message gets attached as an event on that run, visible in the LangSmith UI's run detail view.
+Phoenix: opentelemetry.trace.get_current_span() — if a span is currently recording (set up via setup_phoenix_tracing()), the log message is added as a span event with log.level/log.logger/log.request_id attributes, visible in Phoenix's trace/span detail view.
+Both are wrapped in try/except: pass so logging never breaks if tracing isn't running, isn't installed, or errors out — this handler is purely additive to your existing console + debug-file logging, which is untouched.
+Important caveat: this only attaches logs to a trace that's already active — i.e. code running inside something LangChain/Phoenix is instrumenting (a chain invocation, a traced tool call). A log statement fired outside any traced call (e.g. at module import time, or in a background thread with no span/run context) won't show up anywhere new — that's inherent to how both platforms scope logs to a run/span, not something this handler can work around.
+
+c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+I  cant see any such thing in neither langsmith nor phoenix
+Grep "setup_phoenix_tracing|setup_logging|LangChainInstrumentor|register\("
+32 lines of output
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\main.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\api.py
+Grep "load_dotenv|dotenv"
+34 lines of output
+Bash Check how api.py / main.py are actually run
+IN
+grep -rn "uvicorn\|__main__" app_workflow/api.py app_workflow/main.py 2>/dev/null | head -20
+
+OUT
+app_workflow/api.py:14:# imports work correctly regardless of how uvicorn is invoked.
+app_workflow/api.py:190:if __name__ == "__main__":
+app_workflow/api.py:191:    import uvicorn
+app_workflow/api.py:193:    uvicorn.run("api:app", host="0.0.0.0", port=8001, reload=False)
+Bash Test whether get_current_run_tree() detects an active run inside a synchronous LangChain Runnable when tracing is enabled
+IN
+python -c "
+import os
+os.environ['LANGCHAIN_TRACING_V2'] = 'true'
+os.environ['LANGCHAIN_API_KEY'] = 'dummy-key-for-local-test'
+os.environ['LANGCHAIN_PROJECT'] = 'test-project'
+
+from langchain_core.runnables import RunnableLambda
+from langsmith.run_helpers import get_current_run_tree
+
+def inner(x):
+    rt = get_current_run_tree()
+    print('inside sync RunnableLambda, run_tree =', rt)
+    return x
+
+r = RunnableLambda(inner)
+try:
+    r.invoke('hi')
+except Exception as e:
+    print('invoke error (network expected):', type(e).__name__, str(e)[:200])
+" 2>&1 | grep -v "^Traceback\|^  File\|^requests\|^urllib3\|HTTPError\|ConnectionError" 
+
+OUT
+inside sync RunnableLambda, run_tree = id=UUID('019f4715-232e-7143-b4a8-63dfed894952') name='inner' start_time=datetime.datetime(2026, 7, 9, 13, 33, 15, 438740, tzinfo=datetime.timezone.utc) run_type='chain' end_time=None extra={'runtime': {'library_version': '1.3.0', 'library': 'langchain-core', 'platform': 'Windows-11-10.0.26200-SP0', 'runtime': 'python', 'runtime_version': '3.14.2'}} error=None serialized=None events=[{'name': 'start', 'time': datetime.datetime(2026, 7, 9, 13, 33, 15, 438740, tzinfo=datetime.timezone.utc)}] inputs={'input': 'hi'} outputs={} reference_example_id=None parent_run_id=None tags=[] attachments={} parent_run=None parent_dotted_order=None child_runs=[] session_name='test-project' session_id=None ls_client=Client (API URL: https://api.smith.langchain.com) dotted_order='20260709T133315438740Z019f4715-232e-7143-b4a8-63dfed894952' trace_id=UUID('019f4715-232e-7143-b4a8-63dfed894952') dangerously_allow_filesystem=False replicas=[]
+Before digging further, I need to know exactly what's failing — two different problems would look the same to you ("nothing shows up") but need different fixes. Let me check a couple of things first.
+
+Bash Confirm whether main.py (CLI entry point) initializes Phoenix tracing
+IN
+grep -n "setup_phoenix_tracing\|setup_logging" app_workflow/main.py
+
+OUT
+9:from services.logger_config import setup_logging
+15:setup_logging(log_dir=_log_dir, app_name="rag_langgraph")
+Found one confirmed gap: main.py (the interactive CLI entry point) never calls setup_phoenix_tracing() — only api.py does. If you're running the CLI (python app_workflow/main.py), Phoenix was never initialized at all, so no span is ever recording — my handler's is_recording() check would always be False there, regardless of the logging change. That's unrelated to today's edit; it's a pre-existing gap.
+
+AskUserQuestion
+OUT
+Your questions have been answered: "Two different things could be happening. First: which entry point are you running when you check LangSmith/Phoenix?"="app_workflow/main.py (CLI)", "Second: are you seeing normal LLM/chain traces at all in LangSmith and Phoenix (separate from log messages), or is nothing showing up whatsoever?"="Traces show up fine, only log events are missing". You can now continue with these answers in mind.
+Bash Check the mix of log levels used across node files
+IN
+grep -rn "logger\.\(debug\|info\|warning\|error\)" app_workflow/nodes/*.py | sed -E 's/.*(logger\.[a-z]+).*/\1/' | sort | uniq -c | sort -rn
+
+OUT
+     67 logger.debug
+     35 logger.info
+     21 logger.warning
+      4 logger.error
+Bash Check installed LangGraph version and location
+IN
+python -c "import langgraph; print(langgraph.__version__)" 2>&1
+python - <<'EOF'
+import subprocess
+import importlib.util
+spec = importlib.util.find_spec("langgraph")
+print(spec.submodule_search_locations)
+EOF
+
+OUT
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import langgraph; print(langgraph.__version__)
+                            ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'langgraph' has no attribute '__version__'
+_NamespacePath(['C:\\Users\\LOQ\\Desktop\\Projects\\RAG-work\\.venv\\Lib\\site-packages\\langgraph'])
+Bash Search LangGraph internals for context propagation across executor threads
+IN
+grep -rn "copy_context\|ThreadPoolExecutor\|contextvars" .venv/Lib/site-packages/langgraph/pregel/*.py 2>/dev/null | head -30
+echo "---executors---"
+find .venv/Lib/site-packages/langgraph -iname "*executor*" 2>/dev/null
+
+OUT
+.venv/Lib/site-packages/langgraph/pregel/_executor.py:8:from contextvars import copy_context
+.venv/Lib/site-packages/langgraph/pregel/_executor.py:64:        ctx = copy_context()
+.venv/Lib/site-packages/langgraph/pregel/_executor.py:164:                context=copy_context(),
+---executors---
+.venv/Lib/site-packages/langgraph/prebuilt/chat_agent_executor.py
+.venv/Lib/site-packages/langgraph/pregel/_executor.py
+.venv/Lib/site-packages/langgraph/pregel/__pycache__/_executor.cpython-314.pyc
+Grep "phoenix|opentelemetry|OTEL_" (glob: *.py)
+4 lines of output
+I found two concrete, verifiable bugs (not guesses) — one explains why Phoenix specifically would show nothing for CLI runs, the other explains why most log messages never reach either platform even when tracing is active:
+
+main.py never initializes Phoenix. Only api.py calls setup_phoenix_tracing(). Running the CLI means no OTel provider is ever registered, so get_current_span().is_recording() is always False there.
+The tracing handler filters out DEBUG logs. logger_config.py:125 sets tracing_handler.setLevel(console_level), which defaults to INFO. I checked your node files — 67 of 127 log calls (grep -rn "logger\." app_workflow/nodes/*.py) are logger.debug(...), so the majority of what you'd actually want to see traced is silently dropped before it ever reaches LangSmith/Phoenix.
+Fixing both now.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\main.py
+Added 2 lines
+Bash Syntax-check the edited files
+IN
+cd app_workflow && python -c "
+import ast
+ast.parse(open('main.py', encoding='utf-8').read())
+print('main.py: syntax OK')
+ast.parse(open('services/logger_config.py', encoding='utf-8').read())
+print('logger_config.py: syntax OK')
+"
+
+OUT
+main.py: syntax OK
+logger_config.py: syntax OK
+Fixed:
+
+app_workflow/main.py — now calls setup_phoenix_tracing() before setup_logging(), same as api.py does. Previously the CLI never registered an OTel provider, so Phoenix had nothing to attach to.
+logger_config.py — _TracingHandler now runs at logging.DEBUG unconditionally, independent of console_level (which still controls what prints to your terminal). Console/file logging behavior is unchanged; only the mirror-to-trace path now sees everything, including the 67 logger.debug(...) calls in your node files that were previously filtered out before reaching LangSmith/Phoenix.
+One more thing to check on your end, since I can't verify UI rendering without live credentials: in LangSmith, log events land under the "Events" tab on the individual node's run, not on the top-level trace summary — if you were only looking at the trace overview, that's an easy place to miss them. Same idea in Phoenix: span events show up when you expand a specific span, not in the trace list view.
+
+Can you re-run through main.py and check a node's run/span detail (not just the top-level trace) in both UIs?
+
+Still no logs
+Bash Test whether get_current_run_tree() sees an active run inside LangGraph node functions
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -c "
+import os
+os.environ['LANGCHAIN_TRACING_V2'] = 'true'
+os.environ['LANGCHAIN_API_KEY'] = 'dummy-key-for-local-test'
+os.environ['LANGCHAIN_PROJECT'] = 'test-project'
+
+from typing import TypedDict
+from langgraph.graph import StateGraph, END
+from langsmith.run_helpers import get_current_run_tree
+
+class S(TypedDict):
+    x: str
+
+def node_a(state):
+    rt = get_current_run_tree()
+    print('node_a run_tree:', 'PRESENT' if rt is not None else 'NONE')
+    return {'x': state['x'] + 'a'}
+
+def node_b(state):
+    rt = get_current_run_tree()
+    print('node_b run_tree:', 'PRESENT' if rt is not None else 'NONE')
+    return {'x': state['x'] + 'b'}
+
+g = StateGraph(S)
+g.add_node('node_a', node_a)
+g.add_node('node_b', node_b)
+g.set_entry_point('node_a')
+g.add_edge('node_a', 'node_b')
+g.add_edge('node_b', END)
+app = g.compile()
+
+try:
+    result = app.invoke({'x': ''})
+    print('result:', result)
+except Exception as e:
+    print('invoke error (network expected, ok):', type(e).__name__, str(e)[:200])
+" 2>&1 | grep -v "^Traceback\|^  File\|urllib3\|HTTPError\|ConnectionError\|requests\."
+
+OUT
+node_a run_tree: PRESENT
+node_b run_tree: PRESENT
+result: {'x': 'ab'}
+Bash Inspect get_current_run_tree implementation to find backing contextvar
+IN
+python -c "
+import langsmith.run_helpers as rh
+import inspect
+print(inspect.getsource(rh.get_current_run_tree))
+" 2>&1
+
+OUT
+def get_current_run_tree() -> Optional[run_trees.RunTree]:
+    """Get the current run tree.
+
+    Uses a weakref-based lookup to avoid memory leaks from captured contexts.
+    The RunTree may return None if it has been garbage collected.
+    """
+    return _context.get_current_run_tree()
+Bash Check how the run tree contextvar is populated by LangChain's tracer
+IN
+python -c "
+import langsmith._internal._context as ctx
+import inspect
+print(inspect.getsource(ctx.get_current_run_tree))
+" 2>&1
+python -c "
+import langchain_core.tracers.langchain as lc_tracer
+import inspect
+src = inspect.getsource(lc_tracer)
+" 2>&1
+grep -n "run_tree\|_context\|RunTree" .venv/Lib/site-packages/langchain_core/tracers/core.py | head -40
+
+OUT
+def get_current_run_tree() -> Optional["RunTree"]:
+    """Get the current RunTree from the context.
+
+    Returns the RunTree if it's still alive, otherwise None.
+    """
+    ref = _PARENT_RUN_TREE_REF.get()
+    return ref() if ref is not None else None
+Bash Find where the run tree contextvar gets set, and whether LangChain core sets it
+IN
+grep -rn "_PARENT_RUN_TREE_REF" .venv/Lib/site-packages/langsmith/ 2>/dev/null | grep -v "\.pyc"
+echo "---"
+grep -rln "_PARENT_RUN_TREE_REF\|set_current_run_tree\|_context.set" .venv/Lib/site-packages/langchain_core/ 2>/dev/null
+
+OUT
+.venv/Lib/site-packages/langsmith/integrations/claude_agent_sdk/_client.py:284:            token = _context._PARENT_RUN_TREE_REF.set(weakref.ref(tool_run))
+.venv/Lib/site-packages/langsmith/integrations/claude_agent_sdk/_client.py:288:                _context._PARENT_RUN_TREE_REF.reset(token)
+.venv/Lib/site-packages/langsmith/integrations/openai_agents_sdk/_openai_agents.py:241:                    _context._PARENT_RUN_TREE_REF.set(weakref.ref(new_run))
+.venv/Lib/site-packages/langsmith/integrations/openai_agents_sdk/_openai_agents.py:277:                    _context._PARENT_RUN_TREE_REF.set(weakref.ref(run.parent_run))
+.venv/Lib/site-packages/langsmith/integrations/openai_agents_sdk/_openai_agents.py:279:                    _context._PARENT_RUN_TREE_REF.set(None)
+.venv/Lib/site-packages/langsmith/run_helpers.py:59:    "parent_ref": _context._PARENT_RUN_TREE_REF,
+.venv/Lib/site-packages/langsmith/run_helpers.py:97:    token = _context._PARENT_RUN_TREE_REF.set(weakref.ref(run_tree))
+.venv/Lib/site-packages/langsmith/run_helpers.py:101:        _context._PARENT_RUN_TREE_REF.reset(token)
+.venv/Lib/site-packages/langsmith/run_helpers.py:1141:                _context._PARENT_RUN_TREE_REF.set(weakref.ref(self.new_run))
+.venv/Lib/site-packages/langsmith/run_helpers.py:1143:                _context._PARENT_RUN_TREE_REF.set(None)
+.venv/Lib/site-packages/langsmith/run_helpers.py:1596:        context.run(_context._PARENT_RUN_TREE_REF.set, None)
+.venv/Lib/site-packages/langsmith/run_helpers.py:1701:        context.run(_context._PARENT_RUN_TREE_REF.set, weakref.ref(new_run))
+.venv/Lib/site-packages/langsmith/run_helpers.py:1703:        context.run(_context._PARENT_RUN_TREE_REF.set, None)
+.venv/Lib/site-packages/langsmith/run_helpers.py:1878:                _context._PARENT_RUN_TREE_REF.set(weakref.ref(v))
+.venv/Lib/site-packages/langsmith/run_helpers.py:1880:                _context._PARENT_RUN_TREE_REF.set(None)
+.venv/Lib/site-packages/langsmith/run_helpers.py:2268:_PARENT_RUN_TREE_REF = _context._PARENT_RUN_TREE_REF
+.venv/Lib/site-packages/langsmith/_internal/_context.py:27:_PARENT_RUN_TREE_REF = contextvars.ContextVar[Optional[weakref.ref["RunTree"]]](
+.venv/Lib/site-packages/langsmith/_internal/_context.py:28:    "_PARENT_RUN_TREE_REF", default=None
+.venv/Lib/site-packages/langsmith/_internal/_context.py:37:    ref = _PARENT_RUN_TREE_REF.get()
+---
+Bash Find how langchain_core tracers integrate with langsmith run_helpers context
+IN
+grep -rln "run_helpers\|_context\." .venv/Lib/site-packages/langchain_core/tracers/ 2>/dev/null
+echo "---core.py excerpt---"
+grep -n "run_helpers\|import langsmith\|from langsmith" .venv/Lib/site-packages/langchain_core/tracers/core.py .venv/Lib/site-packages/langchain_core/tracers/langchain.py 2>/dev/null
+
+OUT
+.venv/Lib/site-packages/langchain_core/tracers/context.py
+.venv/Lib/site-packages/langchain_core/tracers/__pycache__/context.cpython-314.pyc
+---core.py excerpt---
+.venv/Lib/site-packages/langchain_core/tracers/langchain.py:11:from langsmith import Client, get_tracing_context
+.venv/Lib/site-packages/langchain_core/tracers/langchain.py:12:from langsmith import run_trees as rt
+.venv/Lib/site-packages/langchain_core/tracers/langchain.py:13:from langsmith import utils as ls_utils
+The mechanism itself checks out in isolation (I just verified with a real LangGraph StateGraph that get_current_run_tree() does return a live object inside node execution when tracing is on). Since it works in isolation but not in your actual app, the difference has to be something specific to your runtime — and right now my handler swallows every exception silently, so if something is going wrong (wrong package version, a Pydantic validation error on add_event, wrong span state), you'd never know. Let me add temporary diagnostics instead of guessing further.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py (lines 43-85)
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+Added 10 lines
+Bash Syntax-check logger_config.py after adding diagnostics
+IN
+cd app_workflow && python -c "
+import ast
+ast.parse(open('services/logger_config.py', encoding='utf-8').read())
+print('syntax OK')
+"
+
+OUT
+syntax OK
+I added temporary diagnostic prints (to stderr, tagged [trace-debug]) so we get ground truth instead of guessing further — this is noisy by design and should come out once we know what's happening.
+
+Please do this:
+
+Run app_workflow/main.py and ask it one question.
+Copy me the [trace-debug] lines that print to your terminal (there'll be one or two per log line — that's expected for this diagnostic pass).
+That will tell us exactly which of these is happening:
+
+no active run_tree / no recording span → the context genuinely isn't propagating in your real graph (possibly async/thread-pool code somewhere in llm_caller.py or retriever.py that doesn't copy context — I confirmed LangGraph's own executor does copy context correctly, so it'd have to be something downstream)
+EXCEPTION with a traceback → the attach call itself is failing (e.g. a Pydantic validation error on add_event, or an OTel/langsmith API mismatch) — the traceback will show exactly where
+Neither line ever prints at all → your node-level logger.debug/info calls aren't reaching the root logger/_TracingHandler in the first place (e.g. propagate=False somewhere, or a different setup_logging() path than the one I edited)
+Once I see the actual output I can fix the real cause instead of theorizing, and then remove the diagnostic prints.
+
+c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\main.py
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-29b1-7793-9b27-482c9b7784a1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-29b0-70a0-b96a-c838efdeb63b
+2026-07-09 18:45:19 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [VALIDATE_DEDUP_MERGE_LEARNED_QA] pair 1: verdict=UNKNOWN  fabricated=0  dropped=0
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-29b1-7793-9b27-482c9b7784a1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-29b0-70a0-b96a-c838efdeb63b
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-29b0-70a0-b96a-c838efdeb63b
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:19 | INFO     | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 402 Payment Required"
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:19 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [VALIDATE-MERGE] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+[trace-debug] langsmith: attached to run 019f4720-29b0-70a0-b96a-c838efdeb63b
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-29b0-70a0-b96a-c838efdeb63b
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-29b0-70a0-b96a-c838efdeb63b
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-29b0-70a0-b96a-c838efdeb63b
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:19 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [VALIDATE_DEDUP_MERGE_DOCUMENTS] pair 2: verdict=UNKNOWN  fabricated=0  dropped=0
+[trace-debug] langsmith: attached to run 019f4720-29b0-70a0-b96a-c838efdeb63b
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:19 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [COMPRESS] running DC_learned_qa on 3 chunk(s)
+2026-07-09 18:45:19 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [COMPRESS] running NAC_documents on 4 chunk(s)
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3083-7322-a547-8d1dc1f15fcf
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3083-7322-a547-8d1dc1f15fcf
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3083-7322-a547-8d1dc1f15fcf
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3083-7322-a547-8d1dc1f15fcf
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3083-7322-a547-8d1dc1f15fcf
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3083-7322-a547-8d1dc1f15fcf
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3083-7322-a547-8d1dc1f15fcf
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:19 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [COMPRESS] NAC_documents complete — 4 chunk(s) remain
+[trace-debug] langsmith: attached to run 019f4720-3083-7322-a547-8d1dc1f15fcf
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | INFO     | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 402 Payment Required"
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [DC] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [DC] non-retryable error (UNKNOWN): Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included  — skipping window
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | WARNING  | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [DC] no usable response after 3 attempt(s) — skipping window
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [COMPRESS] DC_learned_qa complete — 3 chunk(s) remain
+[trace-debug] langsmith: attached to run 019f4720-3082-7fe3-b39d-cab5b8739de6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [validate_DC_learned_qa] no redundancy groups to validate
+[trace-debug] langsmith: attached to run 019f4720-324e-7f60-bef3-cd8c74f8fcef
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [validate_NAC_documents] no merge pairs to validate
+[trace-debug] langsmith: attached to run 019f4720-324f-7a90-b10b-c06521397bad
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [COMPRESS] running LBC_learned_qa on 3 chunk(s)
+2026-07-09 18:45:20 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [COMPRESS] running DC_documents on 4 chunk(s)
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | INFO     | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 402 Payment Required"
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [DC] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [DC] non-retryable error (UNKNOWN): Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included  — skipping window
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | WARNING  | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [DC] no usable response after 3 attempt(s) — skipping window
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [COMPRESS] DC_documents complete — 4 chunk(s) remain
+[trace-debug] langsmith: attached to run 019f4720-32a7-7fc3-9b30-708165cf2606
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | INFO     | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 402 Payment Required"
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [LBC] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 0: non-retryable error on attempt 1 (UNKNOWN): Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included  — keeping original
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:20 | WARNING  | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 0: parse failed after 3 attempt(s) — keeping original
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:21 | INFO     | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 402 Payment Required"
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:21 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [LBC] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:21 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 1: non-retryable error on attempt 1 (UNKNOWN): Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included  — keeping original
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:21 | WARNING  | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 1: parse failed after 3 attempt(s) — keeping original
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:21 | INFO     | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 402 Payment Required"
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:21 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [LBC] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:21 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 2: non-retryable error on attempt 1 (UNKNOWN): Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included  — keeping original
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:21 | WARNING  | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 2: parse failed after 3 attempt(s) — keeping original
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:21 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [COMPRESS] LBC_learned_qa complete — 3 chunk(s) remain
+[trace-debug] langsmith: attached to run 019f4720-32a6-7493-9749-cea0fb07d7c1
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:21 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [validate_LBC_learned_qa] no compressed chunks to validate
+[trace-debug] langsmith: attached to run 019f4720-37be-77a1-a0c5-11927c561513
+2026-07-09 18:45:21 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [validate_DC_documents] no redundancy groups to validate
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-37bf-7520-980f-a9d58e6153bb
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:21 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [COMPRESS] running LBC_documents on 4 chunk(s)
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | INFO     | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 402 Payment Required"
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [LBC] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 0: non-retryable error on attempt 1 (UNKNOWN): Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included  — keeping original
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | WARNING  | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 0: parse failed after 3 attempt(s) — keeping original
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | INFO     | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 402 Payment Required"
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [LBC] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 1: non-retryable error on attempt 1 (UNKNOWN): Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included  — keeping original
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | WARNING  | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 1: parse failed after 3 attempt(s) — keeping original
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | INFO     | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 402 Payment Required"
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [LBC] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 2: non-retryable error on attempt 1 (UNKNOWN): Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included  — keeping original
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | WARNING  | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 2: parse failed after 3 attempt(s) — keeping original
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | INFO     | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 402 Payment Required"
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [LBC] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 3: non-retryable error on attempt 1 (UNKNOWN): Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included  — keeping original
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | WARNING  | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] |   [LBC] chunk 3: parse failed after 3 attempt(s) — keeping original
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:22 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [COMPRESS] LBC_documents complete — 4 chunk(s) remain
+[trace-debug] langsmith: attached to run 019f4720-386b-7f82-8aaf-e57384ed42c6
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:23 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [validate_LBC_documents] no compressed chunks to validate
+[trace-debug] langsmith: attached to run 019f4720-3d3a-7cf1-b36a-bfef1800cf4f
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:23 | INFO     | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [COMBINE_TRACKS] learned_qa=3  documents=4  combined=7 chunk(s)
+[trace-debug] langsmith: attached to run 019f4720-3d8a-7c50-89ab-988ae7cefb6d
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3e72-7c53-a630-2c9235b6f739
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3e72-7c53-a630-2c9235b6f739
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3e72-7c53-a630-2c9235b6f739
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3e72-7c53-a630-2c9235b6f739
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:23 | INFO     | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 402 Payment Required"
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:23 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [GENERATE-DRAFT] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+[trace-debug] langsmith: attached to run 019f4720-3e72-7c53-a630-2c9235b6f739
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3e72-7c53-a630-2c9235b6f739
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3e72-7c53-a630-2c9235b6f739
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-3e72-7c53-a630-2c9235b6f739
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-4092-7261-9891-ebb3a6c8f29e
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-4092-7261-9891-ebb3a6c8f29e
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-4092-7261-9891-ebb3a6c8f29e
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:24 | INFO     | [-] | HTTP Request: POST https://router.huggingface.co/v1/chat/completions "HTTP/1.1 402 Payment Required"
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:24 | ERROR    | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [ANSWER-QUALITY] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+[trace-debug] langsmith: attached to run 019f4720-4092-7261-9891-ebb3a6c8f29e
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-4092-7261-9891-ebb3a6c8f29e
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-4092-7261-9891-ebb3a6c8f29e
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:24 | WARNING  | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [CHECK_ANSWER_QUALITY] judge LLM call failed (LLMErrorKind.UNKNOWN): Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included 
+[trace-debug] langsmith: attached to run 019f4720-4092-7261-9891-ebb3a6c8f29e
+[trace-debug] phoenix: no recording span
+2026-07-09 18:45:24 | WARNING  | [3660a8e4-ae07-4f4f-a82e-b9a3046096cc] | [ROUTE] quality verdict=UNKNOWN but no budget left — using best-effort draft
+[trace-debug] langsmith: attached to run 019f4720-4228-7ff2-8dab-303cf2b91a96
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-4280-7d43-ab2d-e4973bf20d0d
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-4280-7d43-ab2d-e4973bf20d0d
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-4280-7d43-ab2d-e4973bf20d0d
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: attached to run 019f4720-4280-7d43-ab2d-e4973bf20d0d
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-debug] phoenix: no recording span
+[trace-debug] langsmith: no active run_tree
+[trace-d
+
+[Message truncated - exceeded 50,000 character limit]
+Show less
+Good — this is real signal. LangSmith is attaching events (attached to run <uuid> appears constantly, right alongside your node logs). Phoenix shows no recording span for the entire run — meaning setup_phoenix_tracing() isn't actually producing a recording span at all. Let me check why Phoenix never activates, since that's a distinct, fully diagnosable problem.
+
+Bash Test whether setup_phoenix_tracing actually produces a recording span for LangChain calls
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -c "
+import sys
+sys.path.insert(0, 'app_workflow')
+from services.phoenix_tracing import setup_phoenix_tracing
+try:
+    setup_phoenix_tracing()
+    print('setup_phoenix_tracing() completed without raising')
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+
+from opentelemetry import trace as otel_trace
+from langchain_core.runnables import RunnableLambda
+
+def inner(x):
+    span = otel_trace.get_current_span()
+    print('span:', span)
+    print('is_recording:', span.is_recording())
+    return x
+
+RunnableLambda(inner).invoke('hi')
+" 2>&1
+
+OUT
+Attempting to instrument while already instrumented
+OpenTelemetry Tracing Details
+|  Phoenix Project: rag-work
+|  Span Processor: SimpleSpanProcessor
+|  Collector Endpoint: localhost:4317
+|  Transport: gRPC
+|  Transport Headers: {}
+|  
+|  Using a default SpanProcessor. `add_span_processor` will overwrite this default.
+|  
+|  WARNING: It is strongly advised to use a BatchSpanProcessor in production environments.
+|  
+|  `register` has set this TracerProvider as the global OpenTelemetry default.
+|  To disable this behavior, call `register` with `set_global_tracer_provider=False`.
+
+setup_phoenix_tracing() completed without raising
+span: NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))
+is_recording: False
+Bash Test Phoenix span recording with correct import order and an actual LLM-shaped runnable
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -c "
+import sys
+sys.path.insert(0, 'app_workflow')
+
+# Call setup FIRST, before any langchain_core import, to rule out import-order issues
+from services.phoenix_tracing import setup_phoenix_tracing
+setup_phoenix_tracing()
+
+from opentelemetry import trace as otel_trace
+from langchain_core.runnables import RunnableLambda
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+def inner(x):
+    span = otel_trace.get_current_span()
+    print('plain RunnableLambda span recording:', span.is_recording())
+    return x
+
+RunnableLambda(inner).invoke('hi')
+
+# Try an actual LLM-shaped call, since instrumentor may only target LLM/Chat spans
+llm = FakeListChatModel(responses=['hello'])
+def inner2(x):
+    span = otel_trace.get_current_span()
+    print('inside chain around fake LLM, span recording (before llm call):', span.is_recording())
+    return x
+
+chain = RunnableLambda(inner2) | llm
+chain.invoke('hi')
+print('after chain invoke, current span recording:', otel_trace.get_current_span().is_recording())
+" 2>&1
+
+OUT
+Attempting to instrument while already instrumented
+OpenTelemetry Tracing Details
+|  Phoenix Project: rag-work
+|  Span Processor: SimpleSpanProcessor
+|  Collector Endpoint: localhost:4317
+|  Transport: gRPC
+|  Transport Headers: {}
+|  
+|  Using a default SpanProcessor. `add_span_processor` will overwrite this default.
+|  
+|  WARNING: It is strongly advised to use a BatchSpanProcessor in production environments.
+|  
+|  `register` has set this TracerProvider as the global OpenTelemetry default.
+|  To disable this behavior, call `register` with `set_global_tracer_provider=False`.
+
+plain RunnableLambda span recording: False
+inside chain around fake LLM, span recording (before llm call): False
+after chain invoke, current span recording: False
+Bash Inspect LangChainInstrumentor._instrument source to see what it actually patches
+IN
+python -c "
+from openinference.instrumentation.langchain import LangChainInstrumentor
+import inspect
+print('MRO:', [c.__name__ for c in LangChainInstrumentor.__mro__])
+print(inspect.getsource(LangChainInstrumentor._instrument))
+" 2>&1
+
+OUT
+MRO: ['LangChainInstrumentor', 'BaseInstrumentor', 'ABC', 'object']
+    def _instrument(self, **kwargs: Any) -> None:
+        if not (tracer_provider := kwargs.get("tracer_provider")):
+            tracer_provider = trace_api.get_tracer_provider()
+        if not (config := kwargs.get("config")):
+            config = TraceConfig()
+        else:
+            assert isinstance(config, TraceConfig)
+        import langchain_core
+
+        from openinference.instrumentation.langchain._tracer import OpenInferenceTracer
+
+        tracer = OITracer(
+            trace_api.get_tracer(__name__, __version__, tracer_provider),
+            config=config,
+        )
+        self._tracer: Optional[OpenInferenceTracer] = OpenInferenceTracer(
+            tracer,  # type: ignore[arg-type]
+            bool(kwargs.get("separate_trace_from_runtime_context")),
+        )
+        self._original_callback_manager_init = langchain_core.callbacks.BaseCallbackManager.__init__
+        wrap_function_wrapper(
+            "langchain_core.callbacks",
+            "BaseCallbackManager.__init__",
+            _BaseCallbackManagerInit(self._tracer),
+        )
+Bash Check whether OpenInference's LangChain tracer attaches spans to the ambient OTel context
+IN
+python -c "
+import openinference.instrumentation.langchain._tracer as t
+import inspect
+src = inspect.getsource(t)
+print('context.attach' in src, 'use_span' in src, 'start_as_current_span' in src, 'start_span' in src)
+"
+
+OUT
+False False False True
+Bash Inspect OpenInferenceTracer internals for a run_id-to-span registry
+IN
+python -c "
+import openinference.instrumentation.langchain._tracer as t
+import inspect
+print(inspect.getsource(t.OpenInferenceTracer.__init__))
+" 2>&1
+echo "---"
+python -c "
+import openinference.instrumentation.langchain._tracer as t
+import inspect
+methods = [m for m in dir(t.OpenInferenceTracer) if not m.startswith('__')]
+print(methods)
+"
+
+OUT
+    def __init__(
+        self,
+        tracer: trace_api.Tracer,
+        separate_trace_from_runtime_context: bool,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the OpenInferenceTracer.
+
+        Args:
+            tracer (trace_api.Tracer): The OpenTelemetry tracer for creating spans.
+            separate_trace_from_runtime_context (bool): When True, always start a new trace for each
+                span without a parent, isolating it from any existing trace in the runtime context.
+            *args (Any): Positional arguments for BaseTracer.
+            **kwargs (Any): Keyword arguments for BaseTracer.
+        """
+        super().__init__(*args, **kwargs)
+        if TYPE_CHECKING:
+            # check that `run_map` still exists in parent class
+            assert self.run_map
+        self.run_map = _DictWithLock[str, Run](self.run_map)  # type: ignore[assignment]
+        self._tracer = tracer
+        self._separate_trace_from_runtime_context = separate_trace_from_runtime_context
+        self._spans_by_run: Dict[UUID, Span] = _DictWithLock[UUID, Span]()  # type: ignore[assignment]
+        self._lock = RLock()  # handlers may be run in a thread by langchain
+
+---
+['_abc_impl', '_add_child_run', '_complete_chain_run', '_complete_llm_run', '_complete_retrieval_run', '_complete_tool_run', '_create_chain_run', '_create_chat_model_run', '_create_llm_run', '_create_retrieval_run', '_create_tool_run', '_end_trace', '_errored_chain_run', '_errored_llm_run', '_errored_retrieval_run', '_errored_tool_run', '_get_chain_inputs', '_get_chain_outputs', '_get_run', '_get_stacktrace', '_llm_run_with_retry_event', '_llm_run_with_token_event', '_on_chain_end', '_on_chain_error', '_on_chain_start', '_on_chat_model_start', '_on_llm_end', '_on_llm_error', '_on_llm_new_token', '_on_llm_start', '_on_retriever_end', '_on_retriever_error', '_on_retriever_start', '_on_run_create', '_on_run_update', '_on_tool_end', '_on_tool_error', '_on_tool_start', '_persist_run', '_separate_trace_from_runtime_context', '_spans_by_run', '_start_trace', '_tracer', 'get_span', 'ignore_agent', 'ignore_chain', 'ignore_chat_model', 'ignore_custom_event', 'ignore_llm', 'ignore_retriever', 'ignore_retry', 'log_missing_parent', 'on_agent_action', 'on_agent_finish', 'on_chain_end', 'on_chain_error', 'on_chain_start', 'on_chat_model_start', 'on_custom_event', 'on_llm_end', 'on_llm_error', 'on_llm_new_token', 'on_llm_start', 'on_retriever_end', 'on_retriever_error', 'on_retriever_start', 'on_retry', 'on_text', 'on_tool_end', 'on_tool_error', 'on_tool_start', 'raise_error', 'run_inline']
+Bash Check get_span method signature on OpenInferenceTracer
+IN
+python -c "
+import openinference.instrumentation.langchain._tracer as t
+import inspect
+print(inspect.getsource(t.OpenInferenceTracer.get_span))
+"
+
+OUT
+    def get_span(self, run_id: UUID) -> Optional[Span]:
+        return self._spans_by_run.get(run_id)
+Found it. Phoenix's LangChain integration tracks spans by LangChain run-id internally (OpenInferenceTracer._spans_by_run) rather than through OTel's ambient "current span" context — so get_current_span() was structurally never going to work here, no matter what. Let me verify the correct lookup path, then fix it.
+
+Bash Verify the run_id-based Phoenix span lookup actually finds a recording span
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -c "
+import sys
+sys.path.insert(0, 'app_workflow')
+from services.phoenix_tracing import setup_phoenix_tracing
+setup_phoenix_tracing()
+
+from langsmith.run_helpers import get_current_run_tree
+from openinference.instrumentation.langchain import LangChainInstrumentor
+from langchain_core.runnables import RunnableLambda
+
+def inner(x):
+    rt = get_current_run_tree()
+    tracer = LangChainInstrumentor()._tracer
+    span = tracer.get_span(rt.id) if (tracer is not None and rt is not None) else None
+    print('run_tree present:', rt is not None)
+    print('phoenix span found via run_id lookup:', span is not None)
+    print('phoenix span is_recording:', span.is_recording() if span else None)
+    return x
+
+RunnableLambda(inner).invoke('hi')
+" 2>&1 | grep -v "^|" 
+
+OUT
+Attempting to instrument while already instrumented
+OpenTelemetry Tracing Details
+
+run_tree present: False
+phoenix span found via run_id lookup: False
+phoenix span is_recording: None
+Bash Re-verify Phoenix span lookup with LangSmith tracing env vars also enabled
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -c "
+import os
+os.environ['LANGCHAIN_TRACING_V2'] = 'true'
+os.environ['LANGCHAIN_API_KEY'] = 'dummy-key-for-local-test'
+os.environ['LANGCHAIN_PROJECT'] = 'test-project'
+import sys
+sys.path.insert(0, 'app_workflow')
+from services.phoenix_tracing import setup_phoenix_tracing
+setup_phoenix_tracing()
+
+from langsmith.run_helpers import get_current_run_tree
+from openinference.instrumentation.langchain import LangChainInstrumentor
+from langchain_core.runnables import RunnableLambda
+
+def inner(x):
+    rt = get_current_run_tree()
+    tracer = LangChainInstrumentor()._tracer
+    span = tracer.get_span(rt.id) if (tracer is not None and rt is not None) else None
+    print('run_tree present:', rt is not None)
+    print('phoenix span found via run_id lookup:', span is not None)
+    print('phoenix span is_recording:', span.is_recording() if span else None)
+    return x
+
+try:
+    RunnableLambda(inner).invoke('hi')
+except Exception as e:
+    print('invoke error (network expected):', type(e).__name__)
+" 2>&1 | grep -v "^|" 
+
+OUT
+Attempting to instrument while already instrumented
+Failed to multipart ingest runs: langsmith.utils.LangSmithError: Failed to POST https://api.smith.langchain.com/runs/multipart in LangSmith API. HTTPError('403 Client Error: Forbidden for url: https://api.smith.langchain.com/runs/multipart', '{"error":"Forbidden"}\n')
+OpenTelemetry Tracing Details
+
+run_tree present: True
+phoenix span found via run_id lookup: True
+phoenix span is_recording: True
+Confirmed — the run-id-based lookup finds a real, recording Phoenix span. Now applying the fix to _TracingHandler.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py (lines 43-92)
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+Removed 3 lines
+Those are just spell-checker hints on package/class names, not real issues. Let me verify the file end-to-end and re-run the live validation test.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+Now let's do an end-to-end sanity check exercising the actual _TracingHandler through logging, not just the raw mechanism.
+
+Bash End-to-end check that a real logger.info() call lands as a span event via the actual logging pipeline
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -c "
+import os
+os.environ['LANGCHAIN_TRACING_V2'] = 'true'
+os.environ['LANGCHAIN_API_KEY'] = 'dummy-key-for-local-test'
+os.environ['LANGCHAIN_PROJECT'] = 'test-project'
+import sys
+sys.path.insert(0, 'app_workflow')
+
+from services.phoenix_tracing import setup_phoenix_tracing
+setup_phoenix_tracing()
+
+from services.logger_config import setup_logging
+setup_logging(log_dir='.scratch_test_logs2', app_name='diag')
+
+import logging
+logger = logging.getLogger('demo')
+
+from openinference.instrumentation.langchain import LangChainInstrumentor
+from langchain_core.runnables import RunnableLambda
+
+captured = {}
+def inner(x):
+    logger.info('hello from inside a traced run')
+    tracer = LangChainInstrumentor()._tracer
+    from langsmith.run_helpers import get_current_run_tree
+    rt = get_current_run_tree()
+    span = tracer.get_span(rt.id)
+    captured['events'] = list(span.events)
+    return x
+
+try:
+    RunnableLambda(inner).invoke('hi')
+except Exception:
+    pass
+
+for e in captured.get('events', []):
+    print('SPAN EVENT:', e.name)
+" 2>&1 | grep -v "^|" 
+
+OUT
+Attempting to instrument while already instrumented
+OpenTelemetry Tracing Details
+
+2026-07-09 18:49:54 | INFO     | [-] | hello from inside a traced run
+SPAN EVENT: demo | hello from inside a traced run
+2026-07-09 18:49:55 | WARNING  | [-] | Failed to multipart ingest runs: langsmith.utils.LangSmithError: Failed to POST https://api.smith.langchain.com/runs/multipart in LangSmith API. HTTPError('403 Client Error: Forbidden for url: https://api.smith.langchain.com/runs/multipart', '{"error":"Forbidden"}\n')
+SPAN EVENT: demo | hello from inside a traced run — confirmed end-to-end through the real logging pipeline. Cleaning up the test artifact.
+
+Bash Remove test log directory from validation run
+IN
+rm -rf .scratch_test_logs2
+
+OUT
+(Bash completed with no output)
+Root cause found and fixed. Phoenix's LangChain integration (OpenInferenceTracer from openinference-instrumentation-langchain) doesn't attach its spans to OpenTelemetry's ambient "current span" context — it uses start_span(), never start_as_current_span()/context.attach(). It tracks spans in its own internal registry keyed by LangChain's run_id instead. So opentelemetry.trace.get_current_span(), which my original fix relied on, was structurally guaranteed to always return a no-op span for Phoenix — not a bug in your setup, a mismatch in my approach.
+
+Fix in logger_config.py: the Phoenix branch now reuses the run_id from the LangSmith run-tree (which was already working) to look up the matching span via LangChainInstrumentor()._tracer.get_span(run_id), then calls .add_event() on that span directly. Verified end-to-end with a real logger.info() call landing as a span event.
+
+I removed all the [trace-debug] diagnostic prints — the handler is back to being silent (best-effort, swallows exceptions) as originally designed.
+
+Please re-run and check both UIs again:
+
+LangSmith — this was already confirmed working from your log dump (attached to run <uuid>); if you still don't see anything, check the Events tab on an individual node's run detail (not the top-level trace), since that's an easy thing to miss.
+Phoenix — this needed the actual fix above; check a span's detail view (expand a span in a trace) for an events list.
+One heads-up unrelated to this bug, visible in your log dump: your Hugging Face inference key is returning 402 Payment Required — "monthly included credits" depleted — for every LLM call, which is why the workflow kept hitting [LBC] ... parse failed after 3 attempt(s). That's a separate billing issue, not something this logging change affects.
+
+
+image.png
+1052×425
+c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\logger_config.py
+for langsmith, there is no Events tab
+Good catch — let me not guess about UI layout. Since we have real trace data from your last run, I can query the LangSmith API directly to check whether the events actually got persisted server-side, which settles this more reliably than guessing about the UI.
+
+Bash Query LangSmith API directly to check if events were actually persisted server-side for a real run from the earlier trace
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -c "
+from dotenv import load_dotenv
+load_dotenv()
+from langsmith import Client
+client = Client()
+run_id = '019f4720-386b-7f82-8aaf-e57384ed42c6'
+run = client.read_run(run_id)
+print('run name:', run.name)
+print('events:', run.events)
+"
+
+OUT
+Exit code 1
+Traceback (most recent call last):
+  File "<string>", line 9, in <module>
+    print('events:', run.events)
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python314\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2248' in position 793: character maps to <undefined>
+run name: LBC_documents
+events:
+Bash Re-query and write events to a UTF-8 file to sidestep Windows console encoding issue
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -c "
+from dotenv import load_dotenv
+load_dotenv()
+from langsmith import Client
+import json
+client = Client()
+run_id = '019f4720-386b-7f82-8aaf-e57384ed42c6'
+run = client.read_run(run_id)
+with open('.scratch_run_events.json', 'w', encoding='utf-8') as f:
+    json.dump({'name': run.name, 'events': run.events}, f, indent=2, default=str)
+print('wrote', len(run.events or []), 'events to file')
+"
+
+OUT
+wrote 43 events to file
+43 events, confirmed persisted server-side. So the mechanism genuinely works — the data is on LangSmith's backend, this is purely a UI-surfacing question now. Let me see what's actually in there.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\.scratch_run_events.json
+Bash Remove temporary diagnostic file
+IN
+rm -f "c:\Users\LOQ\Desktop\Projects\RAG-work\.scratch_run_events.json"
+
+OUT
+(Bash completed with no output)
+This settles it: the data is confirmed on LangSmith's server. I queried the API directly for a real run from your last trace (LBC_documents) and it has all 43 events — every logger.debug/info/warning/error call from that node, in order, with full messages (including the HTTP 402 errors). So the code is correct end-to-end; this is now purely a "where does the LangSmith UI show it" question, not a bug.
+
+Two things about your screenshot:
+
+You clicked route_after_generate_answer — that's a routing/conditional-edge function, likely one of the ones we saw hit [trace-debug] langsmith: no active run_tree in your earlier log dump (thin functions like that may not even get their own traced run, or may have no log calls inside them at all). Try clicking on LBC_documents or DC_documents instead — those are the nodes that actually log heavily and that I just confirmed have events server-side.
+Even on the right node, this particular LangSmith UI (Feedback / Input / Output / Attributes tabs) may simply not have a dedicated "Events" tab in this version/plan — I was wrong to assume one exists; I hadn't verified it visually. Events might show as small markers on the Waterfall timeline itself, or not be surfaced in the UI at all for your plan.
+Given the data is verifiably there, the practical way to consume it either way is the API/SDK route I just used (Client().read_run(run_id).events) — reliable regardless of what the UI does. Want me to add a small script/CLI that dumps a given run's mirrored log events, so you don't need to hunt through the UI for this?
+
+
+image.png
+1315×851
+nothing in waterfall timeline
+The waterfall having no event markers is more evidence pointing the same direction — worth one more concrete check before giving up on the UI: the Attributes tab sometimes exposes raw run fields (including custom ones like events) as expandable JSON, separate from the Feedback/Input/Output tabs.
+
+AskUserQuestion
+OUT
+Your questions have been answered: "Can you click on the LBC_documents (or DC_learned_qa) node specifically — not the top-level LangGraph trace — and check its 'Attributes' tab? Does it show a raw/expandable JSON view containing an 'events' field?"="No, still nothing". You can now continue with these answers in mind.
+Bash Check langsmith Client.list_runs signature for trace-scoped querying
+IN
+python -c "
+from langsmith import Client
+import inspect
+sig = inspect.signature(Client.list_runs)
+print(sig)
+" 2>&1 | head -5
+
+OUT
+(self, *, project_id: 'Optional[Union[ID_TYPE, Sequence[ID_TYPE]]]' = None, project_name: 'Optional[Union[str, Sequence[str]]]' = None, run_type: 'Optional[str]' = None, trace_id: 'Optional[ID_TYPE]' = None, reference_example_id: 'Optional[ID_TYPE]' = None, query: 'Optional[str]' = None, filter: 'Optional[str]' = None, trace_filter: 'Optional[str]' = None, tree_filter: 'Optional[str]' = None, is_root: 'Optional[bool]' = None, parent_run_id: 'Optional[ID_TYPE]' = None, start_time: 'Optional[datetime.datetime]' = None, error: 'Optional[bool]' = None, run_ids: 'Optional[Sequence[ID_TYPE]]' = None, select: 'Optional[Sequence[str]]' = None, limit: 'Optional[int]' = None, **kwargs: 'Any') -> 'Iterator[ls_schemas.Run]'
+Confirmed — LangSmith's UI on this account doesn't surface custom events anywhere visually, even though the data is fully there server-side. I'll build the script I offered: a small CLI that pulls the mirrored log events for an entire trace via the API and prints them in chronological order across all nodes.
+
+Bash List services directory to match file conventions
+IN
+ls "c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\" | head -30
+
+OUT
+Exit code 2
+/usr/bin/bash: eval: line 1: unexpected EOF while looking for matching `"'
+Bash List services directory to match file conventions
+IN
+ls "c:/Users/LOQ/Desktop/Projects/RAG-work/app_workflow/services/"
+
+OUT
+__pycache__
+db.py
+embedding_manager.py
+feedback_store.py
+fix_llm_output.py
+learned_qa_store.py
+llm_caller.py
+llm_setup.py
+logger_config.py
+phoenix_tracing.py
+prompts.py
+retriever.py
+run_logs
+self_learner.py
+services.py
+timing_tracker.py
+validators.py
+vector_store.py
+Write c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\trace_events.py
+50 lines
+Now let's verify it actually works against the real run we already know has events.
+
+Bash Run the new trace_events CLI against a known run and inspect output
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -m app_workflow.services.trace_events 019f4720-386b-7f82-8aaf-e57384ed42c6 2>&1 | Get-Content -Encoding utf8 2>/dev/null || python -m app_workflow.services.trace_events 019f4720-386b-7f82-8aaf-e57384ed42c6 > .scratch_trace_out.txt 2>&1; wc -l .scratch_trace_out.txt 2>/dev/null; head -20 .scratch_trace_out.txt 2>/dev/null
+
+OUT
+36 .scratch_trace_out.txt
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\trace_events.py", line 49, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\trace_events.py", line 45, in main
+    dump_trace_events(args.run_id)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\trace_events.py", line 38, in dump_trace_events
+    print(f"{time} | {node:<30} | {message}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python314\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2248' in position 142: character maps to <undefined>
+2026-07-09T13:44:44.608018+00:00 | user_input                     | pymongo.serverSelection | {"message": "Server selection started", "selector": "Primary()", "operation": "find", "topologyDescription": "<TopologyDescription id: 6a4fa5af2c51154e1d26ee61, topology_type: ReplicaSetWithPrimary, servers: [<ServerDescription ('127.0.0.1', 27017) server_type: RSPrimary, rtt: 0.0005769359041005373>]>", "clientId": {"$oid": "6a4fa5af2c51154e1d26ee61"}}
+2026-07-09T13:44:44.608830+00:00 | user_input                     | pymongo.serverSelection | {"message": "Server selection succeeded", "selector": "Primary()", "operation": "find", "topologyDescription": "<TopologyDescription id: 6a4fa5af2c51154e1d26ee61, topology_type: ReplicaSetWithPrimary, servers: [<ServerDescription ('127.0.0.1', 27017) server_type: RSPrimary, rtt: 0.0005769359041005373>]>", "clientId": {"$oid": "6a4fa5af2c51154e1d26ee61"}, "serverHost": "127.0.0.1", "serverPort": 27017}
+2026-07-09T13:44:44.609542+00:00 | user_input                     | pymongo.connection | {"message": "Connection checkout started", "clientId": {"$oid": "6a4fa5af2c51154e1d26ee61"}, "serverHost": "127.0.0.1", "serverPort": 27017}
+2026-07-09T13:44:44.610198+00:00 | user_input                     | pymongo.connection | {"message": "Connection checked out", "clientId": {"$oid": "6a4fa5af2c51154e1d26ee61"}, "serverHost": "127.0.0.1", "serverPort": 27017, "driverConnectionId": 1, "durationMS": 0.0006534999702125788}
+The script works — it pulled the full trace's events chronologically, including even pymongo's internal logs (since those propagate to root too, as expected). But it crashed on a Windows console encoding issue printing certain Unicode characters (arrows, em-dashes) — a real bug for this environment, not a logic issue. Fixing it.
+
+Bash Clean up scratch output file
+IN
+rm -f "c:\Users\LOQ\Desktop\Projects\RAG-work\.scratch_trace_out.txt"
+
+OUT
+(Bash completed with no output)
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\trace_events.py
+Added 3 lines
+Bash Re-run trace_events after the encoding fix to confirm it completes without crashing
+IN
+cd "c:\Users\LOQ\Desktop\Projects\RAG-work" && python -m app_workflow.services.trace_events 019f4720-386b-7f82-8aaf-e57384ed42c6 2>&1 | tail -15
+
+OUT
+2026-07-09T13:45:24.806116+00:00 | generate_answer                | app_workflow.services.llm_caller | [GENERATE-ANSWER] openai.APIStatusError — HTTP 402: Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+2026-07-09T13:45:24.806386+00:00 | generate_answer                | app_workflow.services.llm_caller |   [GENERATE-ANSWER] LLM call attempt 1 took 0.453s
+2026-07-09T13:45:24.806633+00:00 | generate_answer                | app_workflow.services.llm_caller | [LLM] could not extract rate-limit headers — cooldown base will be 0
+2026-07-09T13:45:24.806993+00:00 | generate_answer                | nodes.generate_answer | [GENERATE_ANSWER] LLM call failed (LLMErrorKind.UNKNOWN): Error code: 402 - {'error': 'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get 20x more included usage.'}
+2026-07-09T13:45:24.807267+00:00 | generate_answer                | nodes.generate_answer | [GENERATE_ANSWER] RESPONSE:
+
+2026-07-09T13:45:24.807610+00:00 | generate_answer                | nodes.generate_answer | Assistant: 
+2026-07-09T13:45:24.808125+00:00 | generate_answer                | pymongo.serverSelection | {"message": "Server selection started", "selector": "<function writable_server_selector at 0x000001D6F684C3B0>", "operation": "insert", "topologyDescription": "<TopologyDescription id: 6a4fa5af2c51154e1d26ee61, topology_type: ReplicaSetWithPrimary, servers: [<ServerDescription ('127.0.0.1', 27017) server_type: RSPrimary, rtt: 0.0006402201324850321>]>", "clientId": {"$oid": "6a4fa5af2c51154e1d26ee61"}}
+2026-07-09T13:45:24.808709+00:00 | generate_answer                | pymongo.serverSelection | {"message": "Server selection succeeded", "selector": "<function writable_server_selector at 0x000001D6F684C3B0>", "operation": "insert", "topologyDescription": "<TopologyDescription id: 6a4fa5af2c51154e1d26ee61, topology_type: ReplicaSetWithPrimary, servers: [<ServerDescription ('127.0.0.1', 27017) server_type: RSPrimary, rtt: 0.0006402201324850321>]>", "clientId": {"$oid": "6a4fa5af2c51154e1d26ee61"}, "serverHost": "127.0.0.1", "serverPort": 27017}
+2026-07-09T13:45:24.809300+00:00 | generate_answer                | pymongo.connection | {"message": "Connection checkout started", "clientId": {"$oid": "6a4fa5af2c51154e1d26ee61"}, "serverHost": "127.0.0.1", "serverPort": 27017}
+2026-07-09T13:45:24.809675+00:00 | generate_answer                | pymongo.connection | {"message": "Connection checked out", "clientId": {"$oid": "6a4fa5af2c51154e1d26ee61"}, "serverHost": "127.0.0.1", "serverPort": 27017, "driverConnectionId": 1, "durationMS": 0.0005981000140309334}
+2026-07-09T13:45:24.810372+00:00 | generate_answer                | pymongo.command | {"message": "Command started", "clientId": {"$oid": "6a4fa5af2c51154e1d26ee61"}, "command": "{\"insert\": \"feedback_interactions\", \"ordered\": true, \"lsid\": {\"id\": {\"$binary\": {\"base64\": \"NIC+JuOCSmuWfZ2d7BzA7Q==\", \"subType\": \"04\"}}}, \"txnNumber\": 1, \"$clusterTime\": {\"clusterTime\": {\"$timestamp\": {\"t\": 1783604683, \"i\": 1}}, \"signature\": {\"hash\": {\"$binary\": {\"base64\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAA=\", \"subType\": \"00\"}}}}, \"$db\": \"rag_db\", \"documents\": [{\"ts\": \"2026-07-09T13:45:24.807700+00:00\", \"request_id\": \"3660a8e4-ae07-4f4f-a82e-b9a3046096cc\", \"query\": \"What is adjustible speed drive?\", \"quality\": \"UNKNOWN\", \"sources\": [{\"source\": \"learned_qa\"}, {\"source\": \"learned_qa\"}, {\"source\": \"learned_qa\"}, {\"source\": \"..\\data\\Adjustable Speed Drive.txt\"}, {\"source\": \"..\\data\\Adjustable Speed Drive.txt\"}, {\"source\": \"..\\data\\Adjustable Speed Drive.txt\"}, {\"source\": \"..\\data\\Adjustable Speed Drive.txt\"}], \"document_chunks\": [{\"content\": \"An Adjustable Speed Drive is an electronic or electromechanical system used to control the speed, torque, and direction of an electric motor by va...", "commandName": "insert", "databaseName": "rag_db", "requestId": 6334, "operationId": 6334, "driverConnectionId": 1, "serverConnectionId": 595, "serverHost": "127.0.0.1", "serverPort": 27017}
+2026-07-09T13:45:24.815167+00:00 | generate_answer                | pymongo.command | {"message": "Command succeeded", "clientId": {"$oid": "6a4fa5af2c51154e1d26ee61"}, "durationMS": 4.877000000000001, "reply": "{\"n\": 1, \"electionId\": {\"$oid\": \"7fffffff0000000000000001\"}, \"opTime\": {\"ts\": {\"$timestamp\": {\"t\": 1783604724, \"i\": 1}}, \"t\": 1}, \"ok\": 1.0, \"$clusterTime\": {\"clusterTime\": {\"$timestamp\": {\"t\": 1783604724, \"i\": 1}}, \"signature\": {\"hash\": {\"$binary\": {\"base64\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAA=\", \"subType\": \"00\"}}}}, \"operationTime\": {\"$timestamp\": {\"t\": 1783604724, \"i\": 1}}}", "commandName": "insert", "databaseName": "rag_db", "requestId": 6334, "operationId": 6334, "driverConnectionId": 1, "serverConnectionId": 595, "serverHost": "127.0.0.1", "serverPort": 27017}
+2026-07-09T13:45:24.815593+00:00 | generate_answer                | pymongo.connection | {"message": "Connection checked in", "clientId": {"$oid": "6a4fa5af2c51154e1d26ee61"}, "serverHost": "127.0.0.1", "serverPort": 27017, "driverConnectionId": 1}
+2026-07-09T13:45:24.815885+00:00 | generate_answer                | app_workflow.services.feedback_store | Interaction logged to MongoDB: request_id=3660a8e4-ae07-4f4f-a82e-b9a3046096cc quality=UNKNOWN
+Runs cleanly now, prints the full chronological trace across every node.
+
+Summary of everything:
+
+logger_config.py — _TracingHandler mirrors every logging call onto the active LangSmith run (via run_tree.add_event) and the matching Phoenix span (looked up by LangChain run_id, since Phoenix's OTel spans aren't attached to the ambient context). Verified server-side: a real run had 43 mirrored events.
+main.py — now calls setup_phoenix_tracing() (was missing, so Phoenix never activated for CLI runs).
+New: trace_events.py — since your LangSmith UI/plan doesn't surface custom run events anywhere (confirmed by you checking both the trace panel and Attributes tab), this pulls them back via the API instead:
+
+python -m app_workflow.services.trace_events <any_run_id_in_the_trace>
+It resolves the trace_id from that run, fetches every run in the trace, and prints all mirrored log events in chronological order with the originating node name — e.g. generate_answer | [GENERATE_ANSWER] LLM call failed.... Tested against your actual last run.
+One incidental thing this surfaced: it also picks up pymongo's internal debug logs (connection/command chatter), since that logger propagates to root too — harmless, just noisy if you pipe this through grep -v pymongo when reading it.
+
+c#42-42
+Answer briefly and in simple terms:
+
+Why cant we _TracingHandler is unable to show logs from the logging module in the LangSmith?
+Show less
+It's not actually unable to — it does successfully send them. We confirmed this by querying LangSmith's API directly: a real run had 43 log events attached, in order, with full messages.
+
+The real limit is on LangSmith's side, not the code: their web UI simply doesn't have a place to display custom events on this account/plan — not in the trace panel, not in Attributes, not as timeline markers. The data reaches LangSmith fine; their UI just never renders it.
+
+That's why we built trace_events.py — it reads those same events back via the API, bypassing the UI gap entirely.

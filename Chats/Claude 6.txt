@@ -1,0 +1,1506 @@
+I have been asked to move from llama-3.3-70b-versatile to llama-3.1-8b-instant, and check what issues arise. Gimme a set of queries that i can ask and see what changes are there in the responses. I have shifted to llama-3.1-8b-instant.
+Previously when i was using "llama-3.3-70b-versatile", I have been taking the use of confusion between ASD's meaning. There are several files in context that call Autism Spectrum Disorder as ASD and while only one file on Adjustable Speed Drive (and even that files doesnt use the abreviation of ASD). I would ask ask the query "What are the main components and working principles of ASD?" and it would respond on Autism. Then, I would mark it as bad, state that i was referring to Adjustible Speed Drive with ASD, and then quit (end chat). Then, I would start a new chat and again search for "What are the main components and working principles of ASD?". Then, it would give the right answer, i.e. on Adjustible speed drive. 
+Now, the model has been changed.
+
+Let me first read the uploaded dry run file to understand the full context.Now I have a complete picture. Let me analyze this carefully before giving you the query set.
+
+The dry run confirms this was already with `llama-3.1-8b-instant` (the model switch had already happened), and the second-session behaviour worked correctly — the agent used the failed variant memory and blocked the ASD→Autism path. Now let me map out all the risks of the model downgrade and give you a targeted test suite.
+
+Here's what changes between `llama-3.3-70b-versatile` and `llama-3.1-8b-instant` that matter for **your specific pipeline**:
+
+**Key risk areas:**
+1. **Tool call discipline** — 8b is much more likely to spam `retrieve_documents`, ignore the 5-call cap signal, or skip `check_answer_quality` entirely
+2. **Ambiguous abbreviation resolution** — weaker reasoning about context clues (your ASD problem)
+3. **Answer quality / verbosity** — 8b tends to give shallow, template-y answers (you saw this in the dry run: *"include several important parts"* with no actual parts listed)
+4. **Query reformulation** — weaker semantic diversity when retrying failed queries
+5. **Instruction following** — may ignore blocked variants in the system prompt
+6. **Self-learning distillation** — the `DISTILL_PROMPT` requires structured JSON with distinct rephrasings; 8b more likely to produce malformed JSON or repetitive rephrasings
+7. **Tool schema compliance** — more prone to `tool_use_failed` (BadRequestError) on complex responses
+
+---
+
+Here's your test suite, grouped by what each query is designed to stress:
+
+---
+
+### 🔴 Group 1 — Ambiguous Abbreviation (your known ASD problem)
+
+These test whether the model picks the right meaning given context clues, and whether the blocked-variant memory kicks in across sessions.
+
+```
+What are the main components and working principles of ASD?
+```
+*(Run twice — once fresh, once after marking the first bad if wrong. Does session 2 fix it?)*
+
+```
+How does ASD improve energy efficiency in industrial motors?
+```
+*(No ambiguity — should force Adjustable Speed Drive. Does 8b still drift to Autism?)*
+
+```
+What are the diagnostic criteria for ASD in children?
+```
+*(Should correctly go to Autism Spectrum Disorder. Does 8b get this right without confusion?)*
+
+```
+Compare ASD treatment approaches used in clinical settings.
+```
+*(Again should be Autism. Tests whether the model can hold the right meaning when context is medical.)*
+
+---
+
+### 🟠 Group 2 — Tool Call Discipline
+
+These test whether 8b respects the `MAX_TOTAL_RETRIEVALS = 5` cap and doesn't spam queries.
+
+```
+Give me a comprehensive overview of everything in the knowledge base.
+```
+*(Vague query — will 8b fire off 5+ retrievals trying to cover everything?)*
+
+```
+What is the history, components, working principle, applications, limitations, and future of Adjustable Speed Drives?
+```
+*(Multi-part question — does 8b split this into too many `retrieve_documents` calls?)*
+
+```
+Tell me about autism diagnosis AND motor control systems.
+```
+*(Two completely separate topics — does 8b handle this in ≤5 retrievals without losing one topic?)*
+
+---
+
+### 🟡 Group 3 — Answer Depth / Shallow Response Detection
+
+Your dry run already showed 8b gave *"include several important parts"* without naming any parts. These queries directly expose that weakness.
+
+```
+What are the specific components inside an Adjustable Speed Drive system?
+```
+*(Should name: rectifier, DC bus, inverter, controller, etc. Does 8b actually list them or stay vague?)*
+
+```
+What are the early signs and behavioural indicators of Autism Spectrum Disorder?
+```
+*(Should give specific symptoms. Does 8b give a real list or a generic placeholder?)*
+
+```
+How does the inverter section of an ASD convert DC back to AC?
+```
+*(Technical follow-up — tests whether 8b can synthesize detail from retrieved chunks, not just echo headings.)*
+
+---
+
+### 🔵 Group 4 — Query Reformulation Quality
+
+These test whether 8b generates meaningfully diverse retry queries or just shuffles words.
+
+```
+What factors affect the efficiency of variable frequency drives?
+```
+*(Not in the knowledge base as "VFD" — does 8b reformulate to "Adjustable Speed Drive efficiency" or just repeat variations of "variable frequency drive"?)*
+
+```
+What therapies help children with autism develop social skills?
+```
+*(Tests if reformulation stays semantically targeted or drifts.)*
+
+---
+
+### 🟣 Group 5 — Self-Learning / Distillation Quality
+
+Run these **after** triggering distillation (5 good interactions), then re-ask them to see if learned_qa actually helps.
+
+```
+What are the main components and working principles of ASD?
+```
+*(Post-distillation — does the learned_qa hit improve answer quality vs. the dry run you shared?)*
+
+```
+How does an Adjustable Speed Drive control motor torque?
+```
+*(Tests if distilled QA pairs surface relevant info that the raw chunks missed.)*
+
+---
+
+### ⚪ Group 6 — check_answer_quality Bypass Risk
+
+8b sometimes skips the quality check and goes straight to final answer. These are questions where a bad answer would slip through easily.
+
+```
+What is the role of the DC bus in an Adjustable Speed Drive?
+```
+*(Specific enough that if 8b answers without retrieving anything useful, quality check should catch it — does it even call quality check?)*
+
+```
+Is there any information in the knowledge base about sensory processing issues in autism?
+```
+*(Watch whether 8b calls `check_answer_quality` before answering or just returns immediately.)*
+
+---
+
+### The single most important comparison to do
+
+Run this exact pair and compare the outputs side by side:
+
+**Session A (fresh, no history):**
+```
+What are the main components and working principles of ASD?
+```
+
+**Session B (after marking Session A bad and restarting):**
+```
+What are the main components and working principles of ASD?
+```
+
+With `llama-3.3-70b` you confirmed Session B worked (blocked variants + correct topic). With `llama-3.1-8b` your dry run shows Session B **also worked** — but watch for whether the answer is still shallow (*"several important parts"* without naming them). That's the 8b-specific regression: it gets the **topic** right but not the **depth**.
+
+That phrase — **"doesn't spam queries"** — means the model doesn't fire off an excessive number of `retrieve_documents` tool calls unnecessarily.
+
+In your pipeline, "spamming queries" would look like this: the agent calls `retrieve_documents` 4 or 5 times in a row with only slightly different phrasings, burning through the `MAX_TOTAL_RETRIEVALS = 5` cap before it even has a chance to synthesize a good answer. Your system prompt explicitly warns against this:
+
+> *"Never call retrieve_documents more than 5 times total. Never repeat a query you have already tried."*
+
+The concern with `llama-3.1-8b-instant` is that smaller models are generally worse at following these kinds of self-restraint instructions — they tend to keep searching when uncertain rather than committing to an answer with what they have. So those Group 2 test queries are designed to check whether 8b respects that cap or wastes all 5 retrievals on near-duplicate searches.
+
+
+**"Shallow, template-y answers"** means the model gives responses that *sound* complete but are actually hollow — they use generic filler phrases instead of real information pulled from the retrieved chunks.
+
+In your specific case, you already saw this in the dry run. The 8b model answered:
+
+> *"The main components of an Adjustable Speed Drive (ASD) system include **several important parts** that work together to regulate motor speed and performance."*
+
+That's a shallow, template-y answer. It's essentially just rephrasing the question back at you. A good answer from 70b would have actually named the components — things like the **rectifier, DC bus, inverter, and controller** — because it's better at extracting and synthesizing specific details from the retrieved chunks.
+
+**"Template-y"** specifically means the response follows a predictable, copy-paste-feeling structure — like *"X consists of several important parts... for more information consult an expert"* — which feels like a fill-in-the-blank template rather than a real answer grounded in your documents.
+
+The root cause is that 8b has less capacity to reason over the retrieved text and condense it into a detailed answer, so it defaults to safe, vague language that technically isn't wrong but isn't actually useful either.
+
+
+Let me break it down in two parts.
+
+---
+
+**"The DISTILL_PROMPT requires structured JSON with distinct rephrasings"**
+
+When self-learning triggers, `SelfLearner` sends this prompt to the LLM asking it to produce a JSON array like:
+
+```json
+[
+  {"question": "How does an ASD regulate motor speed?", "answer": "..."},
+  {"question": "What controls the output frequency of a speed drive?", "answer": "..."},
+  {"question": "Which device adjusts AC motor velocity in industrial settings?", "answer": "..."}
+]
+```
+
+Each question must be **semantically distinct** — different vocabulary, different angle, same underlying meaning. This is hard. It requires the model to genuinely paraphrase rather than just shuffle words around.
+
+---
+
+**"8b more likely to produce malformed JSON or repetitive rephrasings"**
+
+Two failure modes specific to smaller models:
+
+**Malformed JSON** — 8b might produce something like:
+```
+Here are the QA pairs:
+```json
+[{"question": "How does ASD work?", "answer": "It controls speed."
+```
+...missing closing brackets, markdown backticks still in there, truncated mid-response. Your code does handle this with `.replace("```json", "")` but broken structure will still crash `json.loads()` and the whole distillation silently returns 0 pairs.
+
+**Repetitive rephrasings** — instead of genuinely distinct questions, 8b might give:
+```json
+[
+  {"question": "What are the components of an ASD?"},
+  {"question": "What are the main components of an ASD?"},
+  {"question": "What components does an ASD have?"}
+]
+```
+These are basically the same sentence. When they get embedded and stored in `learned_qa`, they cluster at nearly identical vectors — so they either all get retrieved together (wasting your top_k slots) or get deduplicated away, meaning distillation produced nothing useful.
+
+The net result is that your self-learning loop quietly degrades — it runs, reports success, but the `learned_qa` collection either stays empty or fills with near-duplicate junk that doesn't actually improve retrieval.
+
+Let me read the dry run and interactions files first.Yes, Group 1 is working. Here's the full picture across all 4 queries:
+
+---
+
+**Query 1 — "What are the main components and working principles of ASD?"**
+
+- **Session 1 (fresh):** ❌ Got Autism. Correctly thumbed down and the user feedback was recorded in `user_thumbdowns.json` with the clarification about Adjustable Speed Drive.
+- **Session 2 (new chat):** ✅ Got Adjustable Speed Drive. The blocked variant `"ASD main components and working principles"` was injected into the system prompt, and the model reformulated its queries toward motor/speed control terminology. The topic flip worked exactly as designed.
+
+**Query 2 — "How does ASD improve energy efficiency in industrial motors?"** ✅
+
+No ambiguity needed — the phrase "industrial motors" in the query itself was enough context. The model went straight to Adjustable Speed Drive. One query variant (`"ASD energy efficiency industrial motors"`) returned nothing, but the reformulation to `"adjustable speed drives energy efficiency"` worked. This variant has now also been saved to `failed_variants.json`.
+
+**Query 3 — "What are the diagnostic criteria for ASD in children?"** ✅
+
+Correctly resolved to Autism Spectrum Disorder. The word "diagnostic" and "children" gave enough context. Good answer with specific DSM-5 criteria listed.
+
+**Query 4 — "Compare ASD treatment approaches used in clinical settings."** ✅
+
+Also correctly resolved to Autism. Good answer covering ABA, OT, Speech Therapy, and medication, pulling from both `ASD_Patient_Management_Handbook.docx` and the clinical evaluation PDF.
+
+---
+
+**One thing to note:** Query 2's answer contains a suspicious claim — *"ASDs can reduce energy consumption by up to 50%"* attributed to *"a study published in the Journal of Energy and Power Engineering"*. Looking at the retrieved chunks, that specific statistic and journal citation **do not appear in any of the source chunks**. That's 8b hallucinating a fake citation — a real example of the depth/reliability regression from 70b to 8b that's worth watching.
+
+
+Let me check the actual file.I was wrong — I apologize for the incorrect call. Let me correct myself.
+
+The file says:
+
+> *"According to energy studies, electric motors consume a significant portion of global electricity... By integrating Adjustable Speed Drives into motor-driven systems, organizations can **reduce energy consumption substantially**"*
+
+The document **never mentions "50%"** and **never cites any "Journal of Energy and Power Engineering"**. So my original assessment stands — the 8b model hallucinated both the specific statistic and the journal citation. They are not present anywhere in the source file.
+
+The retrieved chunks for that query were about greenhouse gas emissions and motor efficiency in general terms, and 8b fabricated a precise-sounding number and a fake academic citation to make the answer appear more credible. That's exactly the hallucination problem I flagged — and now you have direct proof of it against your own source document.
+
+
+I quit the chat, removed all 3 of the feedback files and kept the vectorDB with original ingested content (nothing in learned_qa). What do u think about the new outputs?
+Let me read both files first.The dry run only shows queries 1 and 3. Let me check the interactions file for the full picture including query 2.Here's the full breakdown of Group 2:
+
+---
+
+**Query 1 — "Give me a comprehensive overview of everything in the knowledge base."** ❌ — but predictably so
+
+The model fired all 3 retrievals simultaneously in iteration 1 (alongside a premature `check_answer_quality` call — more on that below), all with semantically useless queries: `"knowledge base overview"`, `"knowledge base contents"`, `"knowledge base scope"`. All three returned zero results because those phrases don't match anything actually stored in the vector store. The final answer was honestly `"INSUFFICIENT"`, which is the correct graceful failure. The 3 failed variants are now saved in `failed_variants.json`, so a second session would block those exact phrasings.
+
+The real issue here isn't tool call discipline — it's that this is simply an **unanswerable query** for this kind of RAG system. The vector store has no meta-document describing itself, so no embedding search will work. This query was expected to fail.
+
+---
+
+**Query 2 — "What is the history, components, working principle, applications, limitations, and future of Adjustable Speed Drives?"** ⚠️ — tool discipline failed
+
+This is the clearest Group 2 failure. The model made **5 separate `retrieve_documents` calls**, one per sub-topic: history, components, working principle, applications, limitations. It burned the entire `MAX_TOTAL_RETRIEVALS = 5` cap in one shot, leaving nothing for a retry or quality check. The quality signal came back `INSUFFICIENT` because `check_answer_quality` was never called.
+
+The answer itself is actually not bad in structure — it covers all 6 sub-topics — but it's shallow and contains a hallucination: *"first commercial ASDs being introduced in the 1960s"* is not in your source file anywhere. Your `Adjustable_Speed_Drive.txt` only says earlier methods were mechanical and modern electronic drives replaced them — no dates are given. That's 8b fabricating again.
+
+---
+
+**Query 3 — "Tell me about autism diagnosis AND motor control systems."** ❌ — completely dropped one topic
+
+This is the most significant failure. The user asked about **two separate topics**: autism diagnosis AND motor control systems (i.e., Adjustable Speed Drives). The model interpreted "motor control" through the autism lens — framing it as *motor skill difficulties in autistic children* — and never retrieved a single chunk from `Adjustable Speed Drive.txt`. All 3 queries it generated (`"autism diagnosis and motor control systems"`, `"autism motor skills and diagnosis"`, `"autism motor control and diagnostic criteria"`) were autism-only reformulations. The Adjustable Speed Drive topic was completely ignored.
+
+This is a direct consequence of 8b's weaker reasoning — it latched onto the dominant topic (autism, which has far more documents) and reinterpreted "motor control systems" to fit that context rather than recognizing it as a separate subject. A stronger model would have split this into two independent retrieval tracks.
+
+---
+
+**The premature `check_answer_quality` call in Query 1** is also worth flagging. In iteration 1, the model called `check_answer_quality` *at the same time* as the 3 retrieval calls, before any results had come back. It even pre-filled a fabricated answer to pass to the quality checker. Your agent loop handles this gracefully (it processes tool calls sequentially), but it reveals that 8b doesn't understand the sequential dependency between retrieving first and checking quality after — it treats all tool calls as independent parallel actions.
+
+
+context window of this llm  "llama-3.1-8b-instant"? 
+actual data/tokens we can send to this llm
+Here's the breakdown for `llama-3.1-8b-instant` on Groq:
+
+**Context Window: 128K tokens (~128,000 tokens)**
+
+But the distinction that matters for your RAG pipeline is input vs. output:
+
+| Limit | Tokens |
+|---|---|
+| **Max input (context)** | 128,000 tokens |
+| **Max output** | 8,192 tokens |
+
+### Practical implications for your project
+
+Your `agent_query.py` sets `max_tokens=2048` for the LLM output, which is well within the 8,192 output cap — that's fine.
+
+What you need to watch is the **total input** sent each iteration, which includes:
+- System prompt
+- Full conversation history (grows with each iteration!)
+- All tool call results (retrieved chunks, quality check results)
+- User query
+
+With `MAX_ITERATIONS = 6` and `MAX_TOTAL_RETRIEVALS = 5`, each retrieval returning up to 5 chunks of ~1,000 chars each, your message history can grow significantly across iterations. A rough estimate: system prompt (~500 tokens) + 5 retrievals × 5 chunks × ~300 tokens ≈ ~8,000 tokens of context — still well within 128K.
+
+The 128K window is generous enough that you're unlikely to hit it in normal usage, but if you're ingesting very large documents or have long multi-turn sessions, it's worth monitoring the `_serialize_messages` output length in your debug logs.
+
+"llam 70b versatile"
+Here's the full breakdown for `llama-3.3-70b-versatile` on Groq (the model your project currently uses):
+
+| Limit | Tokens |
+|---|---|
+| **Max input (context)** | 128,000 tokens |
+| **Max output** | 32,768 tokens |
+
+So compared to `llama-3.1-8b-instant`, the **input window is identical** (128K), but the **output limit is 4× larger** — 32,768 vs 8,192 tokens.
+
+### What this means for your RAG pipeline
+
+Your `agent_query.py` sets `max_tokens=2048`, which is very conservative — you're using only ~6% of the available output capacity. That's intentional for a RAG agent (answers should be concise), but good to know you have headroom.
+
+The 128K input window is the same as the 8B model, so your multi-iteration message history with accumulated tool results is just as safe here.
+
+One notable advantage of the 70B versatile model for your use case: it achieves 86% on MMLU and has strong multilingual and tool-use capabilities, which directly benefits your agentic loop's ability to correctly decide *when* to call `retrieve_documents` vs `check_answer_quality` — something the smaller 8B model is more likely to mishandle.
+
+
+what is MMLU and what makes it tool-use capabilities good?
+Great questions — these are two separate things:
+
+---
+
+## MMLU (Massive Multitask Language Understanding)
+
+It's a **benchmark test** used to measure how much general knowledge an LLM has across 57 different academic subjects, including:
+
+- Math, physics, chemistry
+- History, law, medicine
+- Computer science, economics
+- Philosophy, ethics, and more
+
+The model is given multiple-choice questions from all these domains and scored on accuracy. An 86% score (like llama-3.3-70b-versatile) means it answered 86% of questions correctly — which is roughly **expert human level** on many subjects.
+
+Think of it as an IQ + knowledge test for LLMs.
+
+---
+
+## Tool-Use Capabilities
+
+"Good tool use" in an LLM means the model reliably knows:
+
+1. **When to call a tool** — vs just answering from memory
+2. **Which tool to call** — e.g. `retrieve_documents` vs `check_answer_quality`
+3. **What arguments to pass** — correctly structured JSON (e.g. `{"query": "..."}`)
+4. **How to read the tool result** — and use it to continue reasoning
+
+Poor tool use looks like:
+- Calling `retrieve_documents` 5 times with the same query
+- Passing garbage arguments that cause a `400 tool_use_failed` error (your code already handles this edge case!)
+- Ignoring the tool result and making up an answer anyway
+- Calling tools in the wrong order
+
+---
+
+## Why it matters for your project specifically
+
+Your `agent_query.py` has a strict agentic loop with rules like *"never repeat a query"*, *"max 5 retrievals"*, *"call check_answer_quality once"*. A model with weak tool-use will break these rules constantly, burning through your retrieval budget or producing hallucinated answers. The 70B versatile model is much better at respecting these constraints than smaller models.
+
+```markdown
+how is chunking done here:
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        length_function=len,
+        separators=["\n\n", "\n", " ", ""],
+    )
+```
+
+## How `RecursiveCharacterTextSplitter` Works
+
+It tries to split text using a **priority list of separators**, going from largest/most meaningful to smallest:
+
+```
+"\n\n"  →  "\n"  →  " "  →  ""
+```
+
+---
+
+### The Algorithm (Step by Step)
+
+**1. Try the first separator: `"\n\n"` (paragraph breaks)**
+
+It splits the whole document on double newlines first.
+
+```
+"Intro paragraph.\n\nSecond paragraph.\n\nThird paragraph."
+        ↓
+["Intro paragraph.", "Second paragraph.", "Third paragraph."]
+```
+
+**2. Check each piece against `CHUNK_SIZE` (1000 chars)**
+
+- If a piece is **≤ 1000 chars** → keep it, done ✅
+- If a piece is **> 1000 chars** → recurse with the next separator (`"\n"`)
+
+**3. Recurse down the separator list as needed**
+
+```
+"\n\n" didn't split it small enough?
+  → try "\n"   (single newlines / line breaks)
+    → try " "  (individual words)
+      → try ""  (individual characters — last resort)
+```
+
+**4. Apply `CHUNK_OVERLAP` (200 chars)**
+
+After splitting, adjacent chunks share 200 characters of overlap at their boundary:
+
+```
+[...........chunk 1............][overlap][...........chunk 2............]
+                                 ←200→
+```
+
+This prevents a concept that straddles a boundary from being lost entirely.
+
+---
+
+### Concrete Example with Your Settings
+
+Say you have a 2500-char paragraph with no `\n\n` breaks:
+
+```
+Step 1: Try "\n\n"  → whole thing is one piece, still 2500 chars  ❌
+Step 2: Try "\n"    → splits into lines, each ~100 chars           ✅
+Step 3: Merge lines back up until just under 1000 chars            ✅
+Step 4: Apply 200-char overlap between resulting chunks            ✅
+```
+
+Result: ~3 chunks of ≤1000 chars, each sharing 200 chars with its neighbor.
+
+---
+
+### Why This Order of Separators Matters
+
+| Separator | Splits on | Preserves |
+|---|---|---|
+| `"\n\n"` | Paragraphs | Most semantic meaning |
+| `"\n"` | Lines | Sentence/list structure |
+| `" "` | Words | Word boundaries |
+| `""` | Characters | Nothing (last resort) |
+
+The **recursive** part is key — it always tries to keep chunks as semantically whole as possible, only breaking at word/character level if absolutely forced to. This is much better for RAG than a naive "cut every 1000 chars" approach, because your retrieved chunks are more likely to contain complete thoughts.
+
+
+```markdown
+for llama-3.3-70b-versatile on Groq:
+Limit -> Tokens
+Max input (context): 128,000 
+tokensMax output: 32,768 tokens
+
+for llama-3.1-8b-instant on Groq:
+Limit -> Tokens
+Max input (context): 128,000 
+tokensMax output: 8192 tokens
+
+    What can you tell me about the context window? Use the reference of "llama-3.1-8b-instant"?
+    What can you tell me about the actual data/tokens we can send to this llm "llama-3.1-8b-instant"? How and why are they different?
+    How is chunking done here:
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        length_function=len,
+        separators=["\n\n", "\n", " ", ""],
+    )
+    Are there any algorithms to prioritize between the retrieved chunks for future improvements? If yes what are they?
+    What is the weaknesses and limitations of the llms like "llama-3.1-8b-instant"? How can we overcome these?
+    Will "llama-3.1-8b-instant" work on 128,000 tokens (max limit)? Will it produce a reasonable output?
+```
+Let me address each question thoroughly:
+
+---
+
+## 1. Context Window of `llama-3.1-8b-instant`
+
+The **128,000 token context window** is the total "working memory" the model can see at once in a single API call. Think of it like a desk — everything on the desk is what the model can "read" simultaneously.
+
+It includes **everything** sent in one request:
+- System prompt
+- Full conversation history
+- Tool call results (retrieved chunks)
+- The user's query
+- The model's own previous responses
+
+Once something falls outside this window, the model has **zero memory of it** — it's completely gone.
+
+---
+
+## 2. Context Window vs. Actual Sendable Data
+
+They are **not the same**, and this is a critical distinction:
+
+```
+Total Context Window:  128,000 tokens
+─────────────────────────────────────────────────────
+  System prompt:        ~300–500   tokens  (fixed overhead)
+  Conversation history: grows with every iteration
+  Tool results (chunks):~1,500–3,000 tokens per retrieval
+  Max output reserved:  8,192      tokens  (output eats into context)
+─────────────────────────────────────────────────────
+Actual usable input:   ~119,000–120,000 tokens (rough estimate)
+```
+
+### Why are they different?
+
+| Reason | Explanation |
+|---|---|
+| **Output reservation** | The model needs to reserve tokens for its response. Input + Output must fit within 128K total |
+| **System prompt overhead** | Your `_BASE_SYSTEM_PROMPT` and blocked variants consume tokens before any user content |
+| **History accumulation** | Every iteration in your loop appends messages — the history grows and eats into available space |
+| **Tool results** | Each `retrieve_documents` call adds ~1,000–3,000 tokens of chunk text back into the message history |
+
+So in your pipeline with `MAX_ITERATIONS=6` and `MAX_TOTAL_RETRIEVALS=5`, a rough real-world budget looks like:
+
+```
+128,000  total
+-  8,192  reserved for output
+-    500  system prompt
+-  2,000  conversation turns (questions + assistant messages)
+- 15,000  5 retrievals × ~3,000 tokens each
+─────────
+~102,000  tokens still technically available — but you'll never need it for RAG
+```
+
+---
+
+## 3. Chunking — Already Covered Above
+
+Recap of key points for this context:
+
+- `CHUNK_SIZE=1000` chars ≠ 1000 tokens. Tokens are roughly **1 token per ~4 chars** in English, so each chunk ≈ **~250 tokens**
+- `CHUNK_OVERLAP=200` chars ≈ **~50 tokens** of overlap
+- With `top_k=5`, each retrieval returns ~5 chunks × ~250 tokens = **~1,250 tokens** added to context per retrieval call
+- This is why your pipeline stays well within the 128K limit even with 5 retrievals
+
+---
+
+## 4. Algorithms to Prioritize Retrieved Chunks
+
+Your current system uses **cosine similarity** ranking (via ChromaDB distances). There are several better alternatives:
+
+### A. BM25 (Sparse Retrieval)
+- Keyword-frequency based, like traditional search engines
+- Great at exact term matching that embeddings sometimes miss
+- **Hybrid approach**: combine BM25 score + cosine similarity score
+
+### B. MMR — Maximal Marginal Relevance
+- Balances **relevance** vs **diversity**
+- Avoids returning 5 chunks that all say the same thing
+- Formula: pick next chunk that is relevant to query but dissimilar to already-selected chunks
+- **Best fit for your pipeline** — easy to add to `retriever.py`
+
+### C. Cross-Encoder Reranking
+- A second, smaller model re-reads (query + each chunk) together and scores relevance
+- Much more accurate than embedding similarity alone
+- Popular models: `cross-encoder/ms-marco-MiniLM-L-6-v2`
+- **Tradeoff**: slower, adds latency
+
+### D. Reciprocal Rank Fusion (RRF)
+- Combines rankings from multiple retrieval methods (e.g. BM25 + cosine)
+- Simple formula, very effective
+- Already partially relevant — your `retriever.py` merges `documents` + `learned_qa` collections, RRF would make that merger smarter
+
+### E. Contextual Compression
+- After retrieval, pass chunks through an LLM to extract only the sentences relevant to the query
+- Reduces noise before the main LLM sees the context
+- LangChain has a built-in `ContextualCompressionRetriever` for this
+
+**Recommended upgrade path for your project:**
+```
+Current:  cosine similarity only
+Step 1:   Add MMR (diversity)
+Step 2:   Add BM25 hybrid scoring  
+Step 3:   Add cross-encoder reranking on top-10, pass top-5 to LLM
+```
+
+---
+
+## 5. Weaknesses of `llama-3.1-8b-instant`
+
+### A. Knowledge Cutoff
+- Training data ends at a fixed date — knows nothing after that
+- **Fix in your pipeline**: RAG itself solves this — your documents are the knowledge source, not the model's memory
+
+### B. Reasoning Depth
+- 8B parameters means it struggles with multi-hop reasoning (A → B → C → answer)
+- May fail to connect information across multiple retrieved chunks
+- **Fix**: Use `llama-3.3-70b-versatile` for complex queries (which your project already does)
+
+### C. Instruction Following
+- More likely than 70B to ignore rules like *"never call retrieve_documents more than 5 times"*
+- May produce malformed tool call JSON → causes `BadRequestError` (your code already handles this)
+- **Fix**: Simpler, more explicit system prompts; your `_BASE_SYSTEM_PROMPT` is already well-structured
+
+### D. Hallucination
+- More prone to confidently fabricating facts when context is thin
+- **Fix**: Your `check_answer_quality` tool partially mitigates this by checking for red-flag phrases
+
+### E. Context Utilization
+- Smaller models suffer from the **"lost in the middle" problem** — they attend well to the start and end of context but ignore information buried in the middle
+- **Fix**: Put the most important chunks first and last, not in the middle
+
+### F. Tool Use Reliability
+- As discussed, 8B models more frequently misuse tools or produce bad JSON
+- **Fix**: Stick to 70B for agentic/tool-use workloads
+
+---
+
+## 6. Will it Work Well at 128,000 Tokens?
+
+**Technically yes. Practically, no — not reliably.**
+
+| Token Range | Expected Quality |
+|---|---|
+| 0 – 20,000 | ✅ Strong, reliable output |
+| 20,000 – 60,000 | ⚠️ Acceptable, minor degradation |
+| 60,000 – 100,000 | ❌ Noticeable "lost in the middle" problem |
+| 100,000 – 128,000 | ❌ Significant quality drop, may ignore large portions |
+
+### Why?
+
+- The model was **trained** on sequences far shorter than 128K in most cases — long-context is a fine-tuned capability, not a native strength of 8B models
+- Attention mechanisms scale as O(n²) with sequence length — at 128K the model struggles to attend evenly across all tokens
+- The **"lost in the middle"** research showed all LLMs degrade when relevant info is buried deep in a long context
+
+### For your RAG pipeline specifically:
+Your design is already optimal — you retrieve small targeted chunks (top_k=5, ~1,250 tokens) rather than stuffing entire documents into context. You're operating in the **0–20K token range** per query, which is the sweet spot for reliable 8B model output.
+This line is saying:
+
+---
+
+## `~102,000 tokens still technically available — but you'll never need it for RAG`
+
+After subtracting all the overhead (output reservation, system prompt, conversation history, retrieved chunks), you still have **~102,000 tokens of unused space** in the 128K context window.
+
+But the point is — **RAG is specifically designed so you never need that space.**
+
+### Why?
+
+RAG's whole philosophy is **precision over volume**:
+
+```
+❌ Naive approach:  stuff entire documents into context (10,000–100,000 tokens)
+✅ RAG approach:    retrieve only the 5 most relevant chunks (~1,250 tokens)
+```
+
+Instead of giving the LLM a 200-page book and saying *"find the answer"*, RAG pre-selects the 2–3 paragraphs most likely to contain the answer and only sends those.
+
+### So the 102K leftover is essentially wasted headroom?
+
+Yes — and that's a **good thing**. It means:
+
+- Your queries are fast (less tokens = faster inference)
+- Your costs are low (you're billed per token on Groq)
+- Your answer quality is higher (model focuses on a small, relevant context rather than drowning in 100K tokens)
+- You stay far from the danger zone where `llama-3.1-8b-instant` starts degrading (as discussed — quality drops badly beyond ~60K tokens)
+
+Think of it like this: just because your desk **can fit** 500 documents doesn't mean you should put all 500 on it when you only need 3 to answer the question.
+
+
+One query (message sent to LLM) used: 
+Tokens (total)  : 3408 prompt + 385 completion = 3793 total
+How does the quality of the response deteriorate after just 2 to 3 queries?
+Great real-world data point. Let's break this down precisely.
+
+---
+
+## Your Actual Token Usage Per Query
+
+```
+Single query:  3,408 prompt + 385 completion = 3,793 tokens
+```
+
+This is very lean. But here's the problem — **your pipeline is stateful.**
+
+---
+
+## Why Quality Degrades After 2–3 Queries
+
+The key is in your `agent_query.py` — look at how `messages` is built:
+
+```python
+messages = [
+    {"role": "system",    "content": _build_system_prompt(...)},
+    {"role": "user",      "content": query},
+]
+```
+
+This resets **per query** in your `run_agent()` call — so each query starts fresh. ✅
+
+**BUT** — the degradation isn't about token count. It's about something else entirely:
+
+---
+
+## The Real Causes of Degradation After 2–3 Queries
+
+### 1. Growing `failed_variants_store` injected into system prompt
+
+```python
+blocked = failed_variants_store.get(norm, [])
+# → injected into system prompt as BLOCKED QUERY VARIANTS
+```
+
+Every failed retrieval variant from previous queries gets **permanently appended** to the system prompt for similar future queries. More blocked variants = longer, noisier system prompt = model gets confused about what it *can* do.
+
+### 2. `feedback_store` / `learned_qa` interference
+
+After enough good interactions, `self_learner.run_distillation()` adds QA pairs to `learned_qa`. The retriever then **merges results** from both collections:
+
+```python
+# retriever.py
+if self.learned_collection and self.learned_collection.count() > 0:
+    learned_results = self._query_collection(...)
+    results.extend(learned_results)
+```
+
+If early distilled QA pairs are slightly wrong or off-topic, they start **polluting** retrieval results for later queries.
+
+### 3. The "Lost in the Middle" problem — even at 3,408 tokens
+
+At 3,408 prompt tokens, your context looks roughly like:
+
+```
+[System prompt ~500 tokens]
+[User query    ~50  tokens]
+[Tool call     ~20  tokens]
+[Chunk 1       ~250 tokens]
+[Chunk 2       ~250 tokens]   ← model attention weakens here
+[Chunk 3       ~250 tokens]   ← weakens further
+[Chunk 4       ~250 tokens]   ← often ignored
+[Chunk 5       ~250 tokens]
+[Quality check ~200 tokens]
+```
+
+The 8B model strongly attends to the **start** (system prompt) and **end** (last tool result) — chunks 2, 3, 4 in the middle get progressively less attention **even within a single query at 3K tokens.**
+
+### 4. `llama-3.1-8b-instant` has weak instruction persistence
+
+After 2–3 tool call rounds **within a single multi-iteration query**, the model starts:
+- Forgetting rules from the system prompt ("never repeat a query")
+- Calling tools redundantly
+- Generating answers before checking quality
+- Producing slightly malformed tool call JSON
+
+This is a known weakness of 8B models in agentic loops — instruction following degrades as the **conversation history within a single run** grows across iterations.
+
+---
+
+## Summary
+
+```
+Query 1:  Fresh context, model follows rules well          ✅
+Query 2:  Blocked variants added to prompt, minor noise    ⚠️
+Query 3+: Distilled QA pairs in learned_qa may pollute     ⚠️
+          retrieval, model instruction-following weakens    ❌
+```
+
+The degradation isn't from hitting 60K tokens — **you're nowhere near that.** It's from **accumulated state pollution** (blocked variants, learned QA noise) and the **inherent weakness of 8B models in multi-turn agentic loops** — both of which compound across queries.
+
+
+
+First u said that the LLM focuses on whats at the "start" where my prompt etc are and so it ignores the chunks in the lower end of the message. Now u r saying it will ignore the prmopt as well...doesnt make sense
+You're right to call that out — I was imprecise. Let me clarify properly.
+
+---
+
+## These Are Two Separate Problems
+
+### Problem 1 — "Lost in the Middle" (within a single query)
+This is about **where chunks sit** inside one prompt:
+
+```
+[System prompt]     ← HIGH attention ✅
+[Chunk 1]           ← HIGH attention ✅
+[Chunk 2]           ← medium attention ⚠️
+[Chunk 3]           ← low attention ❌
+[Chunk 4]           ← low attention ❌
+[Last tool result]  ← HIGH attention ✅
+```
+
+The model reads the **start and end well**, middle gets ignored. The **system prompt is always safe** here because it's at the very top.
+
+---
+
+### Problem 2 — Instruction Drift (across multiple iterations within one run)
+This is completely different. It's not about position in the prompt — it's about the **model's ability to keep obeying rules** as the conversation grows longer through iterations 1 → 2 → 3 → 4...
+
+```
+Iteration 1: model remembers "max 5 retrievals" ✅
+Iteration 2: still following rules ✅
+Iteration 3: starting to drift ⚠️
+Iteration 4: may call retrieve_documents again anyway ❌
+```
+
+The system prompt **hasn't moved** — it's still at the top. But the model's **compliance** with it weakens as the conversation grows. Think of it like reading a rulebook at the start of a game — by round 4 you start forgetting some rules even though you read them clearly at the beginning.
+
+---
+
+## So to directly correct my earlier statement:
+
+| | What gets ignored |
+|---|---|
+| Lost in the Middle | Middle **chunks** inside the prompt |
+| Instruction Drift | The **rules** from the system prompt, not its position |
+
+The system prompt is never "ignored" in terms of attention — it's always read. But a small 8B model **struggles to consistently enforce its own rules** across many back-and-forth tool call iterations. That's the distinction I should have made clearer from the start.
+
+Great question. It comes down to the fundamental architecture of how these models work.
+
+---
+
+## Why Small Models Struggle to Enforce Rules Over Long Conversations
+
+### 1. Parameter Count = "Working Memory Capacity"
+
+A model's parameters are essentially its ability to **hold and juggle multiple things simultaneously** during generation. 
+
+```
+8B  parameters  → limited juggling capacity
+70B parameters  → much larger juggling capacity
+```
+
+When the conversation is short (iteration 1), the model easily holds:
+- "I must follow these 6 rules"
+- "I've done 2 retrievals so far"
+- "The user asked about X"
+
+As iterations grow, it now needs to track:
+- All previous tool calls and their results
+- Which queries it already tried
+- How many retrievals remain
+- The accumulating context of retrieved chunks
+- The original rules
+
+The 8B model starts **dropping the rules** to make room for tracking the growing conversation — like a person trying to remember too many things at once and forgetting the original instructions.
+
+---
+
+### 2. Attention Dilution
+
+Every token in the context competes for the model's attention. As the conversation grows across iterations:
+
+```
+Iteration 1 context:  500 tokens   → rules get ~high attention share
+Iteration 4 context:  3,000 tokens → rules get ~6x less attention share
+```
+
+The system prompt tokens are the same — but they now represent a **smaller fraction** of the total context. The model's attention naturally shifts toward the most recent content (latest tool results, latest assistant message) because that's what's most immediately relevant to "what do I say next."
+
+---
+
+### 3. Instruction Following is a Learned Behavior, Not Hard-Coded
+
+The model doesn't have an actual rule engine — it doesn't literally "check" constraints before acting. It learned to follow instructions by seeing millions of examples of instruction-following during training.
+
+But that training had a distribution — most examples were **short, simple instruction following**. Long multi-turn agentic loops with strict tool-use rules were far rarer in training data. So the model is essentially **extrapolating** into territory it's less trained on, and it drifts.
+
+A 70B model saw more of this in training and has more capacity to generalize — so it holds up better.
+
+---
+
+### 4. No Explicit State Tracking
+
+Your rules say things like:
+> *"Never call retrieve_documents more than 5 times total"*
+
+A human would keep a mental counter. The model has **no actual counter** — it has to infer how many times it's called the tool by re-reading the conversation history and counting. As the history grows noisier across iterations, this counting becomes unreliable.
+
+This is why your code enforces it **externally**:
+
+```python
+if total_retrievals >= MAX_TOTAL_RETRIEVALS:
+    result = "Retrieval limit reached. Use what you have to answer."
+```
+
+You're essentially compensating for the model's inability to reliably self-enforce this rule — which is exactly the right design decision.
+
+---
+
+## In One Sentence
+
+> The model isn't a rule-engine — it's a pattern matcher, and as the conversation grows longer and noisier, the pattern of "follow these rules" gets diluted by the pattern of "respond to what's immediately in front of me."
+
+
+__Consider this version of the file. Note the message structure that is sent to the LLM. Can you tell me the prompt engineering techniques/methods etc to IMPROVE the content, structure and size of the message? I want the answers to improve, so tell me these that i can use to make my prompt better
+Let me read the file carefully first.Good, I've read the full file. Now let me give you a thorough analysis.
+
+---
+
+## Prompt Engineering Improvements for Your Pipeline
+
+---
+
+### 1. Restructure the System Prompt — Role → Context → Rules → Output Format
+
+**Current structure** mixes everything together loosely. A better structure is:
+
+```
+[ROLE]         → who the agent IS
+[CONTEXT]      → what it has access to
+[PROCESS]      → exactly how to work step by step  
+[CONSTRAINTS]  → hard rules with consequences
+[OUTPUT FORMAT]→ exactly what the final answer should look like
+```
+
+**Current:**
+```python
+_BASE_SYSTEM_PROMPT = """You are a research assistant with access to a knowledge base.
+
+When given a question:
+1. Call retrieve_documents with 2-3 diverse search queries MAX — no more.
+2. Read the results carefully.
+...
+STRICT RULES:
+- Never call retrieve_documents more than 5 times total.
+...
+Never make up facts."""
+```
+
+**Improved:**
+```python
+_BASE_SYSTEM_PROMPT = """## ROLE
+You are a precise research assistant. Your only knowledge source is the 
+knowledge base — you never answer from memory or assumptions.
+
+## WHAT YOU HAVE ACCESS TO
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+
+## PROCESS — follow this exactly
+STEP 1: Call retrieve_documents with 2-3 SHORT, DIVERSE queries.
+         - Each query must use DIFFERENT vocabulary and angle
+         - Bad:  "symptoms of ASD", "ASD symptoms", "signs of ASD"  ← same angle
+         - Good: "ASD diagnosis criteria", "autism social behavior", "sensory processing disorder"
+STEP 2: Read chunks carefully. If clearly insufficient → ONE more rephrased query, then stop.
+STEP 3: Draft answer using ONLY retrieved chunks. Cite [Source: X] inline.
+STEP 4: Call check_answer_quality(answer=<your draft>). 
+STEP 5: Return final answer.
+
+## HARD CONSTRAINTS
+- retrieve_documents: MAX 5 calls total. Stop after 3 if results are poor.
+- NEVER repeat a query already tried.
+- NEVER fabricate facts not present in retrieved chunks.
+- If knowledge base lacks the answer after 3 tries → say "The knowledge base does not contain information about X."
+
+## OUTPUT FORMAT
+Answer: <your answer with inline [Source: filename] citations>
+Confidence: HIGH | MEDIUM | LOW
+Reason for confidence: <one sentence>"""
+```
+
+**Why this is better:**
+- Positive + negative examples teach the model what "diverse" actually means
+- Output format forces structured, consistent responses
+- Confidence signal helps your `check_answer_quality` logic and the user
+
+---
+
+### 2. Add Positive + Negative Examples (Few-Shot Prompting)
+
+Your current prompt tells the model what to do but never **shows** it. Small 8B models especially benefit from examples.
+
+Add this to the system prompt:
+
+```python
+## EXAMPLE — Good query diversity
+User question: "What causes climate change?"
+retrieve_documents("greenhouse gas emissions sources")      ← angle: causes
+retrieve_documents("global temperature rise evidence")     ← angle: effects/data  
+retrieve_documents("carbon dioxide atmosphere concentration") ← angle: mechanism
+
+## EXAMPLE — Bad query diversity (DO NOT DO THIS)
+retrieve_documents("causes of climate change")
+retrieve_documents("what causes climate change")           ← same query rephrased
+retrieve_documents("climate change causes")                ← same again
+```
+
+This directly addresses your real problem — the model repeating semantically identical queries.
+
+---
+
+### 3. Make Blocked Variants More Directive
+
+**Current:**
+```python
+f"BLOCKED QUERY VARIANTS — These exact phrasings retrieved 0 useful chunks..."
+f'  - "{v}"'
+```
+
+**Problem:** It tells the model what NOT to do but doesn't guide it toward what TO do.
+
+**Improved:**
+```python
+f"FAILED QUERIES (retrieved 0 useful chunks — do not reuse):\n"
+for v in blocked_variants:
+    f'  ✗ "{v}"\n'
+f"\nINSTEAD try completely different angles such as:\n"
+f"  - Opposite perspective (e.g. instead of causes → effects)\n"
+f"  - More specific sub-topic\n"  
+f"  - Technical terminology instead of plain language\n"
+f"  - Related concept that might co-occur in the same document\n"
+```
+
+---
+
+### 4. Inject Retrieval State into Messages (Not Just System Prompt)
+
+Right now the model has to infer how many retrievals it's done by reading through the message history. Instead, inject a **state summary message** before each LLM call:
+
+```python
+# Add this just before llm.invoke() in your run_agent loop:
+state_msg = (
+    f"[AGENT STATE] Retrieval {total_retrievals}/{MAX_TOTAL_RETRIEVALS} used. "
+    f"Iteration {iterations}/{MAX_ITERATIONS}. "
+    f"Queries tried so far: {[s['query'] for s in retrieved_sources]}"
+)
+messages_with_state = messages + [{"role": "user", "content": state_msg}]
+response = llm.invoke(messages_with_state, tools=tool_schemas)
+```
+
+**Why:** Instead of the model trying to count tool calls in history, you hand it the count explicitly — this directly combats instruction drift.
+
+---
+
+### 5. Compress Tool Results Before Adding to History
+
+**Current:** Full raw chunk text goes into messages as-is (~250 tokens per chunk × 5 chunks = ~1,250 tokens per retrieval call, growing across iterations).
+
+**Improved:** Add a compression step before appending to messages:
+
+```python
+# In your retrieve_documents tool result handling:
+if len(result) > 800:  # chars
+    # Keep source headers + first 150 chars of each chunk
+    compressed = "\n\n".join(
+        f"[Source: {d['metadata'].get('source','?')}, score: {d['similarity_score']:.2f}]\n"
+        f"{d['content'][:150]}..."
+        for d in docs
+    )
+    result = f"[COMPRESSED — {len(docs)} chunks found]\n{compressed}"
+```
+
+This cuts tool result tokens by ~60% while keeping source attribution and key content visible.
+
+---
+
+### 6. Explicit Chain-of-Thought Instruction
+
+Tell the model to reason before acting:
+
+```python
+## BEFORE calling any tool, think:
+# - What is the user actually asking for?
+# - What are 3 genuinely different angles to search?
+# - Have I already tried this query?
+# Write your reasoning as a brief thought, then act.
+```
+
+This is **Chain-of-Thought (CoT)** prompting. For small models it significantly improves tool selection quality because the model "commits" to a reasoning path before generating a tool call.
+
+---
+
+### 7. Trim Prior Thumbdown Context
+
+**Current:** Your `_build_system_prompt` dumps up to 300 chars of bad answer + all variant queries + chunk previews into the system prompt. This can grow very large and noisy.
+
+**Improved — cap aggressively:**
+```python
+# Limit to 1 prior thumbdown max, 150 char answer snippet, 1 chunk preview per variant
+bad_ans = td.get("bad_answer", "")[:150]  # was 300
+for c in chunks[:1]:                       # was [:2]
+    content = content[:100]                # was [:200]
+```
+
+The model only needs enough to know "this angle failed" — it doesn't need the full failure report.
+
+---
+
+### Summary Table
+
+| Technique | What it fixes | Where to apply |
+|---|---|---|
+| Role→Context→Rules→Format structure | Clarity, instruction following | `_BASE_SYSTEM_PROMPT` |
+| Few-shot examples | Query diversity, stops repetition | `_BASE_SYSTEM_PROMPT` |
+| Positive guidance in blocked variants | Model knows what TO do | `_build_system_prompt()` |
+| State injection before each LLM call | Instruction drift, retrieval counting | `run_agent()` loop |
+| Tool result compression | Token efficiency, context bloat | `retrieve_documents` handler |
+| Chain-of-Thought instruction | Tool selection quality | `_BASE_SYSTEM_PROMPT` |
+| Trim thumbdown context | System prompt bloat | `_build_system_prompt()` |
+
+This is a goldmine of real problems. Let me diagnose exactly what went wrong and what it reveals.
+
+---
+
+## What Actually Happened — Problem by Problem
+
+### Problem 1 — The Model Called the Same Query Twice Simultaneously
+
+```
+Iteration 1, tool_calls requested (2):
+  → retrieve_documents  args: {"query": "motor control systems"}
+  → retrieve_documents  args: {"query": "motor control systems"}  ← EXACT DUPLICATE
+```
+
+This happened because the **user's query itself was duplicated**: *"Tell me about motor control systems AND motor control systems."*
+
+The model literally mirrored the user's input. But more importantly — **your improved system prompt didn't prevent it.** The rule says *"NEVER repeat a query already tried"* — but both calls were generated **simultaneously in the same iteration**, before either had been "tried." The model had no way to know they'd be duplicates until after the fact.
+
+**Fix — deduplicate tool calls in your code before executing:**
+```python
+# In run_agent(), after: tool_calls = resp_tool_calls[:MAX_TOOL_CALLS_PER_ITERATION]
+seen_queries = set()
+deduped_tool_calls = []
+for tc in tool_calls:
+    if tc["name"] == "retrieve_documents":
+        q = tc["args"].get("query", "")
+        if q in seen_queries:
+            print(f"  [DEDUP] Skipping duplicate query: \"{q}\"")
+            continue
+        seen_queries.add(q)
+    deduped_tool_calls.append(tc)
+tool_calls = deduped_tool_calls
+```
+
+Don't rely on the prompt alone for this — enforce it in code.
+
+---
+
+### Problem 2 — The Retrieved Chunk Contains Only the Word "Motor"
+
+```
+CONTEXT APPENDED — retrieve_documents("motor control systems")
+1 chunk(s) | 64 chars total
+
+[Source: ..\data\Adjustable Speed Drive.txt, score: 0.278]
+Motor
+```
+
+**64 chars total. The chunk content is literally just "Motor."**
+
+This is a **data ingestion problem**, not a prompt problem. Something went wrong during chunking/ingestion of `Adjustable Speed Drive.txt` — a chunk was created that contains almost nothing. The score of **0.278** is also barely above your threshold of **0.2**, meaning this is a very weak match.
+
+**Fixes:**
+```python
+# In tools.py — raise score_threshold to filter near-empty weak matches:
+docs = retriever.retrieve(query, top_k=top_k, score_threshold=0.35)  # was 0.2
+
+# Also add minimum content length filter:
+docs = [d for d in docs if len(d["content"].strip()) > 50]
+if not docs:
+    return "No relevant documents found for this query."
+```
+
+---
+
+### Problem 3 — The Model Hallucinated a Full Answer From a Single Word
+
+The retrieved context was literally `"Motor"` — 1 word. Yet the model produced:
+
+```
+"Motor control systems refer to the processes and mechanisms that enable 
+the control of movement in living organisms. This includes the neural 
+control of movement, which involves the coordination of muscle activity 
+and joint movement to achieve specific goals."
+```
+
+**None of this came from the knowledge base.** It came from the model's training data — pure hallucination. And then `check_answer_quality` said **"OK"** because your heuristic check only looks for red-flag phrases like *"I don't know"*, not for fabricated content.
+
+This is the most dangerous failure in this run.
+
+**Fix 1 — Strengthen `check_answer_quality` heuristic in `tools.py`:**
+```python
+# Check if answer is much longer than context — sign of hallucination
+if len(answer) > len(context) * 3 and len(context) < 200:
+    return "INSUFFICIENT — answer appears to exceed what the retrieved context supports."
+
+# Check minimum context length more strictly
+if not context or len(context.strip()) < 100:  # was 50
+    return "INSUFFICIENT — retrieved context too thin to support an answer."
+```
+
+**Fix 2 — Add a grounding check in the system prompt:**
+```
+## GROUNDING RULE (CRITICAL)
+Before calling check_answer_quality, verify:
+- Every sentence in your answer can be traced to a specific retrieved chunk.
+- If a retrieved chunk contains fewer than 20 words, treat it as NO result.
+- A chunk containing only a single word or fragment is NOT a valid source.
+```
+
+---
+
+### Problem 4 — Confidence: HIGH on a Hallucinated Answer
+
+```
+Confidence: HIGH
+Reason for confidence: The knowledge base contains relevant documents 
+that provide a clear understanding of motor control systems.
+```
+
+The model reported HIGH confidence despite having essentially no real data. The confidence field you added to the output format **backfired** — the model filled it in based on its own (hallucinated) certainty, not actual retrieval quality.
+
+**Fix — make confidence tied to concrete retrieval metrics, not model self-assessment:**
+```python
+# In run_agent(), compute confidence from actual data before returning:
+avg_score = sum(s.get("score", 0) for s in retrieved_sources) / max(len(retrieved_sources), 1)
+total_chars = sum(len(s.get("preview", "")) for s in retrieved_sources)
+
+if avg_score > 0.6 and total_chars > 500:
+    confidence = "HIGH"
+elif avg_score > 0.4 and total_chars > 200:
+    confidence = "MEDIUM"
+else:
+    confidence = "LOW"
+
+# Inject into final answer or display separately — don't let the LLM self-report it
+```
+
+---
+
+### Problem 5 — The check_answer_quality "context" Argument Was Injected With Garbage
+
+```
+[AGENT] injecting 135 chars of accumulated context into check_answer_quality
+```
+
+135 chars of context = essentially just the word "Motor" twice with source headers. The quality check had no real context to validate against, yet still returned "OK."
+
+This is the check\_answer\_quality tool failing at its core job. The heuristic is too weak.
+
+---
+
+## Summary of All Issues Found
+
+| # | Problem | Root Cause | Fix Location |
+|---|---|---|---|
+| 1 | Same query called twice simultaneously | Model mirrors duplicated user input; no dedup | `run_agent()` — code-level dedup |
+| 2 | Chunk contains only "Motor" | Bad ingestion/chunking of source file | `tools.py` — min content length filter + raise score_threshold |
+| 3 | Full hallucinated answer from 1 word | Model uses training knowledge when context is thin | `tools.py` check_answer_quality + system prompt grounding rule |
+| 4 | Confidence: HIGH on hallucination | Model self-reports confidence incorrectly | Compute confidence from retrieval metrics in code, not LLM |
+| 5 | Quality check passed garbage context | Heuristic threshold too lenient | `tools.py` — stricter context length + answer/context ratio check |
+
+The prompt improvements helped (the model did use the new output format correctly) — but **problems 2, 3, 4, 5 need code fixes**, not just prompt fixes. Prompt engineering alone cannot save you from bad ingestion data or a hallucinating model with no real context to work from.
+
+
+Let me read the current file to see exactly what changed.Good. Now I can see exactly what's happening. Let me compare all three runs precisely.
+
+---
+
+## What Actually Changed Between the Three Runs
+
+Looking at the logs and the current prompt, here's what you have now vs. what I suggested:
+
+**My suggestion had this in STEP 1:**
+```
+STEP 1: Call retrieve_documents with 2-3 SHORT, DIVERSE queries.
+         - Each query must use DIFFERENT vocabulary and angle
+         - Bad:  "symptoms of ASD"...
+         - Good: "ASD diagnosis criteria"...
+```
+
+**Your current prompt moved the examples OUT of STEP 1:**
+```
+STEP 1: Call retrieve_documents with 2-3 SHORT, DIVERSE queries.
+STEP 2: ...
+STEP 3: ...
+...
+Each query must use DIFFERENT vocabulary and angle   ← floats here, disconnected
+## EXAMPLE — Good query diversity
+```
+
+That's the "slight change" — and it matters more than it looks.
+
+---
+
+## Why This Specific Change Broke It
+
+### 1. The examples are now disconnected from the instruction
+
+The model reads top-to-bottom. When the examples are **inside STEP 1**, the model processes them as part of the action it's about to take. When they float **after** the steps, by the time the model reaches them it has already mentally committed to what it's going to do.
+
+```
+BEFORE (examples inside STEP 1):
+  STEP 1: [instruction + examples right here]  ← model reads, learns, then acts
+  
+AFTER (examples separated):
+  STEP 1: [instruction only]
+  STEP 2, 3, 4, 5...
+  [examples here]  ← model may have already planned its tool calls
+```
+
+### 2. Run 3 (your current version) is actually the WORST outcome
+
+Look at this:
+
+| Run | Queries generated | Diversity | Final answer | Tokens used |
+|---|---|---|---|---|
+| Run 1 (old prompt) | 2 identical + 1 different | ❌ | Hallucinated ❌ | 2,768 |
+| Run 2 (new prompt with examples in STEP 1) | 3 diverse queries | ✅ | "Not in KB" ✅ | 3,334 |
+| Run 3 (your current) | 2 identical, then gave up | ❌ | "Not in KB" ✅ | **1,741** |
+
+Run 3 got the right **final answer** but for the wrong reason — it just gave up after seeing the word "Motor" twice and said the KB doesn't contain it, without even trying diverse queries. It got lucky on the output but the behavior is broken.
+
+Run 2 was actually the **best behavior** — it tried 3 genuinely different angles, exhausted them properly, then correctly said the KB lacks the info.
+
+---
+
+## The Fixes — Two Things Needed
+
+### Fix 1 — Put examples back INSIDE STEP 1 (prompt fix)
+
+```python
+_BASE_SYSTEM_PROMPT = """## ROLE
+You are a precise research assistant. Your only knowledge source is the 
+knowledge base — you never answer from memory or assumptions.
+
+## WHAT YOU HAVE ACCESS TO
+- retrieve_documents(query, top_k): searches the knowledge base
+- check_answer_quality(answer): validates your answer is grounded
+
+## PROCESS — follow this exactly
+STEP 1: Call retrieve_documents with 2-3 SHORT, DIVERSE queries.
+         Each query MUST use different vocabulary and a different angle.
+         ✓ GOOD: "greenhouse gas emissions", "global temperature data", "CO2 concentration"
+         ✗ BAD:  "causes of X", "what causes X", "X causes"  ← all same angle, DO NOT DO THIS
+STEP 2: If results are clearly insufficient → ONE more rephrased query, then stop.
+STEP 3: Draft answer using ONLY retrieved chunks. Cite [Source: X] inline.
+STEP 4: Call check_answer_quality(answer=<your draft>).
+STEP 5: Return final answer.
+
+## HARD CONSTRAINTS
+- retrieve_documents: MAX 5 calls total. Stop after 3 if results are poor.
+- NEVER generate two queries with the same words in the same call.
+- NEVER repeat a query already tried.
+- NEVER fabricate facts not present in retrieved chunks.
+- If knowledge base lacks the answer after 3 tries → say exactly:
+  "The knowledge base does not contain information about [topic]."
+
+## OUTPUT FORMAT
+Answer: <your answer with inline [Source: filename] citations>
+Confidence: HIGH | MEDIUM | LOW
+Reason for confidence: <one sentence>"""
+```
+
+### Fix 2 — Code-level duplicate query guard (non-negotiable)
+
+No matter what the prompt says, a small 8B model will sometimes generate duplicate queries simultaneously. Catch it in code — add this in `run_agent()` right after line `tool_calls = resp_tool_calls[:MAX_TOOL_CALLS_PER_ITERATION]`:
+
+```python
+# Deduplicate retrieve_documents calls within a single iteration
+seen_queries = set()
+deduped = []
+for tc in tool_calls:
+    if tc["name"] == "retrieve_documents":
+        q = tc["args"].get("query", "").strip().lower()
+        if q in seen_queries:
+            print(f"  [DEDUP] Blocked duplicate query: \"{tc['args'].get('query')}\"")
+            continue
+        seen_queries.add(q)
+    deduped.append(tc)
+tool_calls = deduped
+```
+
+Also add globally across all iterations — track all queries ever tried:
+
+```python
+# At the top of run_agent(), alongside other state:
+all_tried_queries: set[str] = set()
+
+# Then in the retrieve_documents handler, before calling:
+q_normalized = args["query"].strip().lower()
+if q_normalized in all_tried_queries:
+    print(f"  [DEDUP] Skipping already-tried query: \"{args['query']}\"")
+    messages.append({"role": "tool", "tool_call_id": tool_call["id"],
+                     "content": "You already tried this exact query. Use a different angle."})
+    continue
+all_tried_queries.add(q_normalized)
+```
+
+---
+
+## Key Takeaway
+
+The prompt structure matters **as much as** the content. Your "slight change" of moving the examples a few lines down broke the behavior because proximity of instruction + example is how LLMs learn what to do in context. Keep them together, and add the code-level guard so you're not depending on the prompt alone for something this critical.
+
+
+Let me read the exact relevant section of the file.Good. Now I can show you exactly where everything goes with your actual line numbers.
+
+---
+
+## Exactly Where to Add the Code
+
+You need to add the **cross-iteration duplicate guard** inside the `retrieve_documents` handler. Here's the precise location:
+
+### Current code (lines 284–294):
+```python
+if name == "retrieve_documents":
+    if total_retrievals >= MAX_TOTAL_RETRIEVALS:
+        result = "Retrieval limit reached. Use what you have to answer."
+        print(f"  [SKIPPED] retrieval cap ({MAX_TOTAL_RETRIEVALS}) reached")
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "content": result,
+        })
+        continue
+    result = callables[name](**args)   # ← line 294
+```
+
+### Add the cross-iteration check RIGHT HERE — between the cap check and the actual call:
+
+```python
+if name == "retrieve_documents":
+    if total_retrievals >= MAX_TOTAL_RETRIEVALS:
+        result = "Retrieval limit reached. Use what you have to answer."
+        print(f"  [SKIPPED] retrieval cap ({MAX_TOTAL_RETRIEVALS}) reached")
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "content": result,
+        })
+        continue
+
+    # ── NEW: cross-iteration duplicate guard ──────────────────────
+    q_normalized = args["query"].strip().lower()
+    if q_normalized in all_tried_queries:
+        print(f"  [DEDUP] Skipping already-tried query: \"{args['query']}\"")
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "content": "You already tried this exact query. Try a genuinely different angle.",
+        })
+        continue
+    all_tried_queries.add(q_normalized)
+    # ─────────────────────────────────────────────────────────────
+
+    result = callables[name](**args)   # ← existing line 294
+```
+
+---
+
+## What You Already Have vs. What's Missing
+
+```
+Line 186:  all_tried_queries: set[str] = set()   ✅ already there
+Lines 260–271: within-iteration dedup            ✅ already there
+Lines 284–293: retrieval cap check               ✅ already there
+
+MISSING → cross-iteration dedup (between line 293 and 294)  ❌ add here
+```
+
+The within-iteration dedup (lines 260–271) catches duplicates **within the same LLM response** (e.g. two identical queries in one batch). The cross-iteration check catches the same query being tried again **in a later iteration** — which is the other failure mode. You need both. The set `all_tried_queries` is already declared at line 186 but never used — this code is what uses it.
+
+
+Give me a query that i can ask in this to check the working/efficiency of the prompt
+Looking at your vector store — you have **1181 documents** and the source file visible is `Adjustable Speed Drive.txt`. That's an engineering/industrial domain.
+
+The best test query needs to:
+1. Be **actually in your knowledge base** (so you get real chunks, not "Motor")
+2. Be **broad enough** to need multiple diverse angles
+3. Be **specific enough** to expose whether the model retrieves well or hallucinates
+
+---
+
+## Best Test Query
+
+```
+What is an adjustable speed drive and how does it control motor speed?
+```
+
+### Why this is the ideal test:
+
+**It tests query diversity** — a good agent should search different angles like:
+- `"adjustable speed drive operation"` → what it is
+- `"motor speed control methods"` → how it works
+- `"variable frequency drive components"` → mechanism
+
+**It tests hallucination resistance** — "motor control systems" hallucinated because the chunk was just "Motor". This query should return real, full chunks from `Adjustable Speed Drive.txt`, so you can verify whether the answer is actually grounded in retrieved text or fabricated.
+
+**It tests the output format** — you'll see if Confidence HIGH/MEDIUM/LOW is now calibrated to actual retrieval scores rather than model self-confidence.
+
+**It tests the duplicate guard** — watch iteration 1 closely to confirm the model generates 2-3 distinct queries rather than repeating the same one.
+
+---
+
+After you run it, share the output and I can tell you exactly what the results reveal about the prompt's current state.

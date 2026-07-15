@@ -1,0 +1,20 @@
+Prompting Techniques List:
+
+1. Zero-Shot Prompting
+2. Few-Shot Prompting
+3. Chain-of-Thought (CoT) Prompting
+4. Role Prompting
+5. Instruction-Based Prompting
+6. Contextual Prompting
+7. Output Formatting Prompting
+8. ReAct Prompting (Reason + Act)
+9. Self-Consistency Prompting
+10. Tree of Thoughts (ToT)
+11. Retrieval-Augmented Prompting (RAG)
+12. Prompt Chaining
+13. Delimiter Technique
+14. Constraint Prompting
+15. Meta Prompting
+16. Socratic Prompting
+17. Step-Back Prompting
+18. Persona + Constraint Hybrid

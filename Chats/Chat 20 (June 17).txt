@@ -1,0 +1,1819 @@
+
+<ide_opened_file>The user opened the file c:\Users\LOQ\Desktop\Projects\RAG-work\app\run_logs\agent_query_20260617_164648.debug.log in the IDE. This may or may not be related to the current task.</ide_opened_file>reverse the separation that uses loggin module to print llm's io separately...make sure it prints llm io with the rest of the logs
+
+Claude
+Simple change — remove the dedicated llm_io file handler and let it propagate to root so its output flows into the shared debug log.
+
+Now remove the now-redundant original loop (which covered only the first two loggers) since it's been merged into the new one:Let me verify the final state:
+
+logger_config.py
+Clean. llm_io is now in the same loop as the other diagnostic loggers — propagate = True means its DEBUG-level LLM prompts and responses flow through root into the single shared .debug.log file alongside all other app logs. No separate file is created anymore.
+
+Claude
+Let me read the compression file to understand the chunk_seq check.
+
+context_compression.py
+Now let me see where compress_context_pipeline is called and what chunks are passed to it.
+
+Now let me look at where document_chunks and learned_qa_chunks are built — specifically whether chunk_seq is attached.
+
+Let me see the chunk-building code in agent_query.py around lines 530–615.
+
+agent_query.py
+Now let me see the retrieve_documents tool in tools.py to understand what format chunks are stored in state with.
+
+tools.py
+Let me see the rest of tools.py to find where accumulated_document_chunks is populated.
+
+Let me look at both where chunks are built and stored in agent_query.py — lines 260–300 and 390–445.
+
+Now let me look at tempFile.py since it's the modified file and likely the entry point for this different setup.
+
+tempFile.py
+Found it. Let me quickly confirm what retriever.retrieve() returns.
+
+I have a clear diagnosis. Here's what's happening:
+
+Root cause: retriever.retrieve() returns chunks with the structure {"content": ..., "metadata": {"chunk_seq": 5, "source": ...}, ...}. But NAC checks c.get("chunk_seq") — top-level on the dict, not nested inside metadata.
+
+In your original agent_query.py flow, _accumulate_track explicitly flattens chunk_seq out of metadata to the top level (lines 536–538):
+
+In tempFile.py, you're passing the raw retriever output directly to compress_neighbor_chunks — so chunk_seq is buried in metadata and NAC never finds it.
+
+Fix — flatten the chunks in the retrieve node in tempFile.py:chunk_seq lives at c["metadata"]["chunk_seq"] in the raw retriever output, but NAC looks for it at the top level c["chunk_seq"]. Your original agent works because _accumulate_track in agent_query.py explicitly promotes it out of metadata when building accumulated chunks. The tempFile.py retrieve node was passing the raw dicts straight through, so NAC never saw chunk_seq.
+
+The fix flattens each retrieved doc into the same shape agent_query.py uses (content, source, chunk_seq at the top level) before storing it in retrieved_docs.
+
+Claude
+Let me look at the error location in context_compression.py around line 402.
+
+context_compression.py
+Let me look at how valid_groups / confirmed_groups are built, and the validate_redundancy function.
+
+context_compression.py
+I can see the bug. valid_groups is list[list[dict]] (each entry is a list of members), but the consumption loop at line 401 treats each entry as a dict with a "members" key. Let me check validate_redundancy to confirm the expected format when validation is enabled.
+
+Found the bug. The shape mismatch is:
+
+When ENABLE_COMPRESSION_VALIDATION=True: confirmed_groups comes from validate_redundancy as list[RedundancyGroupResult] — each entry is a dict with "members" key.
+When ENABLE_COMPRESSION_VALIDATION=False: confirmed_groups = valid_groups which is list[list[dict]] — each entry is the members list directly.
+The consumption loop at line 401 always expects a dict with "members", so the False branch breaks. The fix is to wrap valid_groups items in the same shape:One-line fix in context_compression.py:398. When validation is skipped, valid_groups is list[list[dict]] but the loop at line 401 expects list[{"members": [...]}]. Now both branches produce the same shape.
+
+
+Claude
+Let me read the file to identify the issues.
+
+nodes.py
+Now let me check the surrounding files to understand the proper import paths.
+
+I can see several issues:
+
+logger and llm_io are used but never defined
+setup_logging imported but never called (and shouldn't be called in a module — only in entrypoints)
+from app_workflow.graph import build_graph — unused and potentially circular
+from routes import ... and from state import ... — inconsistent bare imports from a sibling module; should use relative imports
+fan_out_retrievals, route_after_compression are imported but unused hereFixed. Here's a summary of what changed:
+Removed from app.logger_config import setup_logging — unused; setup_logging() belongs in the entrypoint, not a node module
+Removed from app_workflow.graph import build_graph — unused in this file and risks a circular import (graph.py references node functions)
+Removed from routes import fan_out_retrievals, route_after_compression — neither is used in nodes.py
+Fixed from state import GraphState → from .state import GraphState — proper relative import for a sibling module within the package
+Added logger = logging.getLogger(__name__) — was used on lines 104, 109, 113, etc. but never defined
+Added llm_io = logging.getLogger("llm_io") — was used on lines 95, 98, 153, 158 but never defined
+
+
+
+<ide_opened_file>The user opened the file c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services.py in the IDE. This may or may not be related to the current task.</ide_opened_file>(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow>python .\main.py
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights: 100%|██████████████████████████████████████████████████████| 103/103 [00:00<00:00, 6753.48it/s]
+BertModel LOAD REPORT from: sentence-transformers/all-MiniLM-L6-v2
+Key | Status | |
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED | |
+
+Notes:
+
+UNEXPECTED: can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+Traceback (most recent call last):
+File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\main.py", line 7, in <module>
+from graph import build_graph
+File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\graph.py", line 3, in <module>
+from nodes import generate_query_variants, retrieve, execute_nac, execute_dc, execute_lbc, generate_answer
+File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes.py", line 5, in <module>
+from app.context_compression import compress_neighbor_chunks, deduplicate_compression, llm_based_compression
+File "C:\Users\LOQ\Desktop\Projects\RAG-work\app\context_compression.py", line 4, in <module>
+from llm_caller import llm_invoke, LLMErrorKind
+ModuleNotFoundError: No module named 'llm_caller'
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow> ^C
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow>
+Claude
+The issue is app/context_compression.py uses bare imports like from llm_caller import ... — those work when running from inside app/ (script dir is in sys.path), but not from app_workflow/. The fix is to also add the app/ directory to sys.path in services.py.app/ is now also added to sys.path, so bare imports within app/ modules (like from llm_caller import ...) resolve correctly when running from app_workflow/. Try again.
+
+
+
+Claude
+Let me read agent_query.py to understand what each command does, and also check the relevant supporting files.
+
+Let me read the feedback and self-learner modules.
+
+Now I have the full picture. Let me plan before coding:
+
+state.py: Add command: NotRequired[str], user_feedback: NotRequired[str]
+services.py: Add FeedbackStore, SelfLearner instances + ENABLE_AUTO_DISTILLATION, LEARN_EVERY_N, MIN_FEEDBACK_LEN; expose learned_collection; import llm from llm_setup for SelfLearner
+nodes.py: Add user_input_node + 4 command nodes (cmd_stats, cmd_learn, cmd_bad, cmd_exit)
+routes.py: Add route_user_input that reads state["command"]
+graph.py: Wire START → user_input → (command nodes | generate_query_variants); command nodes → END
+main.py: Remove early exit (let graph handle it); read "bad" feedback before invoking; pass user_feedback in state
+Spell-check noise on "thumbdowns" (domain term) and unused-import hints that resolve once nodes.py imports them. Continuing.Now adding the new imports and five new nodes to nodes.py.
+
+These resolve once I add the new nodes below. Now adding all five new nodes at the top of nodes.py, right after the MAX_RETRIES line and before the SUB_QUERY_GENERATION_PROMPT.
+
+All harmless — cmd_stats, cmd_learn, and cmd_exit accept state to satisfy LangGraph's node signature but don't need to read it. Continuing.
+
+That import was a mistake — ENABLE_AUTO_DISTILLATION belongs in nodes.py, not routes.py. Let me revert it and just add route_user_input.Now add route_user_input at the end of routes.py.All done. Here's a summary of every change and the reasoning behind each decision:
+
+state.py
+
+command: NotRequired[str] — set by user_input_node; read by route_user_input to determine graph branch
+user_feedback: NotRequired[str] — populated by main.py before graph invocation when the user types "bad", so the feedback prompt appears naturally in the terminal before graph execution begins
+services.py
+
+Added FeedbackStore and SelfLearner as singletons — absolute paths for feedback/thumbdowns files avoid cwd-relative resolution issues when running from app_workflow/
+Added ENABLE_AUTO_DISTILLATION, LEARN_EVERY_N, MIN_FEEDBACK_LEN from config
+Imports llm as _workflow_llm from llm_setup (no circular dependency) to give SelfLearner the same LLM the rest of the workflow uses
+learned_collection was already there; now explicitly importable by nodes
+nodes.py
+
+user_input_node — normalises input to lowercase, sets command in state ("" for normal queries)
+cmd_stats — calls feedback_store.count/count_good() and learned_collection.count(); mirrors the exact output format from agent_query.py
+cmd_learn — delegates to self_learner.run_distillation()
+cmd_bad — reads user_feedback from state, calls feedback_store.mark_last_bad(feedback=...); omits variants since the graph workflow doesn't track per-variant chunks the way agent_query does
+cmd_exit — raises SystemExit(0), which propagates through LangGraph's call stack cleanly (it's a BaseException, not caught by LangGraph's internal except Exception)
+routes.py
+
+route_user_input — reads state["command"] and returns the target node name
+graph.py
+
+START → user_input (replaces the old direct edge to generate_query_variants)
+Conditional edge from user_input to all four command nodes or generate_query_variants
+cmd_stats, cmd_learn, cmd_bad each have an edge to END; cmd_exit has none (exits the process)
+main.py
+
+Removed the early exit/quit check — the graph's cmd_exit node handles it via SystemExit
+"bad" feedback prompt is shown before graph invocation so user interaction stays in the terminal loop, not inside a graph node
+user_feedback is always passed in state (empty string for non-bad inputs)
+
+
+assume there are 4 nodes A, B, C, and D and ofcourse START and END in a LangGraph. 
+user gives input number
+if its greater than 0, then it is multiplied by 5
+else 5 added into the original number, and then it is multiplied by 5
+The answer is shown
+START -> A
+A -> B 
+A -> C
+B -> C
+C -> D
+Create the skeleton modular code files for these
+
+For a LangGraph-first design, I would split it like this:
+
+project/
+│
+├── main.py
+│
+├── graph/
+│   └── workflow.py
+│
+├── state/
+│   └── graph_state.py
+│
+├── nodes/
+│   ├── node_a.py
+│   ├── node_b.py
+│   ├── node_c.py
+│   └── node_d.py
+│
+└── routers/
+    └── routing.py
+1. State
+state/graph_state.py
+from typing import TypedDict
+
+
+class GraphState(TypedDict):
+    number: int
+    result: int
+2. Node A
+
+Receives input and decides which branch to take.
+
+nodes/node_a.py
+from state.graph_state import GraphState
+
+
+def node_a(state: GraphState) -> GraphState:
+    return state
+3. Node B
+
+Executed when number > 0.
+
+nodes/node_b.py
+from state.graph_state import GraphState
+
+
+def node_b(state: GraphState) -> GraphState:
+    state["result"] = state["number"] * 5
+    return state
+4. Node C
+
+Executed when number <= 0.
+
+Adds 5 first.
+
+nodes/node_c.py
+from state.graph_state import GraphState
+
+
+def node_c(state: GraphState) -> GraphState:
+    state["result"] = state["number"] + 5
+    return state
+5. Node D
+
+Final multiplication.
+
+nodes/node_d.py
+from state.graph_state import GraphState
+
+
+def node_d(state: GraphState) -> GraphState:
+    state["result"] *= 5
+    return state
+6. Router
+routers/routing.py
+from state.graph_state import GraphState
+
+
+def route_from_a(state: GraphState) -> str:
+    if state["number"] > 0:
+        return "B"
+
+    return "C"
+7. Graph Definition
+graph/workflow.py
+from langgraph.graph import StateGraph, START, END
+
+from state.graph_state import GraphState
+
+from nodes.node_a import node_a
+from nodes.node_b import node_b
+from nodes.node_c import node_c
+from nodes.node_d import node_d
+
+from routers.routing import route_from_a
+
+
+def build_graph():
+
+    builder = StateGraph(GraphState)
+
+    builder.add_node("A", node_a)
+    builder.add_node("B", node_b)
+    builder.add_node("C", node_c)
+    builder.add_node("D", node_d)
+
+    builder.add_edge(START, "A")
+
+    builder.add_conditional_edges(
+        "A",
+        route_from_a,
+        {
+            "B": "B",
+            "C": "C",
+        },
+    )
+
+    builder.add_edge("B", "D")
+    builder.add_edge("C", "D")
+
+    builder.add_edge("D", END)
+
+    return builder.compile()
+8. Entry Point
+main.py
+from graph.workflow import build_graph
+
+
+def main():
+
+    graph = build_graph()
+
+    user_number = int(input("Enter a number: "))
+
+    result = graph.invoke(
+        {
+            "number": user_number,
+            "result": 0,
+        }
+    )
+
+    print(f"Final Answer: {result['result']}")
+
+
+if __name__ == "__main__":
+    main()
+Execution Flow
+
+For input:
+
+10
+START
+  ↓
+A
+  ↓
+B
+  ↓
+D
+  ↓
+END
+
+10 × 5 = 50
+Final Answer = 50
+
+For input:
+
+-2
+START
+  ↓
+A
+  ↓
+C
+  ↓
+D
+  ↓
+END
+
+(-2 + 5) = 3
+3 × 5 = 15
+Final Answer = 15
+
+This is the typical LangGraph modular structure used in larger projects: state, nodes, routers, graph builder, and entry point are all separated so that each node remains independently testable and reusable.
+
+
+Python Logging Levels
+There are five built-in levels of the log message.  
+
+Debug: Detailed information for diagnosing problems.
+Info: Confirms things are working as expected.
+Warning: Indicates unexpected issues or potential future problems.
+Error: A serious problem that prevents a function from running.
+Critical: A severe error that may stop the program from running.
+
+would it be sensible to modify code from print() and file write() statements from the every file separately to Python logging while keeping: 
+console output
+output saved to files
+better formatting
+timestamps
+severity levels
+debug/info/error separation
+
+
+or would it be better to create one file that handles all logging cases and then use it in all the other files? Would the code change in the 2 situations be different? if yes which one changes the code least?
+Thought for a few seconds
+
+Yes, it is sensible.
+
+Better approach: create one central logging file, for example:
+
+logger_config.py
+
+Then import and use it in all other files.
+
+This is better because your project currently has many scattered print() debug/status messages in files like retriever.py, embedding_manager.py, vector_store.py, validators.py, context_compression.py, and agent_query.py
+
+The code change is different:
+
+Option 1: Modify every file separately
+
+You would configure logging again and again in each file.
+
+Bad because it causes duplication, inconsistent formatting, and harder maintenance.
+
+Option 2: One shared logging setup file
+
+You configure console output, file output, timestamps, severity levels, and formatting once.
+
+Then in each file, you only replace:
+
+print("message")
+
+with:
+
+logger.info("message")
+
+or:
+
+logger.error("message")
+
+This changes the code least overall and is the cleaner architecture.
+
+Your logging setup file can handle:
+
+console output
+log file output
+timestamps
+INFO / DEBUG / WARNING / ERROR
+separate files like app.log and errors.log
+
+So the best answer is:
+
+Create one central logger configuration file, then use that logger everywhere.
+That gives you the same console display, saved output files, better formatting, timestamps, and severity separation with the least duplicated code.
+
+
+consider this project's updated architecture, and give a plan on how to convert this LangChain app to LangGraph app. There should be no plotting, instead it should be designed as if its being designed from scratch using the concepts purely of LangGraph
+
+I’ll treat this as a clean LangGraph design, not as “wrap the current loop in a graph.” The goal is to convert the current implicit phase machine into explicit state, nodes, edges, and retry paths.
+
+Thought for 23s
+LangGraph conversion plan
+
+Your current app is already conceptually a graph. run_agent() has phases: RETRIEVE → COMPRESS → ANSWER → JUDGE → FINAL, with possible loop-back from JUDGE to RETRIEVE when the answer is insufficient . In LangGraph, do not preserve this as one big function. Split every phase into a node.
+
+1. Define one central RAGState
+
+Create a typed graph state like:
+
+class RAGState(TypedDict):
+    query: str
+    messages: list
+    tried_queries: set[str]
+    failed_variants: list[str]
+
+    document_chunks: list[dict]
+    learned_qa_chunks: list[dict]
+    compressed_document_chunks: list[dict]
+    compressed_learned_qa_chunks: list[dict]
+
+    draft_answer: str
+    final_answer: str
+    quality: str
+
+    sources: list[dict]
+    variants: list[dict]
+    prior_thumbdowns: list[dict]
+
+    total_retrievals: int
+    iterations: int
+    error: str | None
+
+The important design rule: state replaces shared mutable dictionaries like agent_state. In the current code, retrieval, compression, messages, embeddings, and compress_done are stored in a mutable agent_state dictionary . In LangGraph, each node should receive state and return only the fields it updates.
+
+2. Keep infrastructure as services, not graph nodes
+
+These should stay as normal classes/functions injected into the graph:
+
+EmbeddingManager
+VectorStore
+RAGRetriever
+FeedbackStore
+SelfLearner
+LLM clients
+
+Reason: these are dependencies, not workflow steps. For example, VectorStore initializes Chroma and stores document embeddings , while RAGRetriever already retrieves documents and learned QA separately . LangGraph should orchestrate them, not replace them.
+
+3. Create these main nodes
+load_feedback_context
+generate_query_variants
+retrieve_documents
+validate_retrieval
+accumulate_chunks
+merge_similar_retrieval_chunks
+decide_retrieve_or_compress
+compress_learned_qa
+compress_documents
+build_compressed_context
+draft_answer
+judge_answer
+final_answer
+log_interaction
+maybe_distill
+return_no_context
+
+This is the clean LangGraph version of the current architecture.
+
+4. Separate document and learned-QA tracks
+
+Keep the two-track design. Your retriever already returns:
+
+{"documents": documents, "learned_qa": learned_qa}
+
+and stores the last document chunks and learned-QA chunks separately . In LangGraph, preserve this separation all the way until final context formatting.
+
+Graphically, think:
+
+retrieve_documents
+        ↓
+validate documents  +  validate learned_qa
+        ↓
+accumulate documents + accumulate learned_qa
+        ↓
+compress documents  + compress learned_qa
+        ↓
+build precedence context
+
+Do not mix learned QA with normal documents early. Learned QA should remain a high-priority track until final answer generation.
+
+5. Convert tools into graph nodes
+
+Your current retrieve_documents and compress_context are exposed as LLM tools . In the LangGraph design, they should become deterministic graph nodes.
+
+Instead of asking the LLM to decide:
+
+Should I call retrieve_documents?
+Should I call compress_context?
+
+the graph should decide:
+
+Have we retrieved enough?
+Have we hit MAX_TOTAL_RETRIEVALS?
+Do we have chunks?
+Should we compress now?
+
+This is one of the biggest benefits. The workflow becomes controlled by code, not by tool-calling behavior.
+
+6. Use conditional edges for control flow
+
+Main graph:
+
+START
+  ↓
+load_feedback_context
+  ↓
+generate_query_variants
+  ↓
+retrieve_documents
+  ↓
+validate_retrieval
+  ↓
+accumulate_chunks
+  ↓
+merge_similar_retrieval_chunks
+  ↓
+decide_retrieve_or_compress
+      ├── more retrieval needed → generate_query_variants
+      ├── no chunks → return_no_context
+      └── enough context → compress_documents_and_learned_qa
+  ↓
+build_compressed_context
+  ↓
+draft_answer
+  ↓
+judge_answer
+      ├── OK → final_answer
+      ├── insufficient + budget left → generate_query_variants
+      └── insufficient + no budget → final_answer_or_insufficient
+  ↓
+log_interaction
+  ↓
+maybe_distill
+  ↓
+END
+
+This directly replaces your manual phase variable.
+
+7. Make compression a subgraph
+
+Your compression pipeline already has NAC, DC, and LBC stages, controlled by flags like ENABLE_NAC_COMPRESSION, ENABLE_DC_COMPRESSION, and ENABLE_LBC_COMPRESSION . In LangGraph, make this a reusable subgraph:
+
+compression_subgraph:
+    input chunks
+      ↓
+    maybe_nac
+      ↓
+    maybe_dc
+      ↓
+    maybe_lbc
+      ↓
+    output compressed chunks
+
+Then call it twice:
+
+compress_learned_qa → compression_subgraph
+compress_documents  → compression_subgraph
+
+This keeps the learned-QA and document tracks independent.
+
+8. Make validators normal nodes
+
+Your validators already exist for retrieval, merge, redundancy, and LBC safety . In LangGraph, do not hide them inside large helper functions. Use them as explicit quality gates:
+
+retrieve_documents → validate_retrieval → keep/drop chunks
+merge_chunks → validate_merge → retry merge or keep originals
+dc_scan → validate_redundancy → remove only confirmed redundancy
+lbc_compress → validate_lbc → accept/reject compression
+draft_answer → judge_answer → final or retrieve again
+
+This makes failure paths visible.
+
+9. Use checkpointing where it actually helps
+
+Use LangGraph checkpoints after expensive or failure-prone stages:
+
+after query variant generation
+after each retrieval round
+after retrieval validation
+after retrieval merge
+after compression
+after draft answer
+after answer judge
+after feedback logging
+after distillation
+
+The highest-value checkpoints are after retrieval and compression because those are expensive and involve LLM calls, vector search, validation, and chunk processing.
+
+10. Migration order
+
+Do it in this order:
+
+1. Create RAGState.
+2. Move current run_agent local variables into RAGState.
+3. Extract retrieval into a retrieve_documents_node.
+4. Extract retrieval validation into validate_retrieval_node.
+5. Extract accumulation/merge into separate nodes.
+6. Extract compression into a compression subgraph.
+7. Extract draft, judge, and final answer into separate nodes.
+8. Add conditional edges.
+9. Add checkpointing.
+10. Remove LLM tool-calling for retrieve/compress.
+11. Keep CLI/batch runner as graph.invoke(query).
+12. Add feedback and distillation nodes at the end.
+Best final design
+
+The cleanest LangGraph version is not:
+
+LLM agent with tools inside LangGraph
+
+It should be:
+
+LangGraph-controlled RAG workflow
+
+The LLM should generate query variants, merge chunks, compress chunks, judge quality, and write answers. But the graph should control when each step happens. That is the main architectural improvement.
+
+consider the config file. It has 18 switches (boolean constants). Should they be a part of the state? How can i know what to put in the state and what not? Answer briefly
+
+Short rule:
+
+Put something in LangGraph state only if it can change during execution or must be passed between nodes.
+
+Do not put something in state if it is a configuration, dependency, or constant.
+
+Your 18 config booleans
+
+These should generally NOT be part of the state. They belong in configuration.
+
+Examples:
+
+ENABLE_NAC_COMPRESSION
+ENABLE_DC_COMPRESSION
+ENABLE_LBC_COMPRESSION
+ENABLE_RETRIEVAL_VALIDATION
+ENABLE_AUTO_DISTILLATION
+
+These are architecture settings, not runtime data.
+
+Instead:
+
+graph = workflow.compile()
+
+graph.invoke(
+    initial_state,
+    config={"configurable": {...}}
+)
+
+or inject them into nodes from a config object.
+
+Good candidates for State
+
+Things that evolve as the graph runs:
+
+query
+variants
+retrieved_chunks
+validated_chunks
+compressed_chunks
+draft_answer
+judge_result
+retrieval_count
+iteration_count
+final_answer
+error
+
+These are produced by one node and consumed by another.
+
+Bad candidates for State
+
+Things that don't change during a run:
+
+MAX_TOTAL_RETRIEVALS
+MAX_ITERATIONS
+RETRIEVAL_TOP_K
+RETRIEVAL_TOP_L
+COMPRESS_MIN_TOKENS
+
+ENABLE_*
+
+These are configuration values.
+
+Also avoid putting service objects into state:
+
+EmbeddingManager
+VectorStore
+RAGRetriever
+LLM
+FeedbackStore
+
+These are dependencies, not workflow data. They should be injected into nodes. The current architecture already treats them as infrastructure services rather than query-specific data.
+
+Simple test
+
+Ask:
+
+"If I checkpoint this graph and resume tomorrow, does this value represent the current progress of this specific run?"
+
+Yes → State
+No, it's a setting or dependency → Config / injected service
+
+For your project, I'd expect <20 fields in state but almost none of the constants from config.py to be there.
+
+
+
+[ROLE / EXPERTISE CONTEXT]
+
+Act as a world-class Senior Software Engineer, Software Architect, and Technical Researcher with 25+ years of professional hands-on industry experience across real-world production systems, startups, enterprise-scale architectures, and high-performance engineering environments.
+
+Your expertise spans the full spectrum of Software Engineering and adjacent domains, including but not limited to:
+
+- Full-Stack Web Development
+- Frontend Engineering
+- Backend Engineering
+- Distributed Systems
+- System Design & Architecture
+- DevOps & Infrastructure
+- Cloud Computing
+- CI/CD Pipelines
+- Microservices
+- Databases & Data Engineering
+- Networking & Security
+- Machine Learning
+- Deep Learning
+- Computer Vision
+- NLP & LLM Systems
+- Agentic AI
+- RAG Pipelines
+- AI Infrastructure
+- GPU/Inference Optimization
+- Software Testing & Reliability
+- Scalability Engineering
+- Performance Optimization
+- API Design
+- Embedded/Low-Level Systems
+- Open Source Ecosystems
+- Production Debugging
+- Technical Leadership & Engineering Management
+
+Respond as someone who has:
+- Built and maintained large-scale real-world systems in production
+- Experienced failure cases, edge cases, bottlenecks, and scaling issues firsthand
+- Worked across multiple generations of technologies and paradigms
+- Deep understanding of tradeoffs, best practices, anti-patterns, and engineering principles
+- Strong theoretical foundations combined with practical implementation experience
+
+Your answers should:
+- Be technically rigorous and deeply analytical
+- Explain underlying architecture and reasoning
+- Mention real-world considerations, tradeoffs, and edge cases
+- Distinguish between beginner practices and production-grade engineering
+- Include practical implementation guidance where relevant
+- Correct misconceptions directly and precisely
+- Prioritize long-term maintainability, scalability, reliability, and engineering quality
+
+Do not give shallow or generic explanations. Think and respond like an elite engineer mentoring another engineer professionally.
+
+[ACTUAL QUERY]
+
+Tell me where I am wrong and what are my options to fix it:
+I wanted that the generate_query_variants produce multiple queries that ill store in the state. Then each query should go through its separate but identical retrieval nodes. Each retrieval node should append its respective retrieved chunks to the state's variable, allowing parallel execution. 
+
+# ======================================================================================================================
+
+class GraphState(TypedDict):
+    user_input: str
+    query: str
+    query_variants: list[str]
+    answer: str
+    retrieved_docs: list[dict]
+    
+initial_state = GraphState(
+    user_input="",
+    query="",
+    query_variants=[],
+    answer="",
+    retrieved_docs=[]
+)
+
+# ==================================================================================
+    
+# ============================================================================
+def generate_query_variants(state: GraphState) -> dict:
+    return state
+
+def execute_nac(state: GraphState) -> dict:
+    return state
+
+def execute_dc(state: GraphState) -> dict:
+    return state
+
+def retrieve(state: GraphState) -> dict:
+    docs = retriever.retrieve(state["query"])
+    return {"retrieved_docs": docs}
+
+def generate_answer(state: GraphState) -> dict:
+    context = "\n\n".join(
+        f"[{i + 1}] {doc['content']}" for i, doc in enumerate(state["retrieved_docs"])
+    )
+    prompt = (
+        f"Answer the following question using only the provided context."
+        f"Question: {state['query']}"
+        f"Context:{context}"
+        f"Answer:"
+    )
+    response = llm.invoke(prompt)
+    answer = response.content
+    print(f"Assistant: {answer}")
+    return {"answer": answer}
+
+def route_after_compression(state: GraphState) -> str:
+    if not state["retrieved_docs"]:
+        print("No relevant documents found. Please try a different question.")
+        return START
+    return "retry"
+
+# ====================================================================================
+
+graph = StateGraph(GraphState)
+
+graph.add_node("generate_query_variants", generate_query_variants)
+graph.add_node("retrieve", retrieve)
+graph.add_node("NAC", execute_nac)
+graph.add_node("DC", execute_dc)
+graph.add_node("generate_answer", generate_answer)
+
+graph.add_edge(START, "generate_query_variants")
+graph.add_edge("generate_query_variants", "retrieve")
+graph.add_edge("retrieve", "NAC")
+graph.add_edge("NAC", "DC")
+graph.add_conditional_edges(
+    "DC",
+    route_after_compression,
+    {
+        "generate_answer": "generate_answer",
+        "retry": "generate_query_variants"
+    }
+)
+graph.add_edge("generate_answer", END)
+
+rag_app = graph.compile()
+
+# ================================================================
+
+generate\_query\_variants │ ▼ fan\_out / | \\ / | \\ retrieve retrieve retrieve q1 q2 q3 \\ | / \\ | / merge │ ▼ NAC │ ▼ DC │ ▼ generate\_answer
+
+tempFile.py
+Python
+why didnt my graph show parallel nodes?
+Thought for 5s
+
+Your graph does not show parallel nodes because LangGraph visualization shows the static graph structure, not the runtime-expanded executions.
+
+You only registered one node:
+
+graph.add_node("retrieve", retrieve)
+
+So the diagram can only show one box:
+
+retrieve
+
+Even though this function:
+
+def fan_out_retrievals(state):
+    return [
+        Send("retrieve", {**state, "query": variant})
+        for variant in state["query_variants"]
+    ]
+
+can execute retrieve multiple times at runtime, those are multiple executions of the same node, not multiple graph nodes.
+
+So visually LangGraph shows:
+
+generate_query_variants -.-> retrieve
+
+But at runtime it may behave like:
+
+retrieve(query_1)
+retrieve(query_2)
+retrieve(query_3)
+
+using the same retrieve node template.
+
+Also, in your uploaded code, generate_query_variants() currently just returns the state unchanged, and your initial query_variants is empty. So at runtime, this fan-out returns:
+
+[]
+
+because:
+
+for variant in state["query_variants"]
+
+has nothing to loop over.
+
+That means you currently have dynamic fan-out structure, but no actual generated variants yet.
+
+The key distinction:
+
+Diagram = one retrieve node definition
+Runtime = many retrieve executions created by Send
+
+If you want the diagram to literally show:
+
+retrieve_1
+retrieve_2
+retrieve_3
+
+then you must manually create separate nodes:
+
+graph.add_node("retrieve_1", retrieve_1)
+graph.add_node("retrieve_2", retrieve_2)
+graph.add_node("retrieve_3", retrieve_3)
+
+But that is usually worse architecture because the number of variants is dynamic. Your current Send approach is the better LangGraph-style design.
+
+the functions at edges, must they always return state or something else? Explain the concept of "return" in the edges' functions
+
+This is one of the most important LangGraph concepts.
+
+The short answer is:
+
+Node functions return state updates.
+
+Edge/router functions return routing instructions.
+
+Those are completely different things.
+
+1. Node Functions
+
+Example:
+
+def retrieve(state: GraphState) -> dict:
+    docs = retriever.retrieve(state["query"])
+
+    return {
+        "retrieved_docs": docs
+    }
+
+This return value means:
+
+Update the graph state with these values.
+
+LangGraph internally does:
+
+old_state = {
+    "query": "ASD",
+    "retrieved_docs": []
+}
+
+update = {
+    "retrieved_docs": docs
+}
+
+and merges them:
+
+new_state = {
+    "query": "ASD",
+    "retrieved_docs": docs
+}
+
+Notice:
+
+return state
+
+and
+
+return {"retrieved_docs": docs}
+
+are not equivalent.
+
+Returning entire state
+def retrieve(state):
+    state["retrieved_docs"] = docs
+    return state
+
+works, but is discouraged.
+
+Why?
+
+Because now the node is rewriting everything:
+
+{
+    "query": "...",
+    "answer": "...",
+    "retry_count": ...
+}
+
+even though it only changed one field.
+
+Production LangGraph code usually returns only what changed:
+
+return {"retrieved_docs": docs}
+2. Router / Conditional Edge Functions
+
+Example:
+
+def route_after_compression(state):
+    if not state["retrieved_docs"]:
+        return "retry"
+
+    return "generate_answer"
+
+This return value is NOT state.
+
+This return value is:
+
+Which edge should I follow?
+
+You registered:
+
+graph.add_conditional_edges(
+    "DC",
+    route_after_compression,
+    {
+        "generate_answer": "generate_answer",
+        "retry": "generate_query_variants"
+    }
+)
+
+So:
+
+return "retry"
+
+means:
+
+Take the edge labelled retry
+
+which LangGraph translates into:
+
+generate_query_variants
+3. Send Routers
+
+Another type of edge function.
+
+Example:
+
+def fan_out_retrievals(state):
+    return [
+        Send("retrieve", {...}),
+        Send("retrieve", {...}),
+        Send("retrieve", {...}),
+    ]
+
+This return value is neither:
+
+dict
+
+nor
+
+str
+
+It is:
+
+list[Send]
+
+Meaning:
+
+Spawn these executions.
+Three Different Meanings of Return
+Node
+def retrieve(state):
+    return {
+        "retrieved_docs": docs
+    }
+
+means:
+
+Update state
+Conditional Edge
+def route(state):
+    return "retry"
+
+means:
+
+Choose branch
+Fan-out Edge
+def fan_out(state):
+    return [
+        Send(...),
+        Send(...)
+    ]
+
+means:
+
+Create executions
+Mental Model
+
+Think of LangGraph as having two kinds of functions.
+
+Nodes = Workers
+retrieve()
+execute_nac()
+execute_dc()
+generate_answer()
+
+Workers do work and return:
+
+What changed?
+Edges = Traffic Controllers
+route_after_compression()
+fan_out_retrievals()
+
+Traffic controllers decide:
+
+Where should execution go next?
+
+or
+
+How many executions should exist?
+
+They do not modify state directly.
+
+Your Current Graph
+START
+  ↓
+generate_query_variants
+  ↓
+fan_out_retrievals()
+
+returns:
+
+[
+    Send("retrieve", state1),
+    Send("retrieve", state2),
+    Send("retrieve", state3)
+]
+
+meaning:
+
+Create 3 retrieve executions
+
+Each retrieve node returns:
+
+{
+    "retrieved_docs": docs
+}
+
+meaning:
+
+Update state
+
+Then:
+
+NAC
+ ↓
+DC
+ ↓
+route_after_compression()
+
+returns:
+
+"generate_answer"
+
+meaning:
+
+Follow that branch
+
+The biggest beginner mistake is assuming every function in a graph returns state.
+
+In reality:
+
+Function Type	Return Meaning
+Node	State update
+Conditional Router	Branch selection
+Fan-out Router	Execution creation (Send)
+END	No return needed
+
+Once you understand that distinction, most LangGraph designs become much easier to reason about.
+
+Create a prompt to generate ONLY a list of sub_queries from the original query. Use the following prompt for format and inspiration:
+
+_ROLE_AND_RULES = """You are a research assistant. Answer ONLY from retrieved chunks — never from memory.
+
+HARD LIMITS (enforced by the system — do not test them):
+- retrieve_documents: max 5 calls total. Stop at 3 if results are poor.
+- Never repeat a query already tried. Never generate two queries with identical words.
+- If the knowledge base has no answer after 3 tries, say: "The knowledge base does not contain information about [topic]."
+- Never fabricate facts.
+
+TOOLS (these are the ONLY tools available to you):
+- retrieve_documents(query): searches documents and learned QA separately.
+- compress_context(): independently consolidates the document and learned-QA
+  tracks (NAC → DC → LBC). Takes no arguments. The system remembers both.
+
+CONFLICT RULE:
+- Use both context tracks. If learned QA conflicts with document context,
+  prefer learned QA.
+
+NOTE: Drafting, quality-checking, and final-answer generation are handled by
+the system AFTER compress_context returns. Do NOT try to write the final answer
+in the same turn as your tool calls — your job is to drive retrieval and
+trigger compression. The system will handle the remaining answer stages.
+"""
+
+_PROCESS_INSTRUCTIONS = """PROCESS (follow in this exact order — do NOT batch tool calls):
+1. FIRST, call retrieve_documents 2-3 times with SHORT, semantically different queries.
+   Wait for results before doing anything else. Do NOT call compress_context yet.
+   GOOD: short noun-phrase queries from different angles of the topic.
+   BAD:  rephrasings of the same angle ("what causes X", "X causes", "causes of X") — forbidden.
+2. If results are insufficient → one more rephrased query, then stop retrieving.
+3. AFTER retrieval is finished, call compress_context() ONCE with no arguments.
+   This consolidates and deduplicates the learned-QA and document tracks
+   separately. The raw retrieve_documents results will be removed from the chat
+   after this — the compress_context tool result is your sole context from that
+   point on. If the tracks conflict, prefer learned QA.
+4. After compress_context returns, STOP emitting tool calls. In separate turns
+   with no tools available, the system will handle any configured draft and
+   quality-check stages, then generate the final answer from the compressed
+   context. If the system reports a draft is insufficient, it will give you
+   another retrieval round — use it to try genuinely different query angles.
+
+OUTPUT FORMAT (final-answer turn only):
+- Plain prose paragraphs. No headings, no bullet lists, no markdown.
+- Citations appear ONLY inline within sentences as [Source: filename]. Never as a trailing list.
+- Max 400 words. Stop when the question is answered — do not pad or restate.
+- Do not repeat the same sentence or citation twice.
+"""
+
+A good sub-query generation prompt should be much stricter than your retrieval-agent prompt because it has only one responsibility: generate diverse retrieval angles.
+
+SUB_QUERY_GENERATION_PROMPT = """
+You are a retrieval-query generation specialist.
+
+Your task is to generate a small set of retrieval-focused sub-queries from the user's original query.
+
+GOAL:
+Generate queries that maximize retrieval coverage from a knowledge base by exploring different semantic angles of the topic.
+
+RULES:
+- Generate 3 to 5 sub-queries.
+- Each sub-query must target a DIFFERENT aspect, perspective, or retrieval angle.
+- Prefer short retrieval-style queries rather than full natural-language questions.
+- Use concise noun phrases when possible.
+- Do NOT generate trivial rephrasings.
+- Do NOT merely reorder the same words.
+- Do NOT repeat the same retrieval intent.
+- Do NOT answer the question.
+- Do NOT explain your reasoning.
+- Do NOT add commentary.
+
+GOOD EXAMPLES:
+
+Original Query:
+"What therapies are recommended for autism?"
+
+Good Sub-Queries:
+[
+    "autism therapies",
+    "ASD treatment approaches",
+    "behavioral interventions autism",
+    "speech therapy ASD",
+    "autism clinical management"
+]
+
+BAD Sub-Queries:
+[
+    "what therapies are recommended for autism",
+    "recommended therapies for autism",
+    "autism therapy recommendations",
+    "which therapies help autism"
+]
+
+(The above are all essentially the same query.)
+
+DIVERSITY GUIDELINES:
+
+For factual questions:
+- definition
+- causes
+- symptoms
+- treatment
+- diagnosis
+- applications
+- components
+- operation
+- advantages
+- limitations
+
+For entities:
+- overview
+- characteristics
+- history
+- usage
+- comparison
+- implementation
+
+OUTPUT FORMAT:
+Return ONLY a valid JSON array of strings.
+
+Example:
+[
+    "query one",
+    "query two",
+    "query three"
+]
+
+USER QUERY:
+{query}
+"""
+
+A production improvement for your RAG specifically would be to force angle generation rather than free-form generation:
+
+Generate:
+1 query for definition/overview
+1 query for mechanism/process
+1 query for applications/use cases
+1 query for challenges/limitations
+1 query for related concepts
+
+This usually produces much better retrieval diversity than simply asking the LLM for "5 different queries", because LLMs tend to generate near-duplicates otherwise. For a self-learning RAG like yours, angle-based generation is generally the more reliable approach.
+
+
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> python .\tempFile.py                                                                
+
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+Loading weights: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████| 103/103 [00:00<00:00, 3632.29it/s]
+
+BertModel LOAD REPORT from: sentence-transformers/all-MiniLM-L6-v2
+
+Key                     | Status     |  | 
+
+------------------------+------------+--+-
+
+embeddings.position_ids | UNEXPECTED |  | 
+
+
+
+Notes:
+
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+
+Graph saved to C:\Users\LOQ\Desktop\Projects\RAG-work\app\rag_graph.png
+
+RAG Assistant ready. Type "exit" or "quit" to stop.
+
+You: What can you tell me about ASD?
+
+Traceback (most recent call last):
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app\tempFile.py", line 255, in <module>
+
+    rag_app.invoke(initial_state)
+
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langgraph\pregel\main.py", line 3365, in invoke
+
+    for chunk in self.stream(
+
+                 ~~~~~~~~~~~^
+
+        input,
+
+        ^^^^^^
+
+    ...<10 lines>...
+
+        **kwargs,
+
+        ^^^^^^^^^
+
+    ):
+
+    ^
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langgraph\pregel\main.py", line 2759, in stream
+
+    for _ in runner.tick(
+
+             ~~~~~~~~~~~^
+
+        [t for t in loop.tasks.values() if not t.writes],
+
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    ...<2 lines>...
+
+        schedule_task=loop.accept_push,
+
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    ):
+
+    ^
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langgraph\pregel\_runner.py", line 167, in tick
+
+    run_with_retry(
+
+    ~~~~~~~~~~~~~~^
+
+        t,
+
+        ^^
+
+    ...<10 lines>...
+
+        },
+
+        ^^
+
+    )
+
+    ^
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langgraph\pregel\_retry.py", line 126, in run_with_retry
+
+    return task.proc.invoke(task.input, config)
+
+           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langgraph\_internal\_runnable.py", line 656, in invoke
+
+    input = context.run(step.invoke, input, config, **kwargs)
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langgraph\_internal\_runnable.py", line 400, in invoke
+
+    ret = self.func(*args, **kwargs)
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app\tempFile.py", line 194, in generate_answer
+
+    response = llm.invoke(prompt)
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 455, in invoke
+
+    self.generate_prompt(
+
+    ~~~~~~~~~~~~~~~~~~~~^
+
+        [self._convert_input(input)],
+
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    ...<6 lines>...
+
+        **kwargs,
+
+        ^^^^^^^^^
+
+    ).generations[0][0],
+
+    ^
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 1198, in generate_prompt
+
+    return self.generate(prompt_messages, stop=stop, callbacks=callbacks, **kwargs)
+
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 1005, in generate
+
+    self._generate_with_cache(
+
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^
+
+        m,
+
+        ^^
+
+    ...<2 lines>...
+
+        **kwargs,
+
+        ^^^^^^^^^
+
+    )
+
+    ^
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 1310, in _generate_with_cache
+
+    result = self._generate(
+
+        messages, stop=stop, run_manager=run_manager, **kwargs
+
+    )
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\langchain_groq\chat_models.py", line 621, in _generate
+
+    response = self.client.create(messages=message_dicts, **params)
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\groq\resources\chat\completions.py", line 461, in create
+
+    return self._post(
+
+           ~~~~~~~~~~^
+
+        "/openai/v1/chat/completions",
+
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    ...<45 lines>...
+
+        stream_cls=Stream[ChatCompletionChunk],
+
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    )
+
+    ^
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\groq\_base_client.py", line 1242, in post
+
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\.venv\Lib\site-packages\groq\_base_client.py", line 1044, in request
+
+    raise self._make_status_error_from_response(err.response) from None
+
+groq.APIStatusError: Error code: 413 - {'error': {'message': 'Request too large for model llama-3.1-8b-instant in organization org_01kpzxk122fm2akawhpn357gh0 service tier on_demand on tokens per minute (TPM): Limit 6000, Requested 7737, please reduce your message size and try again. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+
+During task with name 'generate_answer' and id '6a267df1-53cc-adc3-f97b-230a48dcf348'
+
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\app> 
+
+The error is not a LangGraph problem. The graph reached the generate_answer node successfully and then Groq rejected the request.
+
+Actual Error
+Error code: 413
+Request too large for model `llama-3.1-8b-instant`
+
+TPM Limit: 6000
+Requested: 7737
+
+This means your prompt sent to Groq contained approximately 7,737 tokens, while your Groq tier allows only 6,000 tokens per request.
+
+The failure occurs here:
+
+generate_answer()
+    ↓
+llm.invoke(prompt)
+    ↓
+Groq API
+    ↓
+413 Request Too Large
+Why it happened
+
+Your architecture is accumulating a lot of context before the final answer stage.
+
+Looking at your pipeline:
+
+User Query
+↓
+Subqueries
+↓
+Multiple retrievals
+↓
+Validation
+↓
+Accumulated chunks
+↓
+NAC
+↓
+DC
+↓
+LBC
+↓
+Generate Answer
+
+The generated prompt likely contains:
+
+System prompt
+Process instructions
+Conversation history
+Retrieved chunks
+Compressed chunks
+Validation messages
+Tool messages
+
+all together.
+
+Even though you have compression, the final context is still exceeding Groq's limit.
+
+First thing I would check
+
+Print the size of the context immediately before:
+
+response = llm.invoke(prompt)
+
+For example:
+
+print(len(prompt))
+
+or better:
+
+approx_tokens = len(prompt) // 4
+print(f"Approx tokens: {approx_tokens}")
+
+You'll probably see something around:
+
+7000-8000 tokens
+Another clue in your config
+
+You have:
+
+COMPRESS_MIN_TOKENS = 500
+
+And in compress_context():
+
+if approx_tokens < COMPRESS_MIN_TOKENS:
+    return chunks
+
+So if a track has fewer than 500 estimated tokens, NAC/DC/LBC are skipped entirely.
+
+If you retrieved many chunks across several retrieval calls, the accumulated context can still become large.
+
+Most likely culprit
+
+Your query:
+
+What can you tell me about ASD?
+
+is extremely broad.
+
+Looking at your project's stored failed variants, ASD can refer to:
+
+Autism Spectrum Disorder
+Adjustable Speed Drive
+
+and there are many ASD-related documents in the corpus.
+
+A broad query like this may retrieve large amounts of information from multiple files, causing the accumulated context to explode before answer generation.
+
+Quick fixes
+Option 1: Limit retrieved chunks
+
+Your config currently uses:
+
+RETRIEVAL_TOP_K = 5
+RETRIEVAL_TOP_L = 5
+
+Try:
+
+RETRIEVAL_TOP_K = 3
+RETRIEVAL_TOP_L = 2
+Option 2: Reduce retrieval budget
+
+Currently:
+
+MAX_TOTAL_RETRIEVALS = 5
+
+Try:
+
+MAX_TOTAL_RETRIEVALS = 2
+
+or
+
+MAX_TOTAL_RETRIEVALS = 3
+Option 3: Hard prompt budget
+
+This is the most robust solution.
+
+Before generating the final answer:
+
+context = format_precedence_context_for_llm(...)
+
+measure token count.
+
+If it exceeds a threshold:
+
+MAX_CONTEXT_TOKENS = 4000
+
+then:
+
+truncate chunks
+or
+run another compression pass
+or
+keep only highest-scoring chunks
+
+A hard budget allocator prevents these failures entirely.
+
+Option 4: Trim conversation history
+
+Your messages list appears to keep:
+
+retrieve_documents results
+validation messages
+tool outputs
+compression outputs
+draft outputs
+
+through the entire run. The system prompt is also very large.
+
+Before final answer generation, keep only:
+
+[
+    system_message,
+    user_query,
+    compressed_context
+]
+
+instead of the full agent history.
+
+This often cuts token usage by 50–80%.
+
+One bug I notice
+
+You already built:
+
+PAD_TOKENS = int(os.getenv("PAD_TOKENS", "0"))
+
+but I don't see it being used to enforce any token budget in the answer-generation path from the code shown.
+
+So the architecture currently has:
+
+retrieval limits
+tool limits
+iteration limits
+
+but no:
+
+prompt token limit
+
+A hard prompt budget allocator is the missing protection here and would have prevented this 413 error.
+
+tempFile.py
+Python
+does this include the following cases of state updation:
+serial
+parallel
+decision making
+Thought for a couple of seconds
+
+Yes, your current LangGraph code includes all 3 state-update cases.
+
+1. Serial state update
+
+Yes.
+
+Example:
+
+generate_query_variants → retrieve → NAC → DC → LBC → generate_answer
+
+Each node returns a partial state update like:
+
+return {"compressed_docs": chunks}
+
+So compressed_docs is updated step-by-step through NAC, DC, then LBC.
+
+2. Parallel state update
+
+Yes.
+
+This part creates parallel retrieval branches:
+
+Send("retrieve", {..., "query": variant})
+
+Each query variant runs retrieve separately.
+
+And this state field supports merging parallel results:
+
+retrieved_docs: Annotated[list[dict], operator.add]
+
+So parallel retrieved_docs lists are combined instead of overwritten.
+
+3. Decision-making state update
+
+Yes.
+
+This function decides the next node:
+
+def route_after_compression(state):
+    if not state["retrieved_docs"]:
+        return "retry"
+    return "generate_answer"
+
+Then LangGraph routes either to:
+
+LBC → generate_answer
+LBC → generate_query_variants
+
+So yes: serial, parallel, and conditional/decision-making state updates are all present.

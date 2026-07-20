@@ -1,0 +1,470 @@
+(Document-Loaders) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders> uv pip install -r requirements.txt
+Resolved 198 packages in 9.62s
+  × Failed to build numba==0.53.1
+  ├─▶ The build backend returned an error
+  ╰─▶ Call to setuptools.build_meta:**legacy**.build_wheel failed (exit code: 1)
+  [stderr]
+  C:\Users\LOQ\AppData\Local\uv\cache\sdists-v9\pypi\numba\0.53.1\j89CiuW_EtXDxdhKWI7iN\src\versioneer.py:415:
+  SyntaxWarning: invalid escape sequence '\s'
+    mo = re.search(r'=\s*"(.*)"', line)
+  Traceback (most recent call last):
+    File "<string>", line 14, in <module>
+    File
+  "C:\Users\LOQ\AppData\Local\uv\cache\builds-v0\.tmpR5KM4e\Lib\site-packages\setuptools\build_meta.py",
+  line 333, in get_requires_for_build_wheel
+      return self._get_build_requires(config_settings, requirements=[])
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File
+  "C:\Users\LOQ\AppData\Local\uv\cache\builds-v0\.tmpR5KM4e\Lib\site-packages\setuptools\build_meta.py",
+  line 301, in _get_build_requires
+      self.run_setup()
+    File
+  "C:\Users\LOQ\AppData\Local\uv\cache\builds-v0\.tmpR5KM4e\Lib\site-packages\setuptools\build_meta.py",
+  line 520, in run_setup
+      super().run_setup(setup_script=setup_script)
+    File
+  "C:\Users\LOQ\AppData\Local\uv\cache\builds-v0\.tmpR5KM4e\Lib\site-packages\setuptools\build_meta.py",
+  line 317, in run_setup
+      exec(code, locals())
+    File "<string>", line 50, in <module>
+    File "<string>", line 47, in _guard_py_ver
+  RuntimeError: Cannot install on Python version 3.12.10; only versions >=3.6,<3.10 are
+  supported.
+
+  hint: This usually indicates a problem with the package or the build environment.
+  help: numba (v0.53.1) was included because unstructured (v0.18.32) depends on numba
+(Document-Loaders) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders> 
+Wednesday 1:03 PM
+This is a dependency-resolution issue, not a compiler problem.
+requirements.txt leaves everything unpinned. uv selected numba==0.53.1, which supports only Python 3.6–3.9, while your environment and [pyproject.toml (line 6)](C:/Users/LOQ/Desktop/Projects/Document-Loaders/pyproject.toml:6) require Python 3.12+. PyPI confirms Numba 0.53.1’s compatibility.
+Force a Python-3.12-compatible Numba version:
+uv pip install "numba>=0.59.1" -r requirements.txt
+For a persistent fix, add this near the top of requirements.txt:
+numba>=0.59.1
+docling
+unstructured[pdf]
+marker-pdf[full]
+Then recreate the environment to avoid partial installation state:
+deactivate
+Remove-Item -Recurse -Force .venv
+uv venv --python 3.12
+.venv\Scripts\Activate.ps1
+uv pip install -r requirements.txt
+Do not switch this project to Python 3.9: unstructured==0.18.32 requires Python 3.10+, and the project itself declares Python 3.12+. PyPI lists Unstructured’s supported version and dependencies.
+
+
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders> uv add pi-heif
+Resolved 3 packages in 1.33s
+Prepared 2 packages in 2.14s
+Installed 2 packages in 97ms
+pi-heif==1.4.0
+pillow==12.3.0
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders> uv pip install -r requirements.txt
+
+  × No solution found when resolving dependencies:
+  ╰─▶ Because unstructured[pdf]==0.24.1 depends on pi-heif>=1.2.0 and only the following versions
+   of pi-heif are available:
+   pi-heif<=1.2.0
+   pi-heif==1.2.1
+   pi-heif==1.3.0
+   pi-heif==1.4.0
+   we can conclude that unstructured[pdf]==0.24.1 depends on pi-heif>=1.2.0.
+   And because pi-heif>=1.2.0 depends on pillow>=11.1.0 and marker-pdf==1.10.2 depends on
+   pillow>=10.1.0,<11.0.0, we can conclude that marker-pdf==1.10.2 and unstructured[pdf]==0.24.1
+   are incompatible.
+   And because you require unstructured[pdf]==0.24.1 and marker-pdf[full]==1.10.2, we can
+   conclude that your requirements are unsatisfiable.
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders> uv pip install -r requirements.txt
+
+  × Failed to read torch==2.13.0
+  ├─▶ Failed to read metadata from installed package torch==2.13.0
+  ╰─▶ failed to open file
+   C:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv\Lib\site-packages\torch-2.13.0.dist-info\METADATA:
+   The system cannot find the file specified. (os error 2)
+  help: torch (v2.13.0) was included because docling (v2.113.0) depends on
+ docling-slim[standard]==2.113.0 (v2.113.0) which depends on torch>=2.2.2, <3.0.0
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders> uv add torch
+Resolved 32 packages in 1.73s
+Prepared 4 packages in 1.45s
+Installed 8 packages in 2.18s
+filelock==3.29.7
+fsspec==2026.6.0
+jinja2==3.1.6
+markupsafe==3.0.3
+mpmath==1.3.0
+networkx==3.6.1
+setuptools==83.0.0
+sympy==1.14.0
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders> uv pip install -r requirements.txt
+
+  × Failed to read torch==2.13.0
+  ├─▶ Failed to read metadata from installed package torch==2.13.0
+  ╰─▶ failed to open file
+   C:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv\Lib\site-packages\torch-2.13.0.dist-info\METADATA:
+   The system cannot find the file specified. (os error 2)
+  help: torch (v2.13.0) was included because docling (v2.113.0) depends on
+ docling-slim[standard]==2.113.0 (v2.113.0) which depends on torch>=2.2.2, <3.0.0
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders> 
+Wednesday 1:00 PM
+You have two separate problems: a genuine Pillow constraint conflict between Marker 1.10.2 and Unstructured’s PDF extras, plus a corrupted/incomplete Torch installation whose .dist-info/METADATA is missing. I’m checking the project’s new pyproject.toml, lockfile, requirements, and installed metadata so the recovery commands match the state you actually have.
+Wednesday 1:00 PM
+(Document-Loaders) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders\codes> python .\docling_test.py
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\docling_test.py", line 1, in <module>
+    from docling.document_converter import DocumentConverter
+ModuleNotFoundError: No module named 'docling'
+(Document-Loaders) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders\codes> 
+Wednesday 1:14 PM
+docling is not installed in the Python interpreter currently running the script. Also run the script from the project root because its PDF/output paths are root-relative.
+First verify the interpreter:
+python -c "import sys; print(sys.executable)"
+python -m pip show docling
+Then repair the project environment from the root:
+cd C:\Users\LOQ\Desktop\Projects\Document-Loaders
+
+deactivate
+uv remove torch pi-heif
+uv add docling
+uv sync
+Activate and verify:
+.\.venv\Scripts\Activate.ps1
+
+python -c "import docling; print('Docling installed')"
+python .\codes\docling_test.py
+Removing explicit torch is appropriate because Docling already declares the compatible Torch dependency. Removing explicit pi-heif avoids forcing Pillow 12 into the project.
+Important: your three loaders currently cannot share one clean environment with these versions:
+marker-pdf==1.10.2 requires pillow<11
+unstructured[pdf]==0.24.1 requires pi-heif, which requires pillow>=11.1
+Use separate environments for Marker and Unstructured, or choose compatible package versions. The immediate commands above restore the Docling environment.
+Wednesday 1:15 PM
+(Document-Loaders) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders\codes> python marker_test.py
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py", line 1, in <module>
+    from marker.converters.pdf import PdfConverter
+  File "C:\Users\LOQ\Desktop\Projects\Document-Loaders.venv\Lib\site-packages\marker_init.py", line 1, in <module>
+    from .marker import Marker
+  File "C:\Users\LOQ\Desktop\Projects\Document-Loaders.venv\Lib\site-packages\marker\marker.py", line 7, in <module>
+    from .lms import LMSFactory
+  File "C:\Users\LOQ\Desktop\Projects\Document-Loaders.venv\Lib\site-packages\marker\lms_init.py", line 1, in <module>
+    from .markus import Markus
+  File "C:\Users\LOQ\Desktop\Projects\Document-Loaders.venv\Lib\site-packages\marker\lms\markus.py", line 11, in <module>
+    from .base import LMS
+  File "C:\Users\LOQ\Desktop\Projects\Document-Loaders.venv\Lib\site-packages\marker\lms\base.py", line 3, in <module>
+    from ..utils.token import get_or_prompt_token, save_token
+  File "C:\Users\LOQ\Desktop\Projects\Document-Loaders.venv\Lib\site-packages\marker\utils\token.py", line 2, in <module>
+    from . import CONFIG_DIR, ensure_config_dir
+ImportError: cannot import name 'CONFIG_DIR' from 'marker.utils' (C:\Users\LOQ\Desktop\Projects\Document-Loaders.venv\Lib\site-packages\marker\utils_init_.py)
+(Document-Loaders) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders\codes> 
+Wednesday 1:29 PM
+This is the wrong marker package—or a namespace collision between marker and marker-pdf. The package in your traceback contains marker.lms.Markus, which is not the Datalab Marker library expected by marker_test.py.
+Use a dedicated environment because Marker 1.10.2 also conflicts with Unstructured’s Pillow requirement.
+From the project root:
+cd C:\Users\LOQ\Desktop\Projects\Document-Loaders
+
+uv venv .venv-marker --python 3.12
+uv pip install --python .venv-marker\Scripts\python.exe "marker-pdf[full]==1.10.2"
+Verify the correct package:
+& .\.venv-marker\Scripts\python.exe -c "from marker.converters.pdf import PdfConverter; print('Correct Marker installed')"
+Then run the script from the root so its relative PDF path works:
+& .\.venv-marker\Scripts\python.exe .\codes\marker_test.py
+Do not install this:
+uv add marker
+That is a different package. The required distribution is:
+marker-pdf
+Recommended environment separation:
+.venv-docling
+.venv-unstructured
+.venv-marker
+This avoids the incompatible Pillow constraints between Marker and unstructured[pdf].
+
+
+Wednesday 1:29 PM
+I m going to delete the .venv
+Help me from scratch
+Wednesday 1:30 PM
+Use three clean environments. Marker and Unstructured currently require incompatible Pillow versions, so forcing all loaders into one .venv will fail.
+Run everything below from the project root—not from codes/.
+1. Remove the broken environment
+deactivate 2>$null
+
+cd C:\Users\LOQ\Desktop\Projects\Document-Loaders
+
+Remove-Item -LiteralPath .venv -Recurse -Force
+If pyproject.toml and uv.lock were created only by the recent experimental uv add commands, remove them too:
+Remove-Item -LiteralPath pyproject.toml -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath uv.lock -Force -ErrorAction SilentlyContinue
+Do not use uv add for this setup.
+2. Create output directories
+New-Item -ItemType Directory -Force `
+  docling_results, `
+  unstructured_results, `
+  marker_results
+Confirm the source PDF exists:
+Test-Path .\Chapter_1_Why_RAG.pdf
+It should return True.
+3. Create the Docling environment
+uv venv .venv-docling --python 3.12
+
+uv pip install `
+  --python .venv-docling\Scripts\python.exe `
+  "docling==2.113.0"
+Verify:
+& .\.venv-docling\Scripts\python.exe -c `
+  "from docling.document_converter import DocumentConverter; print('Docling OK')"
+Run:
+& .\.venv-docling\Scripts\python.exe .\codes\docling_test.py
+4. Create the Unstructured environment
+uv venv .venv-unstructured --python 3.12
+
+uv pip install `
+  --python .venv-unstructured\Scripts\python.exe `
+  "unstructured[pdf]==0.24.1"
+Verify:
+& .\.venv-unstructured\Scripts\python.exe -c `
+  "from unstructured.partition.auto import partition; print('Unstructured OK')"
+Run:
+& .\.venv-unstructured\Scripts\python.exe .\codes\unstructured_test.py
+5. Create the Marker environment
+uv venv .venv-marker --python 3.12
+
+uv pip install `
+  --python .venv-marker\Scripts\python.exe `
+  "marker-pdf[full]==1.10.2"
+Verify that the correct Marker package is installed:
+& .\.venv-marker\Scripts\python.exe -c `
+  "from marker.converters.pdf import PdfConverter; print('Marker PDF OK')"
+Run:
+& .\.venv-marker\Scripts\python.exe .\codes\marker_test.py
+Never install marker; it is an unrelated package. Install marker-pdf.
+6. Expected outputs
+After successful execution:
+docling_results/Chapter_1_Why_RAG.md
+unstructured_results/Chapter_1_Why_RAG.md
+marker_results/Chapter_1_Why_RAG.md
+7. Recommended dependency files
+Use a separate requirements file for each environment:
+requirements-docling.txt
+docling==2.113.0
+requirements-unstructured.txt
+unstructured[pdf]==0.24.1
+requirements-marker.txt
+marker-pdf[full]==1.10.2
+Future installation then becomes:
+uv pip install --python .venv-docling\Scripts\python.exe -r requirements-docling.txt
+uv pip install --python .venv-unstructured\Scripts\python.exe -r requirements-unstructured.txt
+uv pip install --python .venv-marker\Scripts\python.exe -r requirements-marker.txt
+This isolates the Pillow conflict and prevents the incorrect marker package or a damaged Torch installation from contaminating the other loaders.
+Wednesday 1:31 PM
+check now and give me the combine uv install command from requirement.txt
+Wednesday 1:35 PM
+I checked the current requirements.txt:
+numba>=0.59.1
+docling==2.113.0
+unstructured[pdf]==0.24.1
+marker-pdf[full]==1.10.2
+There is no valid combined uv install command for this file because:
+unstructured[pdf]==0.24.1 requires Pillow 11.1+
+marker-pdf==1.10.2 requires Pillow below 11
+Marker 1.10.2 is still the latest release, so upgrading it does not currently solve the conflict. Marker on PyPI
+Use three requirements files and this combined PowerShell block:
+uv venv .venv-docling --python 3.12
+uv pip install --python .venv-docling\Scripts\python.exe "docling==2.113.0"
+
+uv venv .venv-unstructured --python 3.12
+uv pip install --python .venv-unstructured\Scripts\python.exe "unstructured[pdf]==0.24.1"
+
+uv venv .venv-marker --python 3.12
+uv pip install --python .venv-marker\Scripts\python.exe "marker-pdf==1.10.2"
+Since your Marker script only processes PDFs, [full] is unnecessary. Marker documents [full] as support for non-PDF formats.
+Run each script with its matching interpreter:
+& .\.venv-docling\Scripts\python.exe .\codes\docling_test.py
+& .\.venv-unstructured\Scripts\python.exe .\codes\unstructured_test.py
+& .\.venv-marker\Scripts\python.exe .\codes\marker_test.py
+Do not run this—it remains unsatisfiable:
+uv pip install -r requirements.txt
+Wednesday 1:36 PM
+Check the codes/ folder and modify all the codes to read the source/ folder and convert all the files present in it
+Wednesday 1:40 PM
+Updated all three scripts:
+[docling_test.py](C:/Users/LOQ/Desktop/Projects/Document-Loaders/codes/docling_test.py)
+[unstructured_test.py](C:/Users/LOQ/Desktop/Projects/Document-Loaders/codes/unstructured_test.py)
+[marker_test.py](C:/Users/LOQ/Desktop/Projects/Document-Loaders/codes/marker_test.py)
+They now:
+Recursively discover every file under source/
+Currently detect all six PDFs
+Work regardless of the current terminal directory
+Create result directories automatically
+Mirror nested source directories
+Reuse one converter per batch
+Continue when an individual file fails
+Return exit code 1 if the batch has any failures
+Print converted/failed totals
+Updated README.md and project tracking documentation accordingly.
+Validation passed:
+All scripts compile
+All three library imports succeed in their dedicated environments
+Six source-to-output mappings verified
+Graphify updated to 326 nodes and 371 edges
+Full document conversion was not run because processing six large PDFs could require lengthy OCR/model execution.
+
+Why isnt it using GPU?
+Why does it keep saying "Stage preprocess failed for run -, pages [--]: std::bad_alloc"?
+Wednesday 2:02 PM
+Two separate issues are happening.
+It isn’t using the GPU because this environment has a CPU-only PyTorch build:
+torch 2.13.0+cpu
+torch.version.cuda = None
+torch.cuda.is_available() = False
+Your RTX 5050 and NVIDIA driver are detected correctly, but .venv-docling cannot access CUDA. Consequently, RapidOCR explicitly reports Using CPU device, and Docling’s device="auto" resolves to CPU.
+std::bad_alloc means a native C++ component failed to allocate system memory during page preprocessing. It is not a CUDA out-of-memory error.
+The PDFs have normal A4/Letter page dimensions, so malformed page geometry is unlikely. The pattern is significant: processing often works through zero-based page index 9 and then repeatedly fails from [10] onward. That points toward excessive buffering, a native allocation/leak, or memory pressure in Docling’s threaded preprocessing pipeline.
+Also, this line is misleading:
+Docling complete: 6 converted, 0 failed.
+Docling is returning partially processed documents, so your script writes Markdown even when many individual pages failed.
+Recommended configuration:
+from docling.datamodel.accelerator_options import AcceleratorDevice
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import (
+    AcceleratorOptions,
+    PdfPipelineOptions,
+    RapidOcrOptions,
+)
+from docling.document_converter import DocumentConverter, PdfFormatOption
+
+pipeline_options = PdfPipelineOptions(
+    accelerator_options=AcceleratorOptions(
+        device=AcceleratorDevice.CUDA,
+        num_threads=4,
+    ),
+    ocr_options=RapidOcrOptions(
+        backend="onnxruntime",  # More stable fallback than RapidOCR's torch backend
+        lang=["english"],
+    ),
+    ocr_batch_size=1,
+    layout_batch_size=1,
+    table_batch_size=1,
+    queue_max_size=10,
+)
+
+converter = DocumentConverter(
+    format_options={
+        InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+    }
+)
+Before forcing CUDA, replace the CPU-only PyTorch installation with a CUDA-enabled wheel appropriate for the installed driver/Python version. Verify afterward:
+.\.venv-docling\Scripts\python.exe -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+The last value must be True.
+For these PDFs, an even safer test is to disable OCR:
+pipeline_options.do_ocr = False
+If the PDFs already contain selectable text, OCR is unnecessary. If disabling OCR eliminates std::bad_alloc, RapidOCR/preprocessing is the confirmed trigger. Reducing all batch sizes to 1 and queue_max_size to 10 should substantially reduce RAM pressure when OCR is required.
+Wednesday 2:03 PM
+help me replace it with torch==2.11.0+cu128
+Wednesday 2:12 PM
+Successfully replaced PyTorch in .venv-docling.
+Verified:
+torch: 2.11.0+cu128
+CUDA runtime: 12.8
+CUDA available: True
+device count: 1
+GPU: NVIDIA GeForce RTX 5050 Laptop GPU
+CUDA tensor test: 1048576.0
+Run Docling again:
+.\.venv-docling\Scripts\python.exe .\codes\docling_test.py
+Docling’s automatic accelerator selection can now choose CUDA. The verification process lingered during Python shutdown and hit the wrapper timeout, but the actual CUDA tensor operation completed successfully.
+Wednesday 2:19 PM
+Modify the following update commands as per my setup:
+python -m pip install --upgrade docling docling-core docling-parse pypdfium2
+python -m pip show docling docling-core docling-parse pypdfium2
+Wednesday 2:26 PM
+Run these from the project root:
+uv pip install --python .\.venv-docling\Scripts\python.exe --upgrade docling docling-core docling-parse pypdfium2
+uv pip show --python .\.venv-docling\Scripts\python.exe docling docling-core docling-parse pypdfium2
+Then confirm the CUDA build was preserved:
+.\.venv-docling\Scripts\python.exe -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+Wednesday 2:26 PM
+(.venv-docling) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders> uv pip install --python ..venv-docling\Scripts\python.exe --upgrade docling docling-core docling-parse pypdfium2
+Using Python 3.12.10 environment at: .venv-docling
+Resolved 104 packages in 3.11s
+Prepared 6 packages in 932ms
+Uninstalled 6 packages in 2.78s
+Installed 6 packages in 17.64s
+ - docling-core==2.87.0
+ + docling-core==2.87.1
+ - filelock==3.29.0
+ + filelock==3.29.7
+ - fsspec==2026.4.0
+ + fsspec==2026.6.0
+ - setuptools==78.1.0
+ + setuptools==83.0.0
+ - torch==2.11.0+cu128
+ + torch==2.13.0
+ - typing-extensions==4.15.0
+ + typing-extensions==4.16.0
+(.venv-docling) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders> uv pip show --python ..venv-docling\Scripts\python.exe docling docling-core docling-parse pypdfium2
+Using Python 3.12.10 environment at: .venv-docling
+Name: docling
+Version: 2.113.0
+Location: C:\Users\LOQ\Desktop\Projects\Document-Loaders.venv-docling\Lib\site-packages
+Requires: docling-slim
+Required-by:
+Name: docling-core
+Version: 2.87.1
+Location: C:\Users\LOQ\Desktop\Projects\Document-Loaders.venv-docling\Lib\site-packages
+Requires: defusedxml, doclang, jsonref, jsonschema, latex2mathml, pandas, pillow, pydantic, pydantic-settings, pyyaml, tabulate, typer, typing-extensions
+Required-by: docling-ibm-models, docling-parse, docling-slim
+Name: docling-parse
+Version: 7.8.0
+Location: C:\Users\LOQ\Desktop\Projects\Document-Loaders.venv-docling\Lib\site-packages
+Requires: docling-core, pillow, pydantic, pywin32
+Required-by:
+Name: pypdfium2
+Version: 5.11.0
+Location: C:\Users\LOQ\Desktop\Projects\Document-Loaders.venv-docling\Lib\site-packages
+Requires:
+Required-by:
+(.venv-docling) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders> ..venv-docling\Scripts\python.exe -c "import torch; print(torch.version, torch.version.cuda, torch.cuda.is_available())"
+2.13.0+cpu None False
+(.venv-docling) PS C:\Users\LOQ\Desktop\Projects\Document-Loaders> 
+Modify this command:
+uv pip install -r requirements.txt --index-url 
+Wednesday 2:30 PM
+Use an explicit CUDA Torch pin in the same resolution:
+uv pip install --python .\.venv-docling\Scripts\python.exe -r requirements.txt "torch==2.11.0+cu128" --index https://download.pytorch.org/whl/cu128
+The CUDA index is added alongside PyPI, so normal dependencies come from PyPI while the exact CUDA Torch build comes from PyTorch.
+Because your CUDA build has already been replaced, restore it now with:
+uv pip install --python .\.venv-docling\Scripts\python.exe --reinstall "torch==2.11.0+cu128" --index https://download.pytorch.org/whl/cu128
+Then verify:
+.\.venv-docling\Scripts\python.exe -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+Expected:
+2.11.0+cu128 12.8 True
+Also pin this exact version in requirements.txt:
+torch==2.11.0+cu128
+Otherwise a future unrestricted upgrade can select the newer 2.13.0+cpu build again.
+Wednesday 2:31 PM
+
+
+Read source/.pdf
+Read marker_results/.md
+Create a report in a .txt for in the root directory stating the issues in the output created, like a missing text, humanly unreadable-text, wrong heading-levels, recognition of text-boxes, table headers, table formatting, tables without internal and external borders etc
+Wednesday 3:24 PM
+Created the requested QA report:
+[marker_output_quality_report.txt](C:/Users/LOQ/Desktop/Projects/Document-Loaders/marker_output_quality_report.txt)
+It covers all 6 PDF/Markdown pairs across 251 pages, with document-specific findings on missing text/images, unreadable OCR, heading levels, text boxes, table headers, formatting, borders, merged cells, and reading order.
+
+Edited marker_output_quality_report.txt+221-0Review changesUndoReview
+Wednesday 3:28 PM
+Read source/.pdf
+Read marker_results/.md
+Read marker_output_quality_report.txt
+Read text-report.txt
+Use the marker_output_quality_report.txt and text-report.txt files to create a complete report on the working of marker-pdf library. The report should include an Introduction, Overall Assessment, Document-by-Document Assessment, Discussion, and Conclusion
+Wednesday 4:50 PM
+Created the complete consolidated report:
+[marker_pdf_library_complete_report.txt](C:/Users/LOQ/Desktop/Projects/Document-Loaders/marker_pdf_library_complete_report.txt)
+It includes:
+Introduction
+Overall Assessment
+Assessment of all six documents
+Discussion of Marker’s operation, strengths, limitations, and remediation
+Conclusion
+The report incorporates both existing QA reports and direct verification of all 251 PDF pages and corresponding Markdown outputs.

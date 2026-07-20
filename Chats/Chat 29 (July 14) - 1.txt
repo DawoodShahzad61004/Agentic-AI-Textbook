@@ -1,0 +1,639 @@
+read app_workflow/services/api.py
+read app_workflow/services/config.py
+
+Add into the API that the switch(es) configuration passed from the request shall be followed in the run. The following are the switches that can come from the request:
+# 1. Sub-query generation flow
+ENABLE_SUB_QUERY_GENERATION = True
+ENABLE_QUERY_VARIANTS_OUTPUT_FIX = True
+# 2. Retrieval deduplication/merge and its LLM output repair
+ENABLE_RETRIEVAL_DEDUP_MERGE = True
+ENABLE_RETRIEVAL_DEDUP_MERGE_OUTPUT_FIX = True
+ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION = True
+ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION_OUTPUT_FIX = True
+# 3. Retrieval validation and its LLM output repair
+ENABLE_RETRIEVAL_VALIDATION = True
+ENABLE_RETRIEVAL_VALIDATION_OUTPUT_FIX = True
+# 4. Compression stages, their validators, and their LLM output repair
+ENABLE_NAC_COMPRESSION = True
+ENABLE_DC_COMPRESSION = True
+ENABLE_LBC_COMPRESSION = True
+ENABLE_COMPRESSION_VALIDATION = True   
+ENABLE_COMPRESSION_OUTPUT_FIX = True
+# 5. Answer draft creation (disabled = generate final answer directly)
+ENABLE_ANSWER_DRAFT_CREATION = True
+# 6. Answer quality check (only applies when draft creation is enabled)
+ENABLE_ANSWER_QUALITY_CHECK = True
+ENABLE_ANSWER_QUALITY_OUTPUT_FIX = True
+# 7. Automatic distillation
+ENABLE_AUTO_DISTILLATION = False
+# 8. QA-pair generation and its LLM output repair
+ENABLE_QA_PAIR_GENERATION = True
+ENABLE_QA_PAIR_OUTPUT_FIX = True
+# 9. Global LLM output repair across the overall implementation
+ENABLE_GLOBAL_LLM_OUTPUT_FIX = True
+
+Also, if no configuration is passed then keep it to the default (as present in the config.py file)
+Show less
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\api.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\config.py
+Globpattern: "**/api.py"
+Found 46 files
+Globpattern: "**/config.py"
+Found 44 files
+Globpattern: "app_workflow/**/*.py"
+Found 43 files
+So actual files are app_workflow/api.py and app_workflow/config.py (no services/ subpath for these two). Let me read them along with state.py, graph.py, and routes.py for full context.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\api.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\config.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\state.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\routes.py
+Grep "ENABLE_SUB_QUERY_GENERATION|ENABLE_QUERY_VARIANTS_OUTPUT_FIX|ENABLE_RETRIEVAL_DEDUP_MERGE|ENABLE_RETRIEVAL_VALIDATION|ENABLE_NAC_COMPRESSION|ENABLE_DC_COMPRESSION|ENABLE_LBC_COMPRESSION|ENABLE_COMPRESSION_VALIDATION|ENABLE_COMPRESSION_OUTPUT_FIX|ENABLE_ANSWER_DRAFT_CREATION|ENABLE_ANSWER_QUALITY_CHECK|ENABLE_ANSWER_QUALITY_OUTPUT_FIX|ENABLE_AUTO_DISTILLATION|ENABLE_QA_PAIR_GENERATION|ENABLE_QA_PAIR_OUTPUT_FIX|ENABLE_GLOBAL_LLM_OUTPUT_FIX" (in app_workflow)
+14 lines of output
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\graph.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dedup_merge.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\lbc.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dc.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\nac.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\check_answer_quality.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\validate_retrieval.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\query_variants.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\commands.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\validators.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\self_learner.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\main.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\user_input.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\generate_draft.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\generate_answer.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\auto_distillation.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\fix_llm_output.py, c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\test_output_fixes.py
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\llm_caller.py
+Update Todos
+
+Create switches.py helper module (DEFAULT_SWITCHES, resolve_switches, get_switches)
+
+Add switches field to GraphState
+
+Wire QueryRequest/WorkflowSwitches model into api.py and _build_initial_state
+
+Update routes.py to read switches from state
+
+Update nodes/query_variants.py
+
+Update nodes/dedup_merge.py and nodes/nac.py (_merge_similar_chunks)
+
+Update nodes/dc.py and nodes/lbc.py
+
+Update nodes/validate_retrieval.py and nodes/check_answer_quality.py
+
+Update services/validators.py to accept switches param
+
+Update services/self_learner.py and nodes/commands.py and nodes/auto_distillation.py
+
+Verify imports and run a syntax/smoke check
+Now let me create the switches module.
+
+Write c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\switches.py
+79 lines
+"""Per-request overrides for the ENABLE_* workflow toggles in config.py.
+
+Callers (API layer) resolve a request's switch overrides once into a plain
+dict via `resolve_switches()` and store it on GraphState["switches"]. Node
+code reads effective values via `get_switches(state)` instead of importing
+the ENABLE_* constants directly, so a request without overrides transparently
+falls back to the config.py defaults.
+"""
+from app_workflow.config import (
+    ENABLE_SUB_QUERY_GENERATION,
+    ENABLE_QUERY_VARIANTS_OUTPUT_FIX,
+    ENABLE_RETRIEVAL_DEDUP_MERGE,
+    ENABLE_RETRIEVAL_DEDUP_MERGE_OUTPUT_FIX,
+    ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION,
+    ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION_OUTPUT_FIX,
+    ENABLE_RETRIEVAL_VALIDATION,
+    ENABLE_RETRIEVAL_VALIDATION_OUTPUT_FIX,
+    ENABLE_NAC_COMPRESSION,
+    ENABLE_DC_COMPRESSION,
+    ENABLE_LBC_COMPRESSION,
+    ENABLE_COMPRESSION_VALIDATION,
+    ENABLE_COMPRESSION_OUTPUT_FIX,
+    ENABLE_ANSWER_DRAFT_CREATION,
+    ENABLE_ANSWER_QUALITY_CHECK,
+    ENABLE_ANSWER_QUALITY_OUTPUT_FIX,
+    ENABLE_AUTO_DISTILLATION,
+    ENABLE_QA_PAIR_GENERATION,
+    ENABLE_QA_PAIR_OUTPUT_FIX,
+    ENABLE_GLOBAL_LLM_OUTPUT_FIX,
+)
+
+DEFAULT_SWITCHES: dict[str, bool] = {
+    "ENABLE_SUB_QUERY_GENERATION": ENABLE_SUB_QUERY_GENERATION,
+    "ENABLE_QUERY_VARIANTS_OUTPUT_FIX": ENABLE_QUERY_VARIANTS_OUTPUT_FIX,
+    "ENABLE_RETRIEVAL_DEDUP_MERGE": ENABLE_RETRIEVAL_DEDUP_MERGE,
+    "ENABLE_RETRIEVAL_DEDUP_MERGE_OUTPUT_FIX": ENABLE_RETRIEVAL_DEDUP_MERGE_OUTPUT_FIX,
+    "ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION": ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION,
+    "ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION_OUTPUT_FIX": ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION_OUTPUT_FIX,
+    "ENABLE_RETRIEVAL_VALIDATION": ENABLE_RETRIEVAL_VALIDATION,
+    "ENABLE_RETRIEVAL_VALIDATION_OUTPUT_FIX": ENABLE_RETRIEVAL_VALIDATION_OUTPUT_FIX,
+    "ENABLE_NAC_COMPRESSION": ENABLE_NAC_COMPRESSION,
+    "ENABLE_DC_COMPRESSION": ENABLE_DC_COMPRESSION,
+    "ENABLE_LBC_COMPRESSION": ENABLE_LBC_COMPRESSION,
+    "ENABLE_COMPRESSION_VALIDATION": ENABLE_COMPRESSION_VALIDATION,
+    "ENABLE_COMPRESSION_OUTPUT_FIX": ENABLE_COMPRESSION_OUTPUT_FIX,
+    "ENABLE_ANSWER_DRAFT_CREATION": ENABLE_ANSWER_DRAFT_CREATION,
+    "ENABLE_ANSWER_QUALITY_CHECK": ENABLE_ANSWER_QUALITY_CHECK,
+    "ENABLE_ANSWER_QUALITY_OUTPUT_FIX": ENABLE_ANSWER_QUALITY_OUTPUT_FIX,
+    "ENABLE_AUTO_DISTILLATION": ENABLE_AUTO_DISTILLATION,
+    "ENABLE_QA_PAIR_GENERATION": ENABLE_QA_PAIR_GENERATION,
+    "ENABLE_QA_PAIR_OUTPUT_FIX": ENABLE_QA_PAIR_OUTPUT_FIX,
+    "ENABLE_GLOBAL_LLM_OUTPUT_FIX": ENABLE_GLOBAL_LLM_OUTPUT_FIX,
+}
+
+SWITCH_NAMES = frozenset(DEFAULT_SWITCHES)
+
+
+def resolve_switches(overrides: dict | None) -> dict[str, bool]:
+    """Merge request-provided overrides onto the config.py defaults.
+
+    Unknown keys and non-bool values are ignored so a malformed request
+    field can't silently corrupt the run.
+    """
+    merged = dict(DEFAULT_SWITCHES)
+    if overrides:
+        for key, value in overrides.items():
+            if key in SWITCH_NAMES and isinstance(value, bool):
+                merged[key] = value
+    return merged
+
+
+def get_switches(state) -> dict[str, bool]:
+    """Read the effective switch set for this run from GraphState.
+
+    Falls back to config.py defaults when the state has no "switches" key
+    (e.g. the CLI entrypoint in main.py, which doesn't set one).
+    """
+    return state.get("switches") or DEFAULT_SWITCHES
+Now update state.py to add the switches field.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\state.py
+Added 3 lines
+Now update api.py to accept switches in the request and thread them into initial state.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\api.py
+Added 1 line
+Expected — I'll use it below now.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\api.py
+Added 33 lines
+Just spellcheck noise, fine. Now update the Optional import and the /query route to pass req.switches through.
+
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\api.py (lines 2-16)
+Optional is already imported. Now update the /query handler to pass req.switches.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\api.py
+Modified
+Now updating the todo list and moving to routes.py.
+
+Update Todos
+
+Create switches.py helper module (DEFAULT_SWITCHES, resolve_switches, get_switches)
+
+Add switches field to GraphState
+
+Wire QueryRequest/WorkflowSwitches model into api.py and _build_initial_state
+
+Update routes.py to read switches from state
+
+Update nodes/query_variants.py
+
+Update nodes/dedup_merge.py and nodes/nac.py (_merge_similar_chunks)
+
+Update nodes/dc.py and nodes/lbc.py
+
+Update nodes/validate_retrieval.py and nodes/check_answer_quality.py
+
+Update services/validators.py to accept switches param
+
+Update services/self_learner.py and nodes/commands.py and nodes/auto_distillation.py
+
+Verify imports and run a syntax/smoke check
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\routes.py
+Removed 6 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\routes.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\routes.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\routes.py
+Modified
+Now nodes/query_variants.py.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\query_variants.py
+Removed 2 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\query_variants.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\query_variants.py
+Modified
+Now services/validators.py — add a switches parameter to each validate function.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\validators.py
+Removed 5 lines
+Now update the four validate functions in validators.py to accept switches param.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\validators.py
+Added 2 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\validators.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\validators.py
+Added 2 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\validators.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\validators.py
+Added 2 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\validators.py
+Modified
+Now the validate_lbc function:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\validators.py
+Added 2 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\validators.py
+Modified
+validators.py is done. Let me update the todo list to reflect actual progress and continue with nac.py / dedup_merge.py.
+
+Update Todos
+
+Create switches.py helper module (DEFAULT_SWITCHES, resolve_switches, get_switches)
+
+Add switches field to GraphState
+
+Wire QueryRequest/WorkflowSwitches model into api.py and _build_initial_state
+
+Update routes.py to read switches from state
+
+Update nodes/query_variants.py
+
+Update services/validators.py to accept switches param
+
+Update nodes/dedup_merge.py and nodes/nac.py (_merge_similar_chunks)
+
+Update nodes/dc.py and nodes/lbc.py
+
+Update nodes/validate_retrieval.py and nodes/check_answer_quality.py
+
+Update services/self_learner.py and nodes/commands.py and nodes/auto_distillation.py
+
+Verify imports and run a syntax/smoke check
+Now let's update nodes/nac.py — change _merge_similar_chunks signature to accept switches for the global-fix flag, and update execute_nac_documents/validate_nac_documents.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\nac.py
+Removed 4 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\nac.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\nac.py
+Modified
+Now update execute_nac_documents and validate_nac_documents:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\nac.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\nac.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\nac.py
+Added 1 line
+Now nodes/dedup_merge.py.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dedup_merge.py
+Removed 4 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dedup_merge.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dedup_merge.py
+Added 1 line
+Now update the four node functions (dedup_merge_documents, dedup_merge_learned_qa, validate_dedup_merge_documents, validate_dedup_merge_learned_qa).
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dedup_merge.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dedup_merge.py
+Modified
+Now the two validators:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dedup_merge.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dedup_merge.py
+Added 1 line
+dedup_merge.py and nac.py are done. Now let's move to dc.py and lbc.py.
+
+Update Todos
+
+Create switches.py helper module (DEFAULT_SWITCHES, resolve_switches, get_switches)
+
+Add switches field to GraphState
+
+Wire QueryRequest/WorkflowSwitches model into api.py and _build_initial_state
+
+Update routes.py to read switches from state
+
+Update nodes/query_variants.py
+
+Update services/validators.py to accept switches param
+
+Update nodes/dedup_merge.py and nodes/nac.py (_merge_similar_chunks)
+
+Update nodes/dc.py and nodes/lbc.py
+
+Update nodes/validate_retrieval.py and nodes/check_answer_quality.py
+
+Update services/self_learner.py and nodes/commands.py and nodes/auto_distillation.py
+
+Verify imports and run a syntax/smoke check
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dc.py
+Removed 5 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dc.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dc.py
+Modified
+Now _validate_dc_groups and the four node functions in dc.py:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dc.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\dc.py
+Added 6 lines
+dc.py done. Now lbc.py.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\lbc.py
+Removed 6 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\lbc.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\lbc.py
+Modified
+Now _validate_lbc_pairs and the four node functions in lbc.py.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\lbc.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\lbc.py
+Added 4 lines
+dc.py and lbc.py done. Now validate_retrieval.py and check_answer_quality.py.
+
+Update Todos
+
+Create switches.py helper module (DEFAULT_SWITCHES, resolve_switches, get_switches)
+
+Add switches field to GraphState
+
+Wire QueryRequest/WorkflowSwitches model into api.py and _build_initial_state
+
+Update routes.py to read switches from state
+
+Update nodes/query_variants.py
+
+Update services/validators.py to accept switches param
+
+Update nodes/dedup_merge.py and nodes/nac.py (_merge_similar_chunks)
+
+Update nodes/dc.py and nodes/lbc.py
+
+Update nodes/validate_retrieval.py and nodes/check_answer_quality.py
+
+Update services/self_learner.py and nodes/commands.py and nodes/auto_distillation.py
+
+Verify imports and run a syntax/smoke check
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\validate_retrieval.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\validate_retrieval.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\validate_retrieval.py
+Modified
+Now check_answer_quality.py.
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\check_answer_quality.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\check_answer_quality.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\check_answer_quality.py
+Modified
+Now self_learner.py, commands.py, and auto_distillation.py.
+
+Update Todos
+
+Create switches.py helper module (DEFAULT_SWITCHES, resolve_switches, get_switches)
+
+Add switches field to GraphState
+
+Wire QueryRequest/WorkflowSwitches model into api.py and _build_initial_state
+
+Update routes.py to read switches from state
+
+Update nodes/query_variants.py
+
+Update services/validators.py to accept switches param
+
+Update nodes/dedup_merge.py and nodes/nac.py (_merge_similar_chunks)
+
+Update nodes/dc.py and nodes/lbc.py
+
+Update nodes/validate_retrieval.py and nodes/check_answer_quality.py
+
+Update services/self_learner.py and nodes/commands.py and nodes/auto_distillation.py
+
+Verify imports and run a syntax/smoke check
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\self_learner.py
+Removed 5 lines
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\self_learner.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\self_learner.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\self_learner.py
+Added 1 line
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\self_learner.py
+Modified
+Now nodes/auto_distillation.py:
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\auto_distillation.py
+Added 1 line
+Now nodes/commands.py (cmd_stats and cmd_learn):
+
+Edit c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\nodes\commands.py
+Added 1 line
+All source edits done. Now let's verify with a syntax/import smoke check across all touched files.
+
+Update Todos
+
+Create switches.py helper module (DEFAULT_SWITCHES, resolve_switches, get_switches)
+
+Add switches field to GraphState
+
+Wire QueryRequest/WorkflowSwitches model into api.py and _build_initial_state
+
+Update routes.py to read switches from state
+
+Update nodes/query_variants.py
+
+Update services/validators.py to accept switches param
+
+Update nodes/dedup_merge.py and nodes/nac.py (_merge_similar_chunks)
+
+Update nodes/dc.py and nodes/lbc.py
+
+Update nodes/validate_retrieval.py and nodes/check_answer_quality.py
+
+Update services/self_learner.py and nodes/commands.py and nodes/auto_distillation.py
+
+Verify imports and run a syntax/smoke check
+Grep "ENABLE_SUB_QUERY_GENERATION|ENABLE_QUERY_VARIANTS_OUTPUT_FIX|ENABLE_RETRIEVAL_DEDUP_MERGE|ENABLE_RETRIEVAL_VALIDATION|ENABLE_NAC_COMPRESSION|ENABLE_DC_COMPRESSION|ENABLE_LBC_COMPRESSION|ENABLE_COMPRESSION_VALIDATION|ENABLE_COMPRESSION_OUTPUT_FIX|ENABLE_ANSWER_DRAFT_CREATION|ENABLE_ANSWER_QUALITY_CHECK|ENABLE_ANSWER_QUALITY_OUTPUT_FIX|ENABLE_AUTO_DISTILLATION|ENABLE_QA_PAIR_GENERATION|ENABLE_QA_PAIR_OUTPUT_FIX|ENABLE_GLOBAL_LLM_OUTPUT_FIX" (in app_workflow)
+121 lines of output
+All good — no stale direct config imports of the switch flags remain except in config.py itself (defaults), switches.py (building defaults), and api.py (the pydantic model fields + the unrelated global /stats endpoint, which intentionally keeps using the module-level default). Now let's byte-compile everything to catch syntax errors.
+
+Bash Byte-compile all edited modules to catch syntax errors
+IN
+python -m py_compile app_workflow/api.py app_workflow/routes.py app_workflow/state.py app_workflow/config.py app_workflow/services/switches.py app_workflow/services/validators.py app_workflow/services/self_learner.py app_workflow/nodes/query_variants.py app_workflow/nodes/dedup_merge.py app_workflow/nodes/nac.py app_workflow/nodes/dc.py app_workflow/nodes/lbc.py app_workflow/nodes/validate_retrieval.py app_workflow/nodes/check_answer_quality.py app_workflow/nodes/commands.py app_workflow/nodes/auto_distillation.py app_workflow/graph.py app_workflow/main.py && echo COMPILE_OK
+
+OUT
+COMPILE_OK
+All files compile. Now let's do an actual import + graph-build smoke test to catch runtime import errors (circular imports, missing names, etc.).
+
+Bash Smoke test: import graph/api modules, build graph, verify switches resolution
+IN
+cd app_workflow && python -c "
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path('.').resolve()))
+sys.path.insert(1, str(Path('..').resolve()))
+from graph import build_graph
+from api import _build_initial_state, WorkflowSwitches
+from app_workflow.services.switches import DEFAULT_SWITCHES, resolve_switches, get_switches
+
+# default (no overrides)
+s1 = _build_initial_state('hello', request_id='r1')
+print('default switches match config:', s1['switches'] == DEFAULT_SWITCHES)
+
+# with overrides
+sw = WorkflowSwitches(ENABLE_SUB_QUERY_GENERATION=False, ENABLE_NAC_COMPRESSION=False)
+s2 = _build_initial_state('hello', request_id='r2', switches=sw)
+print('override applied:', s2['switches']['ENABLE_SUB_QUERY_GENERATION'] is False, s2['switches']['ENABLE_NAC_COMPRESSION'] is False)
+print('other defaults preserved:', s2['switches']['ENABLE_DC_COMPRESSION'] is True)
+
+print('get_switches on state w/o key falls back:', get_switches({}) == DEFAULT_SWITCHES)
+
+g = build_graph()
+print('GRAPH BUILD OK')
+" 2>&1 | tail -60
+
+OUT
+Traceback (most recent call last):
+  File "<string>", line 6, in <module>
+    from graph import build_graph
+  File "C:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\graph.py", line 1, in <module>
+    from langgraph.graph import StateGraph, START, END
+ModuleNotFoundError: No module named 'langgraph'
+Bash Check if langgraph is installed in project venv
+IN
+cd /c/Users/LOQ/Desktop/Projects/RAG-work && ls .venv/Lib/site-packages | grep -i langgraph
+
+OUT
+langgraph
+langgraph-1.1.8.dist-info
+langgraph_checkpoint-4.0.2.dist-info
+langgraph_prebuilt-1.0.10.dist-info
+langgraph_sdk
+langgraph_sdk-0.3.13.dist-info
+It's in the project's venv, not on PATH. Let me use that interpreter directly.
+
+Bash Check venv python version
+IN
+./.venv/Scripts/python.exe -c "import sys; print(sys.version)"
+
+OUT
+3.14.2 (tags/v3.14.2:df79316, Dec  5 2025, 17:18:21) [MSC v.1944 64 bit (AMD64)]
+Bash Smoke test using project venv: import api/graph modules, build graph, verify switches resolution
+IN
+cd app_workflow && ../.venv/Scripts/python.exe -c "
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path('.').resolve()))
+sys.path.insert(1, str(Path('..').resolve()))
+from graph import build_graph
+from api import _build_initial_state, WorkflowSwitches
+from app_workflow.services.switches import DEFAULT_SWITCHES, resolve_switches, get_switches
+
+s1 = _build_initial_state('hello', request_id='r1')
+print('default switches match config:', s1['switches'] == DEFAULT_SWITCHES)
+
+sw = WorkflowSwitches(ENABLE_SUB_QUERY_GENERATION=False, ENABLE_NAC_COMPRESSION=False)
+s2 = _build_initial_state('hello', request_id='r2', switches=sw)
+print('override applied:', s2['switches']['ENABLE_SUB_QUERY_GENERATION'] is False, s2['switches']['ENABLE_NAC_COMPRESSION'] is False)
+print('other defaults preserved:', s2['switches']['ENABLE_DC_COMPRESSION'] is True)
+
+print('get_switches on state w/o key falls back:', get_switches({}) == DEFAULT_SWITCHES)
+
+g = build_graph()
+print('GRAPH BUILD OK')
+" 2>&1 | tail -80
+
+OUT
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|##########| 103/103 [00:00<00:00, 4087.44it/s]
+BertModel LOAD REPORT from: sentence-transformers/all-MiniLM-L6-v2
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|##########| 103/103 [00:00<00:00, 8580.72it/s]
+BertModel LOAD REPORT from: sentence-transformers/all-MiniLM-L6-v2
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+default switches match config: True
+override applied: True True
+other defaults preserved: True
+get_switches on state w/o key falls back: True
+GRAPH BUILD OK
+2026-07-14 14:38:26 | INFO     | [-] | Shutdown called, ignoring Span.
+Everything imports cleanly, the graph builds, and switch resolution (defaults, overrides, and fallback for state without a switches key) all work correctly. Let's mark the todo complete.
+
+Update Todos
+
+Create switches.py helper module (DEFAULT_SWITCHES, resolve_switches, get_switches)
+
+Add switches field to GraphState
+
+Wire QueryRequest/WorkflowSwitches model into api.py and _build_initial_state
+
+Update routes.py to read switches from state
+
+Update nodes/query_variants.py
+
+Update services/validators.py to accept switches param
+
+Update nodes/dedup_merge.py and nodes/nac.py (_merge_similar_chunks)
+
+Update nodes/dc.py and nodes/lbc.py
+
+Update nodes/validate_retrieval.py and nodes/check_answer_quality.py
+
+Update services/self_learner.py and nodes/commands.py and nodes/auto_distillation.py
+
+Verify imports and run a syntax/smoke check
+Summary
+POST /query now accepts an optional switches object carrying any subset of the 20 ENABLE_* flags from config.py; unset fields (or an omitted switches field entirely) keep the config.py defaults, per your requirement.
+
+How it works:
+
+New app_workflow/services/switches.py: DEFAULT_SWITCHES (built from config.py), resolve_switches(overrides) (merges request overrides onto defaults, ignoring unknown/non-bool keys), and get_switches(state) (reads the per-run dict off GraphState, falling back to defaults if absent).
+state.py: added switches: NotRequired[dict[str, bool]] to GraphState.
+api.py: new WorkflowSwitches Pydantic model (all fields Optional[bool] = None) on QueryRequest; _build_initial_state resolves it into the full switches dict and stores it on the initial state.
+Every node and routing function that previously read an ENABLE_* constant at import time (routes.py, query_variants.py, dedup_merge.py, nac.py, dc.py, lbc.py, validate_retrieval.py, check_answer_quality.py, commands.py, auto_distillation.py) now calls get_switches(state) and looks up the value at runtime instead.
+Plain helper functions that don't receive state (validators.py's four validate_* functions, self_learner.run_distillation/_generate_qa_pairs, nac._merge_similar_chunks) now take an explicit switches dict threaded down from the calling node, defaulting to DEFAULT_SWITCHES if not passed (keeps main.py's CLI path, which never sets switches, working unchanged).
+Verified: all edited files byte-compile, the module graph imports without circular-import issues, build_graph() succeeds, and a live check confirms default resolution, per-field overrides, and the state-less fallback all behave correctly.
+
+c:\Users\LOQ\Desktop\Projects\RAG-work\app_workflow\services\switches.py
+write the link for this server's FastAPI's docs
+FastAPI auto-generates interactive docs at /docs. Since api.py runs uvicorn on port 8001 (see the bottom of the file: uvicorn.run("api:app", host="0.0.0.0", port=8001, ...)), the docs URL is:
+
+http://localhost:8001/docs
+
+(Swagger UI — you can try /query there directly, including the new switches field.) The raw OpenAPI schema is at http://localhost:8001/openapi.json, and ReDoc-style docs are at http://localhost:8001/redoc.

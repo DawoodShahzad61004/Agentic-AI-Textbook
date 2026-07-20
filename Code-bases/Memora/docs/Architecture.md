@@ -1072,3 +1072,51 @@ All changes are in `app_workflow/`. `app/` is unmodified.
 **New env vars:** `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` (or `LANGFUSE_HOST`) — required for `services/langfuse_tracing.py`.
 
 Tracked in: new `app_workflow/services/langfuse_tracing.py`; `app_workflow/config.py`, `app_workflow/main.py`, `app_workflow/api.py`, `app_workflow/services/llm_caller.py`, `app_workflow/services/fix_llm_output.py`, `app_workflow/services/validators.py`, `app_workflow/services/self_learner.py`, `app_workflow/nodes/*.py` modified; new Decisions.md ADR-066, ADR-067; new Bugs.md BUG-074, BUG-075, BUG-076.
+
+---
+
+### 2026-07-13 — Central Tracing Policy (`operation_tracing.py`) Applied to All 17 `app_workflow/` Modules; Dedicated Langfuse Log-Mirroring Handler
+
+All changes are in `app_workflow/`, plus `README.md` and a project-root utility script. `app/` is unmodified.
+
+**New `services/operation_tracing.py`.** `@traced_operation(name)` wraps a function in a `RunnableLambda` with a stable display name, inheriting the ambient `RunnableConfig` so it nests inside the graph's existing trace hierarchy across all three backends (Langfuse, LangSmith, Phoenix). `instrument_namespace(globals(), group, exclude={...})`, called once at the bottom of a module, auto-wraps every module-defined function/method — applied to all 17 node + service modules via a two-line append (e.g. `query_variants.py`: `_instrument_namespace(globals(), "Query Variants", exclude={"generate_query_variants"})`, excluding the top-level node function already covered by graph-level tracing). See ADR-068.
+
+**`services/operation_tracing.py` expanded same-day into a full central tracing policy.** `TraceSpec` dataclass (`input_builder`/`output_builder`); `_summarize()` recursive serializer (`_MAX_TEXT_CHARS = 2_000`, `_MAX_COLLECTION_ITEMS = 20`, depth-limited at 3, numpy arrays → shape+dtype, service objects → type name + key attributes); `_include_argument()` filters `self`/`cls`/`config`/`callbacks`/`client`/`handler` from trace inputs. `config.py` gained the three constants above (`_EXCLUDED_ARGUMENTS`, `_MAX_TEXT_CHARS`, `_MAX_COLLECTION_ITEMS`), moved there from `operation_tracing.py` on request so the tracing-policy limits sit alongside the rest of the pipeline's configurable constants.
+
+**New `services/langfuse_logging.py`.** `LangfuseHandler(logging.Handler)` converts every `LogRecord` into a Langfuse `event` observation attached to the active trace, with `ContextVar`-guarded re-entrancy protection against the Langfuse SDK's own internal logging. See ADR-069.
+
+**`services/logger_config.py`** — `LangfuseHandler` instantiated at `DEBUG` and registered as the fourth root handler, alongside console, file, and `_TracingHandler` (ADR-064).
+
+**New `tests/test_langfuse_logging.py`** — 2 passing tests for `LangfuseHandler`.
+
+**`README.md`** — new "Setting Up Tracing" section (LangSmith/Langfuse/Phoenix setup instructions); feature list, tech stack table, file tree, and prerequisites updated to reflect the three-backend tracing system.
+
+**New root-level `useful_but_not_valuable_Files/run_all_workflow_batches.py`** (non-architectural) — runs every configured query batch against a single long-lived `app_workflow/api.py` subprocess with no inter-query delay, reusing `app/run_batch.py`'s `BATCHES` dict.
+
+Tracked in: new `app_workflow/services/operation_tracing.py`, `app_workflow/services/langfuse_logging.py`, `app_workflow/tests/test_langfuse_logging.py`, `useful_but_not_valuable_Files/run_all_workflow_batches.py`; `app_workflow/services/logger_config.py`, `app_workflow/config.py`, `README.md`, all 17 `app_workflow/` node + service modules modified; new Decisions.md ADR-068, ADR-069; new Research.md topics 58, 59.
+
+### 2026-07-14 — Request-Scoped Workflow Configuration in `GraphState`; Long-Lived 15-Batch Benchmark Harness
+
+All production-code changes are in `app_workflow/`; the benchmark harness remains under `useful_but_not_valuable_Files/`. `app/` is unmodified.
+
+**API schema and resolution boundary.** `app_workflow/api.py` adds a `WorkflowSwitches` Pydantic model with 20 optional boolean fields covering nine functional groups: sub-query generation; retrieval dedup/merge; retrieval validation; NAC/DC/LBC compression; draft creation; answer-quality checking; automatic distillation; QA-pair generation; and global/per-stage output repair. `QueryRequest.switches` is optional. `_build_initial_state()` serializes only explicitly supplied fields (`model_dump(exclude_none=True)`), calls `resolve_switches()`, and stores one complete, immutable-for-the-run effective mapping in `GraphState["switches"]` before graph invocation.
+
+**New `services/switches.py`.** `DEFAULT_SWITCHES` is constructed from `app_workflow/config.py`, keeping configuration constants as the canonical defaults. `resolve_switches(overrides)` copies those defaults and overlays recognized boolean values. `get_switches(state)` returns the request-scoped mapping or falls back to `DEFAULT_SWITCHES` for the CLI and older callers that do not populate the state field. This avoids mutating process-global configuration and therefore allows consecutive requests in the same long-lived API process to use different workflow shapes safely. See ADR-071.
+
+**State-driven routing and execution.** `routes.py` now chooses sub-query generation, compression-validator edges, draft generation, answer-quality checking, and auto-distillation from `get_switches(state)`. Node/service call chains use the same resolved mapping for retrieval validation, dedup/merge and its validator, NAC/DC/LBC stages, structured-output repair gates, QA-pair generation/repair, and command-triggered or automatic distillation. Disabled processing stages use explicit pass-through behavior where the graph topology requires the node to remain present, preserving fan-in/state shape while removing the expensive operation.
+
+**Benchmark architecture.** `run_all_workflow_batches.py` is a non-production orchestration client: it owns one API subprocess for the whole suite, uses readiness polling instead of a fixed startup sleep, executes heterogeneous entries in declared order, and owns shutdown/failure reporting. The catalog grew to 15 batches / 100 numbered scenarios, while comments allow targeted subsets during debugging. The single-process design makes sequential switch combinations, feedback state, distillation, tracing, and learned-QA effects observable in one continuous runtime. See ADR-070 and Research topic 60.
+
+**Observed operational boundary.** The switch-capable run beginning 17:45 continued after the feature landed and produced timing data through 19:26, when the local MongoDB replica set became unavailable. MongoDB remains an external required service; request-scoped workflow configuration does not isolate persistence failures.
+
+Tracked in: commits `cdb1f71` and `1340c10`; new `app_workflow/services/switches.py`; modified `app_workflow/api.py`, `state.py`, `routes.py`, retrieval/compression/answer/self-learning nodes and services; expanded `useful_but_not_valuable_Files/run_all_workflow_batches.py`; new ADR-070/071 and Research topic 60.
+
+### 2026-07-15 — Document-to-Markdown Loader Evaluation Utilities; Production Ingestion Unchanged
+
+No production architecture changed in either `app/` or `app_workflow/`. The active LangChain ingestion path remains `app/ingest.py`, with extension-based `UnstructuredLoader` / `JSONLoader` routing, tabular-to-JSON conversion, recursive character splitting, embeddings, and batched vector-store writes.
+
+Three standalone, batch-capable document-to-Markdown adapters were preserved under `useful_but_not_valuable_Files/document-loaders-codes/`: `docling_test.py`, `unstructured_test.py`, and `marker_test.py`. Each recursively discovers files under a shared `source/` tree, mirrors relative paths into a loader-specific results directory, writes UTF-8 Markdown, isolates per-file failures, prints a conversion summary, and exits non-zero if any conversion failed. These scripts are evaluation utilities rather than modules called by either RAG pipeline. See ADR-072.
+
+The detailed Marker-PDF assessment establishes a future ingestion boundary rather than a new component: Marker is a plausible first-stage semantic-text extractor for conventional prose and some simple tables, but its raw Markdown must not be treated as an authoritative representation for complex forms, merged/border-sensitive tables, engineering title blocks, page furniture, nested lists, or visually rich pages. Any future production adoption would require asset/link validation, encoding repair, page-aware header/footer cleanup, heading normalization, table-quality checks, and manual or richer-format handling for complex layouts. See Research topic 61.
+
+Tracked in: commit `b75e70a`; new `useful_but_not_valuable_Files/document-loaders-codes/docling_test.py`, `marker_test.py`, `unstructured_test.py`, and `useful_but_not_valuable_Files/Marker-PDF Report.md`; new ADR-072 and Research topic 61.

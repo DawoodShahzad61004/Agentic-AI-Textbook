@@ -1,0 +1,9 @@
+.agents/
+.claude/
+.codex/
+.docx-tools/
+
+
+AGENTS.md
+CLAUDE.md
+graphify-out/

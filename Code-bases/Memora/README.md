@@ -41,7 +41,7 @@ They are functionally independent (separate `config.py`, `llm_setup.py`, `feedba
 - **Multi-tier LLM output repair** — a 5-stage pipeline (`fix_llm_output.py`) recovers structured JSON from malformed LLM output (markdown fences, truncation, wrong types, code instead of JSON, etc.) before it reaches Pydantic validation
 - **Thumbdown persistence** — bad answers are logged with full query variants and user feedback; subsequent identical queries block the entire prior failing search trajectory
 - **Single custom LLM endpoint (`app_workflow/`)** — all four roles (`llm`, `llm_tool`, `judge_llm`, `json_fix_llm`) are routed to one self-hosted, OpenAI-compatible endpoint (`CUSTOM_API_BASE`). Groq and the Hugging Face Inference Providers router were both evaluated for `judge_llm`/`json_fix_llm` and retired after a head-to-head latency/reliability benchmark showed the HF router degrading validator quality under quota pressure (see `Status.md` 2026-07-08). Query-variant generation no longer uses tool-calling — it asks the LLM for a plain JSON array, parsed via `fix_llm_output`. `app/` uses Groq (`llama-3.1-8b-instant`) exclusively for all roles.
-- **Observability tracing (`app_workflow/`)** — Arize Phoenix (self-hosted, OTel/OpenInference-based) is the primary tracing backend, chosen for its zero-egress, single-container self-hosting under a no-data-leaves-the-network constraint; LangSmith instrumentation is retained in parallel for comparison. A custom logging handler mirrors every `logging` call onto the active trace in both backends, so per-node debug detail is visible alongside prompts, tokens, and latency.
+- **Three tracing backends (`app_workflow/`)** — LangSmith, Langfuse, and self-hosted Arize Phoenix are supported. Langfuse and Phoenix capture the shared LangChain/LangGraph operation hierarchy; application log records are also mirrored into active traces. See [Setting Up Tracing](#setting-up-tracing) for credentials, feature flags, and the current backend-combination limitation.
 - **Structured error handling** — `LLMResult` dataclass with an `LLMErrorKind` taxonomy, a FIFO serialization gate, and adaptive-cooldown retry across both pipelines
 - **MongoDB-backed persistence** — interaction history, thumbdowns, and failed query variants are stored transactionally (replacing the original flat-file JSON/JSONL design)
 - **HTTP API for both pipelines** — `POST /query`, `POST /feedback/bad`, `GET /stats`, `POST /learn`, `POST /quit` on both `app/api.py` and `app_workflow/api.py`
@@ -57,7 +57,7 @@ They are functionally independent (separate `config.py`, `llm_setup.py`, `feedba
 | Vector store | ChromaDB — local persistent HNSW index, two collections (`documents`, `learned_qa`), shared by both pipelines |
 | LLM inference (`app/`, all roles) | Groq (`llama-3.1-8b-instant`) via LangChain `ChatOpenAI` |
 | LLM inference (`app_workflow/`, all four roles: `llm`, `llm_tool`, `judge_llm`, `json_fix_llm`) | Self-hosted/custom OpenAI-compatible endpoint (`CUSTOM_API_BASE`, default model `llama-3.1-8b-instruct`) via `langchain_openai.ChatOpenAI`; the prior Groq and HF Inference Providers router wiring is commented out in place, not deleted |
-| Observability (`app_workflow/`) | Arize Phoenix (self-hosted, OTel/OpenInference) as primary tracing backend; LangSmith retained in parallel for comparison |
+| Observability (`app_workflow/`) | LangSmith, Langfuse, and Arize Phoenix (self-hosted, OTel/OpenInference) |
 | Interaction persistence | MongoDB — `feedback_interactions`, `user_thumbdowns`, `failed_variants` collections, replica-set mode (`rs0`) required for transactional thumbdown writes |
 | JSON repair | `json_repair` + Pydantic — multi-tier recovery for malformed LLM output |
 | HTTP API | FastAPI + uvicorn |
@@ -110,8 +110,11 @@ app_workflow/                  # LangGraph implementation
     ├── llm_setup.py             # llm, llm_tool, judge_llm, json_fix_llm — all on one custom OpenAI-compatible endpoint
     ├── llm_caller.py             # FIFO gate + retry, Groq/OpenAI/httpx exception handling
     ├── fix_llm_output.py         # Same repair pipeline as app/, own json_fix_llm
+    ├── langfuse_tracing.py        # Langfuse callback construction
+    ├── langfuse_logging.py        # LangfuseHandler — mirrors logging records as Langfuse events
     ├── phoenix_tracing.py         # Arize Phoenix OTel/OpenInference instrumentation (setup_phoenix_tracing)
-    ├── trace_events.py            # CLI — pulls mirrored log events for a trace via the LangSmith API
+    ├── operation_tracing.py       # instrument_namespace() + TraceSpec — central function-level tracing policy
+    ├── trace_events.py            # Retrieve LangSmith trace log events by run ID
     ├── db.py, feedback_store.py, learned_qa_store.py, self_learner.py, ...
 
 data/
@@ -126,7 +129,7 @@ useful_but_not_valuable_Files/  # Diagnostic/analysis scripts, not part of eithe
 
 ## Quick Setup
 
-**Prerequisites:** Python 3.14, a running MongoDB instance configured as a single-node replica set (`rs0` — required for transactional thumbdown writes), a Groq API key, and access to a self-hosted/custom OpenAI-compatible LLM endpoint if you plan to run `app_workflow/` (all four of its LLM roles route through `CUSTOM_API_BASE`). Optionally, a local Arize Phoenix instance (`PHOENIX_COLLECTOR_ENDPOINT`, default `http://localhost:4317`) for trace visualization.
+**Prerequisites:** Python 3.14, a running MongoDB instance configured as a single-node replica set (`rs0` — required for transactional thumbdown writes), a Groq API key, and access to a self-hosted/custom OpenAI-compatible LLM endpoint if you plan to run `app_workflow/` (all four of its LLM roles route through `CUSTOM_API_BASE`). Tracing accounts or a local Phoenix collector are optional; see [Setting Up Tracing](#setting-up-tracing).
 
 ```powershell
 # 1. Create environment
@@ -146,11 +149,7 @@ pip install -r requirements.txt
 #   CUSTOM_API_MODEL_NAME=llama-3.1-8b-instruct   # optional, this is the default
 #   MONGODB_URI=mongodb://localhost:27017
 #   MONGODB_DB_NAME=rag_db
-#   PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317   # optional — app_workflow/ tracing
-#   PHOENIX_PROJECT_NAME=...                            # optional
-#   LANGCHAIN_TRACING_V2=true                           # optional — LangSmith tracing (app_workflow/)
-#   LANGCHAIN_API_KEY=...
-#   LANGCHAIN_PROJECT=...
+#   Tracer variables are documented in "Setting Up Tracing" below.
 
 # 5. Initialise the MongoDB replica set (one-time)
 #   add `replSetName: "rs0"` to mongod.cfg, restart MongoDB, then:
@@ -173,6 +172,82 @@ python main.py
 python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
 # Expected: True 12.x — if False, embeddings fall back to CPU automatically
 ```
+
+---
+
+## Setting Up Tracing
+
+Tracing applies to the `app_workflow/` LangGraph implementation. Install the project dependencies first. If `langfuse` is not already available in the active environment, install its SDK separately:
+
+```powershell
+pip install -r requirements.txt
+pip install langfuse arize-phoenix-otel openinference-instrumentation-langchain
+```
+
+Choose the backend configuration below, then start either `python app_workflow/main.py` or the port-8001 API. Both entry points initialize tracing at process startup.
+
+### 1. LangSmith
+
+Create a LangSmith API key and add the following values to the root `.env` file:
+
+```dotenv
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=<your-langsmith-api-key>
+LANGCHAIN_PROJECT=rag-work
+# LANGCHAIN_ENDPOINT=https://api.smith.langchain.com  # optional override
+```
+
+LangSmith uses LangChain's environment-driven instrumentation, so it has no separate feature flag in `app_workflow/config.py`. Set `LANGCHAIN_TRACING_V2=false` (or remove it) to disable uploads. To print the log events mirrored into a stored LangSmith trace, pass one of its run IDs to:
+
+```powershell
+python -m app_workflow.services.trace_events <run-id>
+```
+
+### 2. Langfuse
+
+Create a Langfuse project, copy its public and secret keys into `.env`, and set the host for Langfuse Cloud or your self-hosted deployment:
+
+```dotenv
+LANGFUSE_PUBLIC_KEY=<your-public-key>
+LANGFUSE_SECRET_KEY=<your-secret-key>
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+# LANGFUSE_HOST=<your-langfuse-url>  # supported fallback to LANGFUSE_BASE_URL
+```
+
+Enable the callback in `app_workflow/config.py`:
+
+```python
+ENABLE_LANGFUSE_TRACING = True
+ENABLE_PHOENIX_TRACING = False
+```
+
+The CLI, API `/query`, and API `/learn` paths pass this callback through to the graph and nested LLM calls. Set `ENABLE_LANGFUSE_TRACING = False` to disable it.
+
+A dedicated `LangfuseHandler` (`services/langfuse_logging.py`) is also registered as a fourth root log handler at `DEBUG` level, alongside console, file, and `_TracingHandler`. It mirrors every log record onto the active Langfuse trace as an `event` observation, independent of the callback above — so per-function detail is visible in the Langfuse UI even without inspecting `.debug.log` files directly.
+
+### 3. Arize Phoenix
+
+Start or otherwise provide a Phoenix instance with an OTLP gRPC collector reachable by the application. The default collector address expected by this repository is `http://localhost:4317`; the Phoenix UI is commonly exposed separately by the Phoenix deployment.
+
+Add the collector and project name to `.env`:
+
+```dotenv
+PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
+PHOENIX_PROJECT_NAME=rag-work
+```
+
+Then select Phoenix in `app_workflow/config.py`:
+
+```python
+ENABLE_PHOENIX_TRACING = True
+ENABLE_LANGFUSE_TRACING = False
+```
+
+Phoenix is registered once at startup and auto-instruments LangChain/LangGraph through OpenInference. Set `ENABLE_PHOENIX_TRACING = False` to disable it.
+
+> **Backend compatibility:** LangSmith can remain enabled alongside either callback backend. Do not enable Langfuse and Phoenix together in the current implementation: both attach to the process-global OpenTelemetry provider, and one exporter can silently replace the other. Select exactly one of `ENABLE_LANGFUSE_TRACING` and `ENABLE_PHOENIX_TRACING` until tracer-provider isolation is implemented.
+
+After startup, run one query and confirm a new trace appears in the selected backend/project. Trace payloads are bounded by the policy in `app_workflow/services/operation_tracing.py`; credentials, callback/config objects, and client/handler arguments are excluded.
 
 ---
 

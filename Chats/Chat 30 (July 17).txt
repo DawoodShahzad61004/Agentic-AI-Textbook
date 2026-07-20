@@ -1,0 +1,314 @@
+Read chunking.ingest.split_documents()
+Replace the temp_split() with the following instructions:
+Give me a markdown-text split function that does the following:
+Has a CHUNK_SIZE limiter
+Starts from the top of the text and records the chunk till the CHUNK_SIZE is reachedWithin this chunk, check the last smallest level of heading in hierarchy.
+If there is at least 1 level of heading present, then check whether if the smallest heading level's last heading's content is left-over in the remaining text and not recorded due to CHUNK_SIZE limiter
+ (i) If there is content present, then drop all the headings of the smallest heading level inside this chunk.The next chunk should start from the start of the dropped content.
+ (ii) Else, keep the chunk and continue to record the next chunk
+If there is no headings at all or just one heading with no sub-headings in the recorded chunk, then check whether further content present in the remaining text starts with any heading.
+ (i) If the remaining text starts with a heading, then keep the current chunk and continue recording with the remaining text for the next chunk
+ (ii) else, check if the chunk has a list in the end.
+ > if there is a list then look for the smallest pointer in hierarchy and drop all of them from this chunk. The next chunk should start from the pointers that were dropped
+ > if there is a list with a single level of pointer in hierarchy, then split the list (each pointer) as a chunk.
+ > if there is no list, and the current chunk ends with a table's part, then drop till the start of the table. The next chunk should start with the table's beginning
+ > if there is no list, then drop till the current chunk's last paragraph. The next chunk will begin from the paragraph dropped.
+If the chunk starts without a heading AND there is at least one heading within this chunk AND this chunk ends with a table's part, then drop till the heading before the table. The next chunk should start from the dropped heading
+If the chunk starts with a heading and ends with a table's part, then drop till the start of the table. The next chunk should start from the table and record only the table.
+If the chunk starts with a table, record the entire table. The next chunk should start after the end of the table.
+
+Hierarchy of Heading Levels: 
+Heading Level 1 = # before next #
+Heading Level 2 = ## before next ##
+Heading Level 3 = ### before next ###
+Heading Level 4 = #### before next ####
+Heading Level 5 = ##### before next #####
+Heading Level 6 = ###### before next ######
+Inside any Heading Level, the hierarchy of List is:
+Outer-most = - 
+Next to outer-most =  -
+Next to next to outer-most =    -
+Friday 6:02 PM
+Implemented the Markdown-aware temp_split() in [ingest.py (line 95)](C:/Users/LOQ/Desktop/Projects/Document-Loaders/chunking/ingest.py:95).
+It now handles:
+CHUNK_SIZE limits, except indivisible tables.
+Heading hierarchy and incomplete subsection rollover.
+Flat and nested list splitting by indentation.
+Paragraph-based fallback boundaries.
+Partial and oversized tables according to rules 4–6.
+Markdown fenced-code exclusions.
+No overlap between chunks.
+Added nine focused tests in [test_markdown_splitter.py (line 20)](C:/Users/LOQ/Desktop/Projects/Document-Loaders/tests/test_markdown_splitter.py:20). All pass.
+A 589,511-character Marker document smoke test produced 1,028 chunks; every chunk exceeding CHUNK_SIZE was a complete table. The knowledge graph was also refreshed. Existing changes to chunking/logger_config.py were left untouched.
+
+
+Markdown fenced-code exclusions.
+what does this mean? Answer briefly
+Friday 6:12 PM
+It means headings, lists, or table-like text inside fenced code blocks (``` or ~~~) are treated as code—not as Markdown structures used for chunk splitting.
+Friday 6:12 PM
+Chunk 4:
+"
+Single Company Procurement: Following submission of the Bids, the Company may select one or more Bidder(s) to enter into a legal agreement with the Company in the form set out in Appendix 9 to this RFT ("Agreement"). The Agreement shall detail the Scope of Work, the terms and conditions and agreed fees pursuant to which the Company may engage the selected Bidder(s) to perform all or part of the Scope of Work. [DELETE THIS PARAGRAPH IF THIS TENDER IS FOR GROUP COMPANY PROCUREMENT]
+*2. BACKGROUND
+"
+How it should be:
+"
+Single Company Procurement: Following submission of the Bids, the Company may select one or more Bidder(s) to enter into a legal agreement with the Company in the form set out in Appendix 9 to this RFT ("Agreement"). The Agreement shall detail the Scope of Work, the terms and conditions and agreed fees pursuant to which the Company may engage the selected Bidder(s) to perform all or part of the Scope of Work. [DELETE THIS PARAGRAPH IF THIS TENDER IS FOR GROUP COMPANY PROCUREMENT]
+"
+"
+*2. BACKGROUND
+...next chunk's remaining text
+"
+Rule to add: If a chunk ends with a heading, drop the heading from the current chunk. The next chunk should start recording from this heading.
+Chunk 5:
+"
+2.1 ADNOC was formed under Abu Dhabi Law No. (7) of 1971 to operate in all areas of the oil and gas industry, including but not limited to engaging in prospecting for and exploitation of oil, natural gas and other hydrocarbons in Abu Dhabi, United Arab Emirates ("UAE") and, pursuant to Abu Dhabi Law No. (4) of 1976 (the "Gas Law"), has the right, individually or in joint venture with other parties, to exploit all gas discovered within Abu Dhabi territorial boundaries.
+"
+Chunk 6:
+"
+2.2 ADNOC and its group of affiliated companies ("ADNOC Group") undertake diversified operations covering all aspects of the upstream, midstream and downstream petroleum industry, including crude oil and natural gas exploration, production, refining, processing, distribution, global marketing and the manufacture of petrochemicals. Further information on the ADNOC Group can be found on the website www.adnoc.ae.
+"
+Chunk 7:
+"
+2.3 [[Insert name of company] is a member of the ADNOC Group. [Where the RFT is being tendered by a company other than ADNOC, insert a paragraph describing the Company, similar to paragraph 2.1 above.]
+"
+How it should be:
+"
+*2. BACKGROUND
+2.1 ADNOC was formed under Abu Dhabi Law No. (7) of 1971 to operate in all areas of the oil and gas industry, including but not limited to engaging in prospecting for and exploitation of oil, natural gas and other hydrocarbons in Abu Dhabi, United Arab Emirates ("UAE") and, pursuant to Abu Dhabi Law No. (4) of 1976 (the "Gas Law"), has the right, individually or in joint venture with other parties, to exploit all gas discovered within Abu Dhabi territorial boundaries.
+2.2 ADNOC and its group of affiliated companies ("ADNOC Group") undertake diversified operations covering all aspects of the upstream, midstream and downstream petroleum industry, including crude oil and natural gas exploration, production, refining, processing, distribution, global marketing and the manufacture of petrochemicals. Further information on the ADNOC Group can be found on the website www.adnoc.ae.
+2.3 [[Insert name of company] is a member of the ADNOC Group. [Where the RFT is being tendered by a company other than ADNOC, insert a paragraph describing the Company, similar to paragraph 2.1 above.]
+"
+Rule to change: If there is no headings at all or just one heading with no sub-headings in the recorded chunk, then check whether further content present in the remaining text starts with any heading. If the remaining text doesn't starts with a heading and if there is a list with a single level of pointer in hierarchy, then split the list (each pointer) as a chunk.
+New Rule: If there is no headings at all or just one heading with no sub-headings in the recorded chunk, then check whether further content present in the remaining text starts with any heading. If the remaining text doesn't starts with a heading and if there is a list with a single level of pointer in hierarchy, then drop till the start of the heading. The new chunk should start from this heading.
+And if there is a chunk that starts with a heading and this is the only heading in the chunk. The Chunk only has a list and that list has the same level of pointers, THEN treat each pointer with a single chunk.
+Friday 6:49 PM
+Implemented both rule changes in [ingest.py (line 95)](C:/Users/LOQ/Desktop/Projects/Document-Loaders/chunking/ingest.py:95):
+A heading ending a chunk now moves to the next chunk.
+A single heading followed only by a flat list stays together when within CHUNK_SIZE; oversized lists split by whole pointers.
+Verified against the actual document: 2. BACKGROUND and items 2.1–2.3 now form one 1,154-character chunk. All 11 tests pass.
+chunking/ingest.pychunking/ingest.py+106-11
+tests/test_markdown_splitter.pytests/test_markdown_splitter.py+31-6
+Friday 6:53 PM
+
+Read chunking/ingestion.py
+Make the following changes:
+Chunk 8: 
+"
+RFT Number: [6000042656 (ENQ22-108)]
+
+#### **5. INSTRUCTIONS TO BIDDERS**
+
+5.1 **Communications** All communications and Bidder enquiries in connection with this RFT must be
+
+sent in writing to the address set out in the Company Contact Details section of the
+
+RFT Summary in Section 4 of this RFT ("**RFT Summary**").
+
+5.2 **English Language** All documents and correspondence relating to this RFT shall be in English language. If any documentation relating to this RFT is submitted by the Bidder in another language in addition to English, the English version shall take precedence
+
+and be used for interpreting the information.
+
+5.3 **Facsimile / email not acceptable**
+
+Submission of the Bid should be in accordance with the requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+
+5.4 **Two-stage bidding (Technical & Commercial)**
+
+Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+
+*Technical Bids*:
+
+To be submitted in accordance with:
+
+- ➢ the requirements in the Technical Bid section of the RFT Summary; and
+- ➢ the requirements set out in Appendix 7 of this RFT.
+
+The Technical Bid **must not** include any pricing information.
+
+*Commercial Bids*:
+
+Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acceptable and compliant with the terms of this RFT.
+
+To be submitted in accordance with:
+"
+Chunk 9:
+"
+- (i) the requirements in the Commercial Bid section of the RFT Summary; and
+"
+Chunk 10:
+"
+- (ii) the requirements set out in Appendix 8 of this RFT.
+"
+
+How it should be:
+"
+RFT Number: [6000042656 (ENQ22-108)]
+
+#### **5. INSTRUCTIONS TO BIDDERS**
+
+5.1 **Communications** All communications and Bidder enquiries in connection with this RFT must be
+
+sent in writing to the address set out in the Company Contact Details section of the
+
+RFT Summary in Section 4 of this RFT ("**RFT Summary**").
+
+5.2 **English Language** All documents and correspondence relating to this RFT shall be in English language. If any documentation relating to this RFT is submitted by the Bidder in another language in addition to English, the English version shall take precedence
+
+and be used for interpreting the information.
+
+5.3 **Facsimile / email not acceptable**
+
+Submission of the Bid should be in accordance with the requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+
+5.4 **Two-stage bidding (Technical & Commercial)**
+
+Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+
+*Technical Bids*:
+
+To be submitted in accordance with:
+
+- ➢ the requirements in the Technical Bid section of the RFT Summary; and
+- ➢ the requirements set out in Appendix 7 of this RFT.
+
+The Technical Bid **must not** include any pricing information.
+
+*Commercial Bids*:
+
+Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acceptable and compliant with the terms of this RFT.
+"
+"
+To be submitted in accordance with:
+- (i) the requirements in the Commercial Bid section of the RFT Summary; and
+- (ii) the requirements set out in Appendix 8 of this RFT.
+"
+
+Rules:
+If we have to drop a list, we drop the paragraph before it as well. The chunk should begin with this paragraph
+
+
+its the existing chunking/ingest.py
+
+Updated the existing [chunking/ingest.py (line 95)](C:/Users/LOQ/Desktop/Projects/Document-Loaders/chunking/ingest.py:95).
+When a list moves forward, its immediately preceding paragraph now moves with it. The exact Section 5 example produces:
+Previous chunk ending at “compliant with the terms of this RFT.”
+Next chunk containing the lead-in paragraph and both list pointers.
+All 12 tests pass. Existing logger_config.py changes remain untouched.
+
+
+Chunk 31: 
+"
+#### **Contractual / Commercial Qualifications**
+
+|     | RFT No:    |               |               |  |  |
+|-----|------------|---------------|---------------|--|--|
+|     | RFT Title: |               |               |  |  |
+| No. | Ref. No.   | Qualification | Justification |  |  |
+|     |            |               |               |  |  |
+
+We hereby confirm that any qualifications that are set out elsewhere in our Bid, but not listed in the above table, shall be deemed to be withdrawn and shall be considered null and void.
+
+Signed by:
+
+Name: Title: Date:
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+**APPENDIX 6**
+
+**SCOPE OF WORK**
+
+**[●]**
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+#### **APPENDIX 7**
+"
+Chunk 32:
+"
+|           | The Bidder shall submit the Technical Bid in the following format:               |                                                                                                                                                                                                                                                                                                                                                                                                                                            |  |
+|-----------|----------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--|
+| Section 1 | Qualification Statement                                                          | Appendix 5<br>to be completed and submitted by Bidder<br>(if applicable)                                                                                                                                                                                                                                                                                                                                                                   |  |
+| Section 2 | Technical Bid                                                                    | To include the following:                                                                                                                                                                                                                                                                                                                                                                                                                  |  |
+|           |                                                                                  | 1.<br>HSE                                                                                                                                                                                                                                                                                                                                                                                                                                  |  |
+|           |                                                                                  | 2.<br>Organization and Resources (Including<br>Subcontractors)                                                                                                                                                                                                                                                                                                                                                                             |  |
+|           |                                                                                  | 3.<br>Execution Strategy                                                                                                                                                                                                                                                                                                                                                                                                                   |  |
+|           |                                                                                  | 4.<br>Project Control & Planning                                                                                                                                                                                                                                                                                                                                                                                                           |  |
+|           |                                                                                  | 5.<br>Financial Soundness                                                                                                                                                                                                                                                                                                                                                                                                                  |  |
+|           |                                                                                  | 6.<br>Quality Assurance and Quality Control                                                                                                                                                                                                                                                                                                                                                                                                |  |
+|           |                                                                                  | 7.<br>Compliance to Unpriced Commercial & FEED<br>Endorsement                                                                                                                                                                                                                                                                                                                                                                              |  |
+| Section 3 | Business Venture                                                                 | The Bidder should submit a description of any business<br>ventures directly related to the Scope of Work, under this RFT,<br>in which the Bidder or any affiliated company of the Bidder is<br>a party.                                                                                                                                                                                                                                    |  |
+| Section 4 | Investment Plan<br>(To be included for tenders<br>above USD 100 Million<br>only) | Bidder is required to submit the current and future Investment<br>Plans in the attached template (Annexure 1 –<br>Details of<br>Manufacturing & Technical Services Investment in UAE).                                                                                                                                                                                                                                                     |  |
+| Section 5 | Ta'ziz<br>Industrial Park<br>investments (If applicable)                         | In case bidding entity has invested in and is operating from<br>Ta'ziz Industrial Park, Bidder is eligible to additional credits<br>during evaluation of bids. To obtain this credit, Bidder is<br>required to provide supporting document to prove that the<br>bidding entity has invested and operating from the Ta'ziz<br>Industrial Park.                                                                                              |  |
+| Section 6 | Investment plan as a new<br>Manufacturing entity (If<br>applicable)              | In case the Bidder has plans to set up new Manufacturing<br>facility in UAE as a separate legal entity, during the<br>Agreement duration to produce the same goods/services as<br>tendered, Bidder may provide the details of the proposed<br>facilities. The details to be provided include as a minimum -<br>Value of investment, expected date of operation<br>commencement, status of Investment decision, ownership<br>structure etc. |  |
+"
+
+How it should be:
+"
+#### **Contractual / Commercial Qualifications**
+
+|     | RFT No:    |               |               |  |  |
+|-----|------------|---------------|---------------|--|--|
+|     | RFT Title: |               |               |  |  |
+| No. | Ref. No.   | Qualification | Justification |  |  |
+|     |            |               |               |  |  |
+
+We hereby confirm that any qualifications that are set out elsewhere in our Bid, but not listed in the above table, shall be deemed to be withdrawn and shall be considered null and void.
+
+Signed by:
+
+Name: Title: Date:
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+**APPENDIX 6**
+
+**SCOPE OF WORK**
+
+**[●]**
+
+RFT Number: [6000042656 (ENQ22-108)]
+"
+"
+#### **APPENDIX 7**
+|           | The Bidder shall submit the Technical Bid in the following format:               |                                                                                                                                                                                                                                                                                                                                                                                                                                            |  |
+|-----------|----------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--|
+| Section 1 | Qualification Statement                                                          | Appendix 5<br>to be completed and submitted by Bidder<br>(if applicable)                                                                                                                                                                                                                                                                                                                                                                   |  |
+| Section 2 | Technical Bid                                                                    | To include the following:                                                                                                                                                                                                                                                                                                                                                                                                                  |  |
+|           |                                                                                  | 1.<br>HSE                                                                                                                                                                                                                                                                                                                                                                                                                                  |  |
+|           |                                                                                  | 2.<br>Organization and Resources (Including<br>Subcontractors)                                                                                                                                                                                                                                                                                                                                                                             |  |
+|           |                                                                                  | 3.<br>Execution Strategy                                                                                                                                                                                                                                                                                                                                                                                                                   |  |
+|           |                                                                                  | 4.<br>Project Control & Planning                                                                                                                                                                                                                                                                                                                                                                                                           |  |
+|           |                                                                                  | 5.<br>Financial Soundness                                                                                                                                                                                                                                                                                                                                                                                                                  |  |
+|           |                                                                                  | 6.<br>Quality Assurance and Quality Control                                                                                                                                                                                                                                                                                                                                                                                                |  |
+|           |                                                                                  | 7.<br>Compliance to Unpriced Commercial & FEED<br>Endorsement                                                                                                                                                                                                                                                                                                                                                                              |  |
+| Section 3 | Business Venture                                                                 | The Bidder should submit a description of any business<br>ventures directly related to the Scope of Work, under this RFT,<br>in which the Bidder or any affiliated company of the Bidder is<br>a party.                                                                                                                                                                                                                                    |  |
+| Section 4 | Investment Plan<br>(To be included for tenders<br>above USD 100 Million<br>only) | Bidder is required to submit the current and future Investment<br>Plans in the attached template (Annexure 1 –<br>Details of<br>Manufacturing & Technical Services Investment in UAE).                                                                                                                                                                                                                                                     |  |
+| Section 5 | Ta'ziz<br>Industrial Park<br>investments (If applicable)                         | In case bidding entity has invested in and is operating from<br>Ta'ziz Industrial Park, Bidder is eligible to additional credits<br>during evaluation of bids. To obtain this credit, Bidder is<br>required to provide supporting document to prove that the<br>bidding entity has invested and operating from the Ta'ziz<br>Industrial Park.                                                                                              |  |
+| Section 6 | Investment plan as a new<br>Manufacturing entity (If<br>applicable)              | In case the Bidder has plans to set up new Manufacturing<br>facility in UAE as a separate legal entity, during the<br>Agreement duration to produce the same goods/services as<br>tendered, Bidder may provide the details of the proposed<br>facilities. The details to be provided include as a minimum -<br>Value of investment, expected date of operation<br>commencement, status of Investment decision, ownership<br>structure etc. |  |
+"
+
+Rule to Change: 5) If the chunk starts with a heading and ends with a table's part, then drop till the start of the table. The next chunk should start from the table and record only the table.
+
+New Rule: If the chunk starts with a heading and ends with a table's part, then check if it has any level of heading between the starting heading and before the table. If there is none then drop till the start of the table. The next chunk will only store the table. If there is a heading, then drop till the heading right before the table. The next chunk will start with the heading and will also store the table.
+Make the following changes
+Friday 7:19 PM
+Updated table rule 5 in [chunking/ingest.py (line 110)](C:/Users/LOQ/Desktop/Projects/Document-Loaders/chunking/ingest.py:110).
+The resulting chunk now contains:
+APPENDIX 7
+TECHNICAL BID STRUCTURE—also present in the source
+The complete table
+The real-document output was verified, all 13 tests pass, and the project graph was refreshed.
+
+
+an original heading directly followed by a table must still remain separate under the existing rule.
+A chunk should not end with a heading when the remaining text starts with a table or list or paragraph
+Friday 7:42 PM
+Updated [chunking/ingest.py (line 601)](C:/Users/LOQ/Desktop/Projects/Document-Loaders/chunking/ingest.py:601).
+A chunk can no longer end with a heading when the following content is a:
+Table
+List
+Paragraph
+The heading moves forward and stays with that content. Full-document validation found zero violations, and all 15 tests pass.

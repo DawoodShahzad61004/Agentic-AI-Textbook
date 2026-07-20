@@ -1,0 +1,86 @@
+Read useful_but_not_valuable_Files/run_all_workflow_batches.py
+What is this bug?
+Wednesday 12:13 PM
+This is not a bug in run_all_workflow_batches.py. The batch runner correctly reports that its child API process crashed during startup.
+The actual failure is:
+pymongo.errors.ServerSelectionTimeoutError:
+localhost:27017 ... actively refused it
+Startup flow:
+The runner launches app_workflow/api.py at [run_all_workflow_batches.py (line 471)](C:/Users/LOQ/Desktop/Projects/RAG-work/useful_but_not_valuable_Files/run_all_workflow_batches.py:471).
+Importing the API constructs FeedbackStore.
+That calls interactions_col(), which tries to create MongoDB indexes.
+Nothing is listening on localhost:27017, so PyMongo waits 30 seconds and fails.
+The API exits with code 1.
+wait_until_ready() detects that exit and raises the final RuntimeError at [run_all_workflow_batches.py (line 481)](C:/Users/LOQ/Desktop/Projects/RAG-work/useful_but_not_valuable_Files/run_all_workflow_batches.py:481).
+So the root cause is: MongoDB is stopped, inaccessible, or the configured MongoDB URI is wrong.
+The embeddings.position_ids | UNEXPECTED message is only a model-loading warning and is unrelated.
+Start MongoDB on port 27017, or configure the application’s Mongo URI to point to the correct running instance, then rerun the script. One secondary design issue is that the application connects to MongoDB and creates indexes during module import, causing the entire API to crash before it can serve a health endpoint.
+Wednesday 12:13 PM
+how to check MongoDB's server?
+Wednesday 1:04 PM
+In PowerShell, first check whether MongoDB is listening on its default port:
+Test-NetConnection localhost -Port 27017
+Look for:
+TcpTestSucceeded : True
+You can also check the Windows service:
+Get-Service *mongo*
+If it exists but is stopped:
+Start-Service MongoDB
+Then test MongoDB directly, if mongosh is installed:
+mongosh "mongodb://localhost:27017"
+Inside mongosh, run:
+db.runCommand({ ping: 1 })
+A healthy server returns:
+{ ok: 1 }
+If MongoDB runs through Docker, check:
+docker ps --filter "ancestor=mongo"
+docker ps -a --filter "ancestor=mongo"
+Your error indicates nothing was accepting connections at localhost:27017, so MongoDB was most likely stopped, running on another port, or running in Docker without port 27017 published.
+Wednesday 1:04 PM
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\useful_but_not_valuable_Files> Test-NetConnection localhost -Port 27017
+WARNING: TCP connect to (::1 : 27017) failed
+WARNING: TCP connect to (127.0.0.1 : 27017) failed                                                  
+ComputerName           : localhost
+RemoteAddress          : ::1
+RemotePort             : 27017
+InterfaceAlias         : Loopback Pseudo-Interface 1
+SourceAddress          : ::1
+PingSucceeded          : True
+PingReplyDetails (RTT) : 0 ms
+TcpTestSucceeded       : False
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\useful_but_not_valuable_Files> Get-Service mongo
+Status   Name               DisplayName                           
+Stopped  MongoDB            MongoDB Server (MongoDB)              
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\useful_but_not_valuable_Files> Start-Service MongoDB
+Start-Service : Service 'MongoDB Server (MongoDB) (MongoDB)' cannot be started due to the
+following error: Cannot open MongoDB service on computer '.'.
+At line:1 char:1
+Start-Service MongoDB
+  + CategoryInfo          : OpenError: (System.ServiceProcess.ServiceController:ServiceControlle 
+ r) [Start-Service], ServiceCommandException
+  + FullyQualifiedErrorId : CouldNotStartService,Microsoft.PowerShell.Commands.StartServiceComma 
+ nd
+
+(RAG-work) PS C:\Users\LOQ\Desktop\Projects\RAG-work\useful_but_not_valuable_Files>
+Wednesday 1:06 PM
+MongoDB is installed but stopped. The “Cannot open MongoDB service” message usually means the current PowerShell session lacks administrator privileges.
+Open PowerShell or Windows Terminal using Run as administrator, then run:
+Start-Service MongoDB
+Get-Service MongoDB
+Test-NetConnection localhost -Port 27017
+Expected results:
+Status             : Running
+TcpTestSucceeded   : True
+Alternatively, from elevated PowerShell:
+net start MongoDB
+If it still fails while elevated, inspect the service configuration and MongoDB log:
+sc.exe qc MongoDB
+sc.exe queryex MongoDB
+Find its configuration-file argument—usually something like:
+--config "C:\Program Files\MongoDB\Server\<version>\bin\mongod.cfg"
+Then inspect that configuration:
+Get-Content "C:\Program Files\MongoDB\Server\<version>\bin\mongod.cfg"
+Look under systemLog.path for the log location and read its latest entries:
+Get-Content "<log-path-from-mongod.cfg>" -Tail 100
+Common startup failures are a missing storage.dbPath directory, missing log directory, insufficient permissions on those directories, or port 27017 already being occupied. But your current error occurs before Windows even tries to start MongoDB, so elevation is the first fix.
+Wednesday 1:06 PM

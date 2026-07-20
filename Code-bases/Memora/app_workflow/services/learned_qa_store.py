@@ -117,3 +117,7 @@ def get_or_create_learned_qa_collection(
         f"{replacement.count()} entries, cosine distance."
     )
     return replacement
+
+
+from .operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Learned QA Store")

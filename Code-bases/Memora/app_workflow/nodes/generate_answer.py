@@ -92,3 +92,7 @@ def generate_answer(state: GraphState, config=None) -> dict:
 
     timing_tracker.record("Final Generation", time.perf_counter() - _t0)
     return {"answer": answer}
+
+
+from services.operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Answer Generation Node", exclude={"generate_answer"})

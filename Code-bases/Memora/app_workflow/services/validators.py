@@ -4,14 +4,9 @@ from typing import Any, Literal, TypedDict
 
 from .llm_caller import llm_invoke, LLMErrorKind
 from .fix_llm_output import fix_llm_output, _parse_to_python
+from .switches import DEFAULT_SWITCHES
 
 logger = logging.getLogger(__name__)
-from app_workflow.config import (
-    ENABLE_RETRIEVAL_VALIDATION_OUTPUT_FIX,
-    ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION_OUTPUT_FIX,
-    ENABLE_COMPRESSION_OUTPUT_FIX,
-    ENABLE_GLOBAL_LLM_OUTPUT_FIX,
-)
 
 from .prompts import (
     _RETRIEVAL_JUDGE_PROMPT,
@@ -74,7 +69,9 @@ def validate_retrieval(
     judge_llm,
     max_chunk_chars: int = 1000,
     config=None,
+    switches: dict | None = None,
 ) -> RetrievalCheckResult:
+    sw = switches or DEFAULT_SWITCHES
     if not chunks:
         return RetrievalCheckResult(
             verdict="FAIL",
@@ -125,7 +122,7 @@ def validate_retrieval(
         )
     raw = _retrieval_llm_result.content
 
-    if ENABLE_RETRIEVAL_VALIDATION_OUTPUT_FIX and ENABLE_GLOBAL_LLM_OUTPUT_FIX:
+    if sw["ENABLE_RETRIEVAL_VALIDATION_OUTPUT_FIX"] and sw["ENABLE_GLOBAL_LLM_OUTPUT_FIX"]:
         llm_result, _ok = fix_llm_output("retrieval_judge", raw, llm=judge_llm, config=config)
         if not _ok or not isinstance(llm_result, dict) or "verdict" not in llm_result:
             logger.warning("  [VALIDATE-RETRIEVAL] failed to fix malformed LLM output.")
@@ -182,14 +179,15 @@ def validate_retrieval(
     logger.debug(_THIN)
 
     return result
-
 def validate_merge(
     source_chunks: list[dict],
     merged_chunk: dict,
     judge_llm,
     max_chunk_chars: int = 1200,
     config=None,
+    switches: dict | None = None,
 ) -> MergeCheckResult:
+    sw = switches or DEFAULT_SWITCHES
     if not source_chunks:
         return MergeCheckResult(
             verdict="UNKNOWN",
@@ -272,7 +270,7 @@ def validate_merge(
             raw=raw,
         )
 
-    if ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION_OUTPUT_FIX and ENABLE_GLOBAL_LLM_OUTPUT_FIX:
+    if sw["ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION_OUTPUT_FIX"] and sw["ENABLE_GLOBAL_LLM_OUTPUT_FIX"]:
         llm_result, _ok = fix_llm_output("merge_judge", raw, llm=judge_llm, config=config)
         if not _ok or not isinstance(llm_result, dict):
             _log_validation_warning("[VALIDATE-MERGE] failed to parse JSON", raw)
@@ -334,13 +332,16 @@ def validate_merge(
 
     return result
 
+
 def validate_redundancy(
     window_chunks: list[dict],
     groups: list[list[dict]],
     judge_llm,
     max_chunk_chars: int = 1000,
     config=None,
+    switches: dict | None = None,
 ) -> RedundancyCheckResult:
+    sw = switches or DEFAULT_SWITCHES
     if not groups:
         return RedundancyCheckResult(
             confirmed_groups=[],
@@ -409,7 +410,7 @@ def validate_redundancy(
     raw = _redundancy_llm_result.content
 
     # ── Parse response ────────────────────────────────────────────────────────
-    if ENABLE_COMPRESSION_OUTPUT_FIX and ENABLE_GLOBAL_LLM_OUTPUT_FIX:
+    if sw["ENABLE_COMPRESSION_OUTPUT_FIX"] and sw["ENABLE_GLOBAL_LLM_OUTPUT_FIX"]:
         llm_result, _ok = fix_llm_output("redundancy_judge", raw, llm=judge_llm, config=config)
         if not _ok or not isinstance(llm_result, list):
             logger.warning(f"  [VALIDATE-REDUNDANCY] failed to parse JSON — treating all groups as REJECTED")
@@ -497,7 +498,9 @@ def validate_lbc(
     judge_llm,
     max_chunk_chars: int = 1500,
     config=None,
+    switches: dict | None = None,
 ) -> LBCCheckResult:
+    sw = switches or DEFAULT_SWITCHES
 
     original_content    = (source_chunk.get("content") or "").strip()
     compressed_content  = (compressed_chunk.get("content") or "").strip()
@@ -562,7 +565,7 @@ def validate_lbc(
         )
     raw = _lbc_llm_result.content
 
-    if ENABLE_COMPRESSION_OUTPUT_FIX and ENABLE_GLOBAL_LLM_OUTPUT_FIX:
+    if sw["ENABLE_COMPRESSION_OUTPUT_FIX"] and sw["ENABLE_GLOBAL_LLM_OUTPUT_FIX"]:
         llm_result, _ok = fix_llm_output("lbc_judge", raw, llm=judge_llm, config=config)
         if not _ok or not isinstance(llm_result, dict) or "verdict" not in llm_result:
             _log_validation_warning("[VALIDATE-LBC] failed to parse JSON", raw)
@@ -615,3 +618,7 @@ def validate_lbc(
     logger.debug(_THIN)
 
     return result
+
+
+from .operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Validation")

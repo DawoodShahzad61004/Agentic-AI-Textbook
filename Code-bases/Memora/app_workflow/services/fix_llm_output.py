@@ -812,3 +812,7 @@ def _Verify_And_Correct(
     llm_data_check_logger.debug("\n".join(details))
 
     return final
+
+
+from .operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "LLM Output Repair")

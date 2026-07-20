@@ -50,3 +50,7 @@ def thumbdowns_col():
 def failed_variants_col():
     _ensure_indexes()
     return get_db()["failed_variants"]
+
+
+from .operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Database")

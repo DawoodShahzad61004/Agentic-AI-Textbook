@@ -106,3 +106,7 @@ class VectorStore:
                 torch.cuda.empty_cache()
 
         logger.info("All batches inserted successfully.")
+
+
+from .operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Vector Store")

@@ -13,6 +13,9 @@ class GraphState(TypedDict):
     # Command routing
     command: NotRequired[str]
     user_feedback: NotRequired[str]
+    # Per-request ENABLE_* switch overrides (see services/switches.py). Absent
+    # or empty means "use config.py defaults" for every switch.
+    switches: NotRequired[dict[str, bool]]
     # Feedback-driven retrieval context (populated by user_input_node)
     blocked_variants: NotRequired[list[str]]
     prior_thumbdowns: NotRequired[list[dict]]

@@ -8,6 +8,8 @@ from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .langfuse_logging import LangfuseHandler
+
 
 DEFAULT_LOG_DIR = Path(__file__).resolve().parent / "run_logs"
 _CONFIGURED_ATTR = "_rag_logging_configured"
@@ -133,6 +135,11 @@ def setup_logging(
     tracing_handler.setFormatter(logging.Formatter("%(name)s | %(message)s"))
     tracing_handler.addFilter(request_id_filter)
 
+    langfuse_handler = LangfuseHandler()
+    langfuse_handler.setLevel(logging.DEBUG)
+    langfuse_handler.setFormatter(logging.Formatter("%(name)s | %(message)s"))
+    langfuse_handler.addFilter(request_id_filter)
+
     try:
         import importlib as _importlib
         _tt_mod = _importlib.import_module("app_workflow.services.timing_tracker")
@@ -144,6 +151,7 @@ def setup_logging(
     root_logger.addHandler(console_handler)
     root_logger.addHandler(debug_handler)
     root_logger.addHandler(tracing_handler)
+    root_logger.addHandler(langfuse_handler)
 
     # Diagnostic loggers propagate to root so their output reaches both console and debug file
     for logger_name in ("llm_data_check", "llm_json_tries", "llm_io"):

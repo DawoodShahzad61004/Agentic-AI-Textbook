@@ -5,12 +5,8 @@ from app_workflow.services.llm_setup import llm, judge_llm
 from app_workflow.services.services import embedding_manager
 from app_workflow.services.validators import validate_merge
 from app_workflow.services.timing_tracker import timing_tracker
-from app_workflow.config import (
-    ENABLE_RETRIEVAL_DEDUP_MERGE,
-    ENABLE_RETRIEVAL_DEDUP_MERGE_OUTPUT_FIX,
-    ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION,
-    MERGE_SIMILARITY_THRESHOLD,
-)
+from app_workflow.services.switches import get_switches
+from app_workflow.config import MERGE_SIMILARITY_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +14,7 @@ logger = logging.getLogger(__name__)
 def _run_dedup_merge(
     track_name: str,
     input_chunks: list[dict],
+    switches: dict,
     config=None,
 ) -> tuple[list[dict], list[dict]]:
     """Deduplicate and merge near-duplicate chunks within one track.
@@ -29,7 +26,7 @@ def _run_dedup_merge(
         logger.debug("[DEDUP_MERGE_%s] no chunks — skipping", track_name.upper())
         return [], []
 
-    if not ENABLE_RETRIEVAL_DEDUP_MERGE:
+    if not switches["ENABLE_RETRIEVAL_DEDUP_MERGE"]:
         logger.debug(
             "[DEDUP_MERGE_%s] disabled — passing through %d chunk(s)",
             track_name.upper(), len(input_chunks),
@@ -84,7 +81,8 @@ def _run_dedup_merge(
             source_chunks,
             llm,
             embedding_manager,
-            output_fix_enabled=ENABLE_RETRIEVAL_DEDUP_MERGE_OUTPUT_FIX,
+            output_fix_enabled=switches["ENABLE_RETRIEVAL_DEDUP_MERGE_OUTPUT_FIX"],
+            switches=switches,
             config=config,
         )
         chunks_with_emb[keeper_idx] = merged
@@ -125,7 +123,7 @@ def dedup_merge_documents(state: GraphState, config=None) -> dict:
     """
     _t0 = time.perf_counter()
     input_chunks = state.get("validated_document_chunks") or []
-    result, pairs = _run_dedup_merge("documents", input_chunks, config=config)
+    result, pairs = _run_dedup_merge("documents", input_chunks, get_switches(state), config=config)
     timing_tracker.record("Total Merge Time for Retrieved Chunks", time.perf_counter() - _t0)
     return {
         "dedup_merged_document_chunks": result,
@@ -141,7 +139,7 @@ def dedup_merge_learned_qa(state: GraphState, config=None) -> dict:
     """
     _t0 = time.perf_counter()
     input_chunks = state.get("validated_learned_qa_chunks") or []
-    result, pairs = _run_dedup_merge("learned_qa", input_chunks, config=config)
+    result, pairs = _run_dedup_merge("learned_qa", input_chunks, get_switches(state), config=config)
     timing_tracker.record("Total Merge Time for Retrieved Chunks", time.perf_counter() - _t0)
     return {
         "dedup_merged_learned_qa_chunks": result,
@@ -158,7 +156,8 @@ def validate_dedup_merge_documents(state: GraphState, config=None) -> dict:
     Runs in parallel with validate_dedup_merge_learned_qa.
     """
     _t0 = time.perf_counter()
-    if not ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION:
+    sw = get_switches(state)
+    if not sw["ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION"]:
         timing_tracker.record("Total Validation Time for Merged Chunks", time.perf_counter() - _t0)
         return {}
     pairs: list[dict] = state.get("dedup_merge_document_pairs") or []
@@ -167,7 +166,7 @@ def validate_dedup_merge_documents(state: GraphState, config=None) -> dict:
         timing_tracker.record("Total Validation Time for Merged Chunks", time.perf_counter() - _t0)
         return {}
     for i, pair in enumerate(pairs):
-        check = validate_merge(pair["source_chunks"], pair["merged"], judge_llm, config=config)
+        check = validate_merge(pair["source_chunks"], pair["merged"], judge_llm, config=config, switches=sw)
         logger.info(
             "[VALIDATE_DEDUP_MERGE_DOCUMENTS] pair %d: verdict=%s  fabricated=%d  dropped=%d",
             i, check["verdict"],
@@ -185,7 +184,8 @@ def validate_dedup_merge_learned_qa(state: GraphState, config=None) -> dict:
     Runs in parallel with validate_dedup_merge_documents.
     """
     _t0 = time.perf_counter()
-    if not ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION:
+    sw = get_switches(state)
+    if not sw["ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION"]:
         timing_tracker.record("Total Validation Time for Merged Chunks", time.perf_counter() - _t0)
         return {}
     pairs: list[dict] = state.get("dedup_merge_learned_qa_pairs") or []
@@ -194,7 +194,7 @@ def validate_dedup_merge_learned_qa(state: GraphState, config=None) -> dict:
         timing_tracker.record("Total Validation Time for Merged Chunks", time.perf_counter() - _t0)
         return {}
     for i, pair in enumerate(pairs):
-        check = validate_merge(pair["source_chunks"], pair["merged"], judge_llm, config=config)
+        check = validate_merge(pair["source_chunks"], pair["merged"], judge_llm, config=config, switches=sw)
         logger.info(
             "[VALIDATE_DEDUP_MERGE_LEARNED_QA] pair %d: verdict=%s  fabricated=%d  dropped=%d",
             i, check["verdict"],
@@ -203,3 +203,7 @@ def validate_dedup_merge_learned_qa(state: GraphState, config=None) -> dict:
         )
     timing_tracker.record("Total Validation Time for Merged Chunks", time.perf_counter() - _t0)
     return {}
+
+
+from services.operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Deduplication and Merge", exclude={"dedup_merge_documents", "dedup_merge_learned_qa", "validate_dedup_merge_documents", "validate_dedup_merge_learned_qa"})

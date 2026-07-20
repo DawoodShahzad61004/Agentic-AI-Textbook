@@ -88,3 +88,7 @@ class EmbeddingManager:
         if np.linalg.norm(vec_a) == 0 or np.linalg.norm(vec_b) == 0:
             return 0.0
         return float(np.dot(vec_a, vec_b) / (np.linalg.norm(vec_a) * np.linalg.norm(vec_b)))
+
+
+from .operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Embeddings")

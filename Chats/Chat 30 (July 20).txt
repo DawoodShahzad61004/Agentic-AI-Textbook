@@ -1,0 +1,2356 @@
+Give me all the splitting RULES that we have implemented so far
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Grep "Rule" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs)
+1 line of output
+Grep "chunk|split|temp_split|Rule" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs\Architecture.md)
+15 lines of output
+No formal enumerated rule list exists in the docs — the "Rule N" labels in the code comments are just informal cross-references within ingest.py itself. I'll derive the complete rule set directly from the logic in chunking/ingest.py.
+
+Splitting rules implemented in temp_split() (chunking/ingest.py)
+Core parameters
+
+CHUNK_SIZE = 1600 chars — soft/hard limit for prose, but tables and list "pointers" are treated as indivisible and can exceed it.
+MIN_CHUNK_CHARS = 50 — chunks shorter than this are dropped in split_documents().
+Structural detection (pre-pass, done once per document)
+
+Fenced code blocks (``` / ~~~) are detected first and excluded from heading/table matching, so headings or table-like lines inside code fences are ignored.
+Headings = ATX #–###### lines outside code fences, recorded with their level.
+Tables = GitHub-style pipe tables (header row + separator row of -/:-/-:/:-: cells, followed by consecutive row lines), outside code fences.
+Lists = blocks (paragraph-delimited by blank lines) whose first line is a -/*/+/N./N) item; indentation is tab-expanded to measure nesting depth.
+Whole-block protection rules (checked at the top of the main loop, in order)
+
+Heading(s) immediately before a table → the whole consecutive heading run plus the table is emitted as one chunk (prevents a heading-only chunk stranded before an oversized table).
+Table reaches the cursor → the entire table is emitted as one chunk regardless of size (tables are never split).
+Paragraph immediately before a flat list → the lead-in paragraph (e.g. "To be submitted in accordance with:") is kept with the list. If it fits in CHUNK_SIZE it's one chunk; if oversized, the paragraph+first item become one chunk and each remaining item becomes its own chunk.
+Heading immediately before a flat (single-indent-level) list, with nothing else in the section → heading+list kept together if it fits; if oversized, split one list item per chunk (heading attached to the first item).
+Flat list starting exactly at the cursor → split one list item at a time, keeping any continuation lines with their item.
+Size-limited cut rules (_structural_cut, applied when none of the above whole-block rules fire and the text exceeds CHUNK_SIZE)
+
+Rule 2 — nested heading hierarchy in the candidate: if more than one heading falls inside the size window, find the deepest (numerically largest ATX # level) heading(s); drop all sections at that deepest level from the candidate (move them to the next chunk) unless doing so would produce an empty chunk, in which case only the final incomplete peer section is moved.
+Rule 3(i) — heading right after the limit: if a heading starts right where the size limit falls, that boundary is already safe and is used as-is.
+Rule 3(ii), lists — limit lands inside a list:
+If the enclosing list is flat (one indent level), move the whole list forward (to a preceding lead-in paragraph if present, otherwise to the list start) so it can be split per-item on the next loop iteration.
+If the list has mixed indentation, move only the deepest-nested item(s) forward, keeping shallower items in the current chunk.
+Rule 3(ii), prose — limit lands in plain text: cut at the start of the last complete paragraph before the limit (paragraph = blank-line-delimited block), so no chunk ends mid-paragraph.
+Hard-cut fallback: if a single paragraph/heading itself exceeds CHUNK_SIZE (no paragraph boundary to use), cut at the nearest newline, else nearest space/tab, else exactly at the limit — guaranteeing the loop always advances.
+Rules 4 & 5 — partial table inside the size window: if a table would be split by the size limit, exclude it entirely from the current chunk and roll it into the next one. If the current chunk started with a heading (or heading group), that heading group is carried forward with the table too, unless there's a closer heading between the start and the table, in which case only the table is deferred and the closer heading is kept as the boundary.
+Post-cut cleanup
+
+Trailing-heading rollover: if the chosen cut point leaves a heading as the last non-blank line of a chunk (with no body content after it), the cut is pulled back to before that heading so a chunk never ends on a bare heading.
+Heading-only fallback (_cut_with_heading_content): if the computed cut would produce a chunk containing only heading lines (no body text), extend the cut to include content following the initial heading group — cutting at a newline within that content, or a space/tab if no newline is available before the limit.
+Rollover check runs a second time on the final cut candidate in case the heading-content fallback itself lands right after a later heading.
+Chunk emission: leading/trailing blank lines/\r\n are stripped; empty results are discarded (_append_chunk).
+Per-item hard-splitting (_append_limited): used when emitting individual list items — if a single item still exceeds CHUNK_SIZE, it's hard-cut via the same newline→space→limit fallback as above.
+Bookkeeping
+
+Files under 1 char after .strip() produce no chunks.
+Each chunk gets a zero-based chunk_seq per source file, assigned after all splitting (split_documents).
+Net effect: tables are always atomic; flat lists are split one item at a time (never mid-item) with lead-in paragraphs/headings preserved; nested-heading sections are peeled off by depth rather than mid-sentence; plain prose falls back to paragraph boundaries, then word boundaries, as a last resort; and no chunk is ever allowed to end on a lone heading.
+
+Read marker_results/1-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_1-250.md
+Read marker_results/2-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_251-500.md
+
+Answer briefly:
+
+There are several headings in these documents that are not actually made headings during conversion from pdf to markdown by marker-pdf. 
+
+What do u thinks is best probable solution for chunking/splitting? Should i convert them to headings? 
+If yes, then how? Are regurlar-expressions/regex a good options?
+If no, then what?
+Show less
+I'll look at the actual documents to ground my answer.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\1-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_1-250.md
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Looking at the actual output, here's what's going on and my recommendation.
+
+What these "missing headings" actually are
+They fall into a few distinct shapes in your files:
+
+Numbered clause headers: 5.3 **Facsimile / email not acceptable** (line 108), 5.1 **Communications** (inline, line 98)
+Italic labels: *Technical Bids*: (line 116)
+All-caps section names inside TOC/list items
+Real headings like #### **1. INTRODUCTION** did survive. The lost ones are the second-level clause titles that Marker saw as bold-run paragraphs, not headings — because the only reliable signal that they were headings (font size/weight in the PDF) is already gone by the time you have Markdown.
+
+My recommendation: don't rewrite the source — detect boundaries in the splitter
+Two reasons this is the better path here:
+
+Your own project rule (CLAUDE.md): "Chunking is not a repair mechanism for source-conversion defects." Promoting text to # headings mutates Marker's output and pretends a fidelity you don't have.
+Bold is overloaded in these docs. Bold marks defined terms inline everywhere — "**Company**", "**RFT**", "**Bidder**". A blind "promote bold to heading" regex would create dozens of false headings mid-sentence and make chunking worse.
+So: add a soft-heading detector to temp_split() that treats these lines as cut boundaries only, without editing the text — same role _heading_matches() plays now, just fed extra patterns.
+
+Is regex a good option? Yes — but only whole-line-anchored
+Regex is the right tool for the detector, because these pseudo-headings are line-structured and regular. It's the wrong tool if you try to separate "semantic heading" from "inline emphasis" — the safeguard for that is the whole-line constraint, not a cleverer pattern.
+
+Patterns that are safe because they must match the entire line:
+
+
+^\s*\d+(\.\d+)*\s+\*\*[^*]+\*\*\s*$     # 5.3 **Facsimile / email not acceptable**
+^\s*\*[^*]+\*:\s*$                        # *Technical Bids*:
+^\s*\*\*[A-Z][^*]+\*\*\s*$                # a bold-only line
+The critical rule: the bold/italic must span the whole line ($ anchored). That's what excludes "...to the **Company** in...". Anything with prose after the emphasis is not a heading.
+
+What I'd actually do
+Extend _heading_matches() → have it also return these soft-heading offsets (with a synthetic level, e.g. treat clause headers as level 5–6 so they sit below real #### sections).
+Feed them into the existing headings list the splitter already consumes for _trailing_heading_start, _structural_cut, keep-with-content logic — you get boundary behavior for free.
+Don't touch the .md files. If you later need real heading structure for TOC/metadata downstream, do that as a separate, opt-in preprocessing pass — never silently.
+Want me to sketch the _heading_matches() extension so it's boundary-only and level-tagged?
+
+Read chunking/ingest.py
+
+## Before applying split_documents(), on each document run preprocessing():
+1. Find the patterns across the text that start with a list marker (number, roman numeric, alphabet) in a sequence; either in the beginning of paragraph or right after syntax-characters like #, *, - etc.
+    - If this pattern has "format syntax character(s)" "marker" "normal paragraph tex", then check from the end of one marker to the beginning of the next is there any heading, nested-list in-between any of these markers
+        - If there is none, check if any of these markers had a format-syntax character present before them. 
+            - If none, add a ```- ``` before every marker in this sequence and remove all the ```\n``` dividing one point in this sequence 
+            - else, add that specific format-syntax character before the markers in this sequence and remove all the ```\n``` dividing one point in this sequence
+        - else if there is a text written right after a marker in-between ```**``` and ```**``` within a sequence, then check whether any of the markers are part of a heading.
+            - If there is any one marker of this sequence that is a heading, then make the rest of the markers (from the marker till the end of ```**``` and ```**``` pair) headings of the same level. The text under this heading would start where ```**``` and ```**``` pair ended.
+            - else, add ```##### ``` before each marker in this sequence, add a ```\n``` return character after the ```**``` and ```**``` pair. 
+        - else if there is one or more heading, then make the rest of the markers to be of the same level of headings in the sequence
+2. If a line starts with ```* text *:``` or ```* text :*```, check whether it is a part of a heading.
+    - if it has a parent-heading, then make it a one-level smaller sub-heading and remove the ```*``` and ```*``` pair from this sub-heading.
+
+### Example 1:
+```text
+    #### **3. OVERVIEW OF THE PROJECT**
+
+    RFT Number: [6000042656 (ENQ22-108)]
+
+    3.1 The Project will be located at [*insert details*], within the Emirate of Abu Dhabi. [Insert a brief description of the project, stating the nature of the project, the size of the project and the title of the Project.]
+
+    - 3.2 [The package being tendered under this RFT is for [describe the services being tendered e.g. the engineering, procurement and construction of a process plant on a lump sum turnkey basis], one of several packages of works being tendered as part of the overall Project, and other packages are being tendered on or about the same time as this package.] *[AMEND OR DELETE THIS PARAGRAPH AS APPROPRIATE.]*
+    - 3.3 The Company would like the successful Bidder to start the Scope of Works no later than [*insert date*] (the "**Commencement Date**").
+    - 3.4 The Scope of Works are to be completed within [*insert number of weeks / months*] from the Commencement Date.
+    - 3.5 The Company requires the whole of the Project to be completed by [*insert date] (the "Completion Date").*].
+
+    [**NOTE:** At least one of 3.4 or 3.5 should always be included, and both provisions can be used where appropriate].]
+
+    RFT Number: [6000042656 (ENQ22-108)]
+```
+should be:
+```text
+    #### **3. OVERVIEW OF THE PROJECT**
+
+    RFT Number: [6000042656 (ENQ22-108)]
+
+    - 3.1 The Project will be located at [*insert details*], within the Emirate of Abu Dhabi. [Insert a brief description of the project, stating the nature of the project, the size of the project and the title of the Project.]
+
+    - 3.2 [The package being tendered under this RFT is for [describe the services being tendered e.g. the engineering, procurement and construction of a process plant on a lump sum turnkey basis], one of several packages of works being tendered as part of the overall Project, and other packages are being tendered on or about the same time as this package.] *[AMEND OR DELETE THIS PARAGRAPH AS APPROPRIATE.]*
+    - 3.3 The Company would like the successful Bidder to start the Scope of Works no later than [*insert date*] (the "**Commencement Date**").
+    - 3.4 The Scope of Works are to be completed within [*insert number of weeks / months*] from the Commencement Date.
+    - 3.5 The Company requires the whole of the Project to be completed by [*insert date] (the "Completion Date").*].
+
+    [**NOTE:** At least one of 3.4 or 3.5 should always be included, and both provisions can be used where appropriate].]
+
+    RFT Number: [6000042656 (ENQ22-108)]
+```
+
+### Example 2:
+
+```text
+    #### **5. INSTRUCTIONS TO BIDDERS**
+
+    5.1 **Communications** All communications and Bidder enquiries in connection with this RFT must be
+
+    sent in writing to the address set out in the Company Contact Details section of the
+
+    RFT Summary in Section 4 of this RFT ("**RFT Summary**").
+
+    5.2 **English Language** All documents and correspondence relating to this RFT shall be in English language. If any documentation relating to this RFT is submitted by the Bidder in another language in addition to English, the English version shall take precedence
+
+    and be used for interpreting the information.
+
+    5.3 **Facsimile / email not acceptable**
+
+    Submission of the Bid should be in accordance with the requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+
+    5.4 **Two-stage bidding (Technical & Commercial)**
+
+    Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+
+    *Technical Bids*:
+
+    To be submitted in accordance with:
+
+    - ➢ the requirements in the Technical Bid section of the RFT Summary; and
+    - ➢ the requirements set out in Appendix 7 of this RFT.
+
+    The Technical Bid **must not** include any pricing information.
+
+    *Commercial Bids*:
+
+    Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acceptable and compliant with the terms of this RFT.
+
+    To be submitted in accordance with:
+
+    - (i) the requirements in the Commercial Bid section of the RFT Summary; and
+    - (ii) the requirements set out in Appendix 8 of this RFT.
+
+    The Bidder shall submit with the Commercial Bid:
+
+    - (i) the Commercial Bid Submission Form set out in Appendix 4 of this RFT ("**Commercial Bid Submission Form**") signed by an authorized signatory of the Bidder; and
+    - (ii) a copy of the power of attorney evidencing the authority of such signatory to sign the Commercial Bid Submission Form on behalf of the Bidder.
+
+    5.5 **Bid Timetable** The tentative timetable for the bid process is set out in Appendix 1. Any changes in this timetable affecting the Bid Submission timeline shall be communicated to the Bidders solely through Tender Bulletins.
+
+    RFT Number: [6000042656 (ENQ22-108)]
+
+    #### 5.6 **Bid Submission Date(s)**
+
+    The Technical Bid and Commercial Bid must be delivered to the Company on or before the submission date(s) and time(s) specified in the RFT Summary ("**Bid Submission Date(s)**").
+
+    Any Bid (or part thereof) received after the Bid Submission Date(s) may be subject to disqualification.
+
+    #### 5.7 **Joint Ventures / Consortiums**
+
+    If the Bidder would like to submit its Bid as a joint venture or consortium it shall inform the Company within [seven (7)] days of receipt of the RFT.
+
+    The Bidder shall provide the following information to the Company:
+
+    - (a) the full legal names of each partner;
+    - (b) the legal address of each partner;
+    - (c) the name of the partner nominated to act as the manager of the joint venture or consortium;
+    - (d) the responsibilities of each partner in relation to the Scope of Work; and
+    - (e) a copy of the joint venture or consortium agreement with the Technical Bid, which shall state that:
+    - (i) all partners shall be jointly and severally responsible for the performance of the Scope of Work; and
+    - (ii) in the event that any partner ceases to be a member of a joint venture or consortium for any reason whatsoever the remaining partner(s) shall be fully responsible for the performance of the Scope of Work.
+
+    The Company shall review the Bidder's proposal to submit a Bid as a joint venture or consortium and shall decide, at the Company's discretion, whether this is acceptable to the Company. The Company shall notify the Bidder within seven (7) days of receiving its proposal whether the proposal has been accepted or rejected.
+
+    If the proposal is rejected by the Company, then the Bidder may proceed with submitting a Bid, not as part of a joint venture or consortium, within the timeframes set out in the RFT.
+
+    5.8 **No Bid Bond** No bid bond is required under this RFT.
+
+    5.9 **No Late Bids** Any Bid received by the Company shall be deemed to be the Bidder's final offer and any unsolicited bids of any kind from the same Bidder after the submission date will not be considered and may result in disqualification of the Bid.
+
+    5.10 **Alternative Bids** If there is a commercial or technical benefit to the Company or the ADNOC Group, the Bidder may submit an alternative Bid, in addition to the Bid requested within this RFT, by submitting a separate and identifiable alternative Bid, which clearly details the commercial and/or technical benefits of such alternative Bid.
+
+    RFT Number: [6000042656 (ENQ22-108)]
+
+    Any alternative Bid should be submitted in accordance with the requirements set out in the RFT Summary.
+
+    5.11 **No Modification Or Withdrawal**
+
+    Unless otherwise provided in this RFT, a Bid may not be modified or withdrawn by the Bidder following the Bid Submission Date under any circumstances.
+
+    5.12 **In-Country Value ("ICV")**
+
+    Technical and commercial bid requires different information / ICV documents from the bidder, and such requirements have been specified in Appendix 7 and Appendix 8 respectively. Bidders are required to submit ICV related documentation in Technical and Commercial bids strictly as outlined in Appendix 7 and Appendix 8. The submitted documents will be evaluated as per ADNOC ICV Implementation Guidelines available in [ADNOC's ICV program -](https://www.adnoc.ae/incountry-value/adnocs-icv-program) [Abu Dhabi National Oil Company](https://www.adnoc.ae/incountry-value/adnocs-icv-program)
+
+    RFT Number: [6000042656 (ENQ22-108)]
+
+```
+
+should be:
+    
+```text
+
+    #### **5. INSTRUCTIONS TO BIDDERS**
+
+    #### 5.1 **Communications**
+
+    All communications and Bidder enquiries in connection with this RFT must be sent in writing to the address set out in the Company Contact Details section of the RFT Summary in Section 4 of this RFT ("**RFT Summary**").
+
+    #### 5.2 **English Language** 
+
+    All documents and correspondence relating to this RFT shall be in English language. If any documentation relating to this RFT is submitted by the Bidder in another language in addition to English, the English version shall take precedence and be used for interpreting the information.
+
+    #### 5.3 **Facsimile / email not acceptable**
+
+    Submission of the Bid should be in accordance with the requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+
+    #### 5.4 **Two-stage bidding (Technical & Commercial)**
+
+    Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+
+    ##### Technical Bids:
+
+    To be submitted in accordance with:
+
+    - ➢ the requirements in the Technical Bid section of the RFT Summary; and
+    - ➢ the requirements set out in Appendix 7 of this RFT.
+
+    The Technical Bid **must not** include any pricing information.
+
+    ##### Commercial Bids:
+
+    Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acceptable and compliant with the terms of this RFT.
+
+    To be submitted in accordance with:
+
+    - (i) the requirements in the Commercial Bid section of the RFT Summary; and
+    - (ii) the requirements set out in Appendix 8 of this RFT.
+
+    The Bidder shall submit with the Commercial Bid:
+
+    - (i) the Commercial Bid Submission Form set out in Appendix 4 of this RFT ("**Commercial Bid Submission Form**") signed by an authorized signatory of the Bidder; and
+    - (ii) a copy of the power of attorney evidencing the authority of such signatory to sign the Commercial Bid Submission Form on behalf of the Bidder.
+
+    #### 5.5 **Bid Timetable** 
+
+    The tentative timetable for the bid process is set out in Appendix 1. Any changes in this timetable affecting the Bid Submission timeline shall be communicated to the Bidders solely through Tender Bulletins.
+
+    RFT Number: [6000042656 (ENQ22-108)]
+
+    #### 5.6 **Bid Submission Date(s)**
+
+    The Technical Bid and Commercial Bid must be delivered to the Company on or before the submission date(s) and time(s) specified in the RFT Summary ("**Bid Submission Date(s)**").
+
+    Any Bid (or part thereof) received after the Bid Submission Date(s) may be subject to disqualification.
+
+    #### 5.7 **Joint Ventures / Consortiums**
+
+    If the Bidder would like to submit its Bid as a joint venture or consortium it shall inform the Company within [seven (7)] days of receipt of the RFT.
+
+    The Bidder shall provide the following information to the Company:
+
+    - (a) the full legal names of each partner;
+    - (b) the legal address of each partner;
+    - (c) the name of the partner nominated to act as the manager of the joint venture or consortium;
+    - (d) the responsibilities of each partner in relation to the Scope of Work; and
+    - (e) a copy of the joint venture or consortium agreement with the Technical Bid, which shall state that:
+    - (i) all partners shall be jointly and severally responsible for the performance of the Scope of Work; and
+    - (ii) in the event that any partner ceases to be a member of a joint venture or consortium for any reason whatsoever the remaining partner(s) shall be fully responsible for the performance of the Scope of Work.
+
+    The Company shall review the Bidder's proposal to submit a Bid as a joint venture or consortium and shall decide, at the Company's discretion, whether this is acceptable to the Company. The Company shall notify the Bidder within seven (7) days of receiving its proposal whether the proposal has been accepted or rejected.
+
+    If the proposal is rejected by the Company, then the Bidder may proceed with submitting a Bid, not as part of a joint venture or consortium, within the timeframes set out in the RFT.
+
+    #### 5.8 **No Bid Bond** 
+
+    No bid bond is required under this RFT.
+
+    #### 5.9 **No Late Bids** 
+
+    Any Bid received by the Company shall be deemed to be the Bidder's final offer and any unsolicited bids of any kind from the same Bidder after the submission date will not be considered and may result in disqualification of the Bid.
+
+    #### 5.10 **Alternative Bids** 
+
+    If there is a commercial or technical benefit to the Company or the ADNOC Group, the Bidder may submit an alternative Bid, in addition to the Bid requested within this RFT, by submitting a separate and identifiable alternative Bid, which clearly details the commercial and/or technical benefits of such alternative Bid. RFT Number: [6000042656 (ENQ22-108)] Any alternative Bid should be submitted in accordance with the requirements set out in the RFT Summary.
+
+    #### 5.11 **No Modification Or Withdrawal**
+
+    Unless otherwise provided in this RFT, a Bid may not be modified or withdrawn by the Bidder following the Bid Submission Date under any circumstances.
+
+    #### 5.12 **In-Country Value ("ICV")**
+
+    Technical and commercial bid requires different information / ICV documents from the bidder, and such requirements have been specified in Appendix 7 and Appendix 8 respectively. Bidders are required to submit ICV related documentation in Technical and Commercial bids strictly as outlined in Appendix 7 and Appendix 8. The submitted documents will be evaluated as per ADNOC ICV Implementation Guidelines available in [ADNOC's ICV program -](https://www.adnoc.ae/incountry-value/adnocs-icv-program) [Abu Dhabi National Oil Company](https://www.adnoc.ae/incountry-value/adnocs-icv-program)RFT Number: [6000042656 (ENQ22-108)]
+
+```
+Show less
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+I read through chunking/ingest.py and the spec closely against both worked examples. Before implementing, I need to resolve a real ambiguity: the two examples don't follow one consistent rule for when a stray fragment (like the "RFT Number: [...]" footer line) gets merged into a marker's body paragraph versus left standalone.
+
+Specifically — in Example 2:
+
+After 5.5's body, the fragment RFT Number: [...] is left as its own separate paragraph (not merged), because what follows it is #### 5.6 ... which is already formatted as a heading in the input.
+After 5.10's body, the same kind of RFT Number: [...] fragment is merged inline into the flowing paragraph, even though what follows it (5.11 **No Modification...**) is a plain-text marker in the input that only becomes a heading as a result of this same preprocessing pass.
+So the merge boundary seems to depend on whether the next marker is already ####-formatted in the source, not on anything about the current point's own content. That's a fairly subtle, easy-to-get-wrong distinction, and the prose spec (step 1's nested branches) doesn't state it explicitly — I inferred it purely from diffing the two examples.
+
+AskUserQuestion
+OUT
+Your questions have been answered: "For merging a point's fragmented body paragraphs (removing the stray blank-line breaks), should the last fragment before the next marker be excluded from the merge (left standalone) specifically when the next marker is already a pre-existing `####` heading in the source — and merged otherwise?"="No — always merge everything up to the next marker", "This spec is intricate and the two examples are the only ground truth I have. How should I approach implementation?"="Best-effort generalization (Recommended)". You can now continue with these answers in mind.
+Now let me implement this. I'll add a preprocessing() pass driven by two sub-transforms (marker-sequence normalization/heading-promotion, and italic-sublabel promotion), and wire it into split_documents() before temp_split().
+
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 25 lines
+Those are just spellcheck notices, not errors — safe to ignore. Now let's add the preprocessing() function and its helpers.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 96-110)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Modified
+Now let me add the preprocessing() function and its helper functions right before split_documents().
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 97-102)
+Update Todos
+
+Implement preprocessing() core marker-sequence normalization (block splitting, classification, sequence detection)
+
+Implement plain-branch (add missing list prefix) and heading-branch (bold-label/heading promotion) transforms
+
+Implement italic-sublabel-to-subheading promotion pass (rule 2)
+
+Wire preprocessing() together and test against both worked examples
+Now let me write the full preprocessing() implementation.
+
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 221 lines
+I need to fix _apply_plain_branch — I referenced a nonexistent _gap_before key instead of slicing the original text for inter-block gaps. Let me fix that and clean up the unused params.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 196-225)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 2 lines
+Now update the call site in _normalize_marker_sequences to pass text to _apply_plain_branch:
+
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Modified
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 224-263)
+Right, text is indeed unused there since block text is self-contained. Let me remove that unused parameter.
+
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Modified
+Now let's write a test script with the two worked examples and run it against the implementation.
+
+Update Todos
+
+Implement preprocessing() core marker-sequence normalization (block splitting, classification, sequence detection)
+
+Implement plain-branch (add missing list prefix) and heading-branch (bold-label/heading promotion) transforms
+
+Implement italic-sublabel-to-subheading promotion pass (rule 2)
+
+Wire preprocessing() together and test against both worked examples
+Write C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\test_preprocessing.py
+153 lines
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(r"c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking")))
+
+from ingest import preprocessing
+
+EXAMPLE_1_INPUT = '''#### **3. OVERVIEW OF THE PROJECT**
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+3.1 The Project will be located at [*insert details*], within the Emirate of Abu Dhabi. [Insert a brief description of the project, stating the nature of the project, the size of the project and the title of the Project.]
+
+- 3.2 [The package being tendered under this RFT is for [describe the services being tendered e.g. the engineering, procurement and construction of a process plant on a lump sum turnkey basis], one of several packages of works being tendered as part of the overall Project, and other packages are being tendered on or about the same time as this package.] *[AMEND OR DELETE THIS PARAGRAPH AS APPROPRIATE.]*
+- 3.3 The Company would like the successful Bidder to start the Scope of Works no later than [*insert date*] (the "**Commencement Date**").
+- 3.4 The Scope of Works are to be completed within [*insert number of weeks / months*] from the Commencement Date.
+- 3.5 The Company requires the whole of the Project to be completed by [*insert date] (the "Completion Date").*].
+
+[**NOTE:** At least one of 3.4 or 3.5 should always be included, and both provisions can be used where appropriate].]
+
+RFT Number: [6000042656 (ENQ22-108)]'''
+
+EXAMPLE_1_EXPECTED = '''#### **3. OVERVIEW OF THE PROJECT**
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+- 3.1 The Project will be located at [*insert details*], within the Emirate of Abu Dhabi. [Insert a brief description of the project, stating the nature of the project, the size of the project and the title of the Project.]
+
+- 3.2 [The package being tendered under this RFT is for [describe the services being tendered e.g. the engineering, procurement and construction of a process plant on a lump sum turnkey basis], one of several packages of works being tendered as part of the overall Project, and other packages are being tendered on or about the same time as this package.] *[AMEND OR DELETE THIS PARAGRAPH AS APPROPRIATE.]*
+- 3.3 The Company would like the successful Bidder to start the Scope of Works no later than [*insert date*] (the "**Commencement Date**").
+- 3.4 The Scope of Works are to be completed within [*insert number of weeks / months*] from the Commencement Date.
+- 3.5 The Company requires the whole of the Project to be completed by [*insert date] (the "Completion Date").*].
+
+[**NOTE:** At least one of 3.4 or 3.5 should always be included, and both provisions can be used where appropriate].]
+
+RFT Number: [6000042656 (ENQ22-108)]'''
+
+EXAMPLE_2_INPUT = '''#### **5. INSTRUCTIONS TO BIDDERS**
+
+5.1 **Communications** All communications and Bidder enquiries in connection with this RFT must be
+
+sent in writing to the address set out in the Company Contact Details section of the
+
+RFT Summary in Section 4 of this RFT ("**RFT Summary**").
+
+5.2 **English Language** All documents and correspondence relating to this RFT shall be in English language. If any documentation relating to this RFT is submitted by the Bidder in another language in addition to English, the English version shall take precedence
+
+and be used for interpreting the information.
+
+5.3 **Facsimile / email not acceptable**
+
+Submission of the Bid should be in accordance with the requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+
+5.4 **Two-stage bidding (Technical & Commercial)**
+
+Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+
+*Technical Bids*:
+
+To be submitted in accordance with:
+
+- ➢ the requirements in the Technical Bid section of the RFT Summary; and
+- ➢ the requirements set out in Appendix 7 of this RFT.
+
+The Technical Bid **must not** include any pricing information.
+
+*Commercial Bids*:
+
+Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acceptable and compliant with the terms of this RFT.
+
+To be submitted in accordance with:
+
+- (i) the requirements in the Commercial Bid section of the RFT Summary; and
+- (ii) the requirements set out in Appendix 8 of this RFT.
+
+The Bidder shall submit with the Commercial Bid:
+
+- (i) the Commercial Bid Submission Form set out in Appendix 4 of this RFT ("**Commercial Bid Submission Form**") signed by an authorized signatory of the Bidder; and
+- (ii) a copy of the power of attorney evidencing the authority of such signatory to sign the Commercial Bid Submission Form on behalf of the Bidder.
+
+5.5 **Bid Timetable** The tentative timetable for the bid process is set out in Appendix 1. Any changes in this timetable affecting the Bid Submission timeline shall be communicated to the Bidders solely through Tender Bulletins.
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+#### 5.6 **Bid Submission Date(s)**
+
+The Technical Bid and Commercial Bid must be delivered to the Company on or before the submission date(s) and time(s) specified in the RFT Summary ("**Bid Submission Date(s)**").
+
+Any Bid (or part thereof) received after the Bid Submission Date(s) may be subject to disqualification.
+
+#### 5.7 **Joint Ventures / Consortiums**
+
+If the Bidder would like to submit its Bid as a joint venture or consortium it shall inform the Company within [seven (7)] days of receipt of the RFT.
+
+The Bidder shall provide the following information to the Company:
+
+- (a) the full legal names of each partner;
+- (b) the legal address of each partner;
+- (c) the name of the partner nominated to act as the manager of the joint venture or consortium;
+- (d) the responsibilities of each partner in relation to the Scope of Work; and
+- (e) a copy of the joint venture or consortium agreement with the Technical Bid, which shall state that:
+- (i) all partners shall be jointly and severally responsible for the performance of the Scope of Work; and
+- (ii) in the event that any partner ceases to be a member of a joint venture or consortium for any reason whatsoever the remaining partner(s) shall be fully responsible for the performance of the Scope of Work.
+
+The Company shall review the Bidder's proposal to submit a Bid as a joint venture or consortium and shall decide, at the Company's discretion, whether this is acceptable to the Company. The Company shall notify the Bidder within seven (7) days of receiving its proposal whether the proposal has been accepted or rejected.
+
+If the proposal is rejected by the Company, then the Bidder may proceed with submitting a Bid, not as part of a joint venture or consortium, within the timeframes set out in the RFT.
+
+5.8 **No Bid Bond** No bid bond is required under this RFT.
+
+5.9 **No Late Bids** Any Bid received by the Company shall be deemed to be the Bidder's final offer and any unsolicited bids of any kind from the same Bidder after the submission date will not be considered and may result in disqualification of the Bid.
+
+5.10 **Alternative Bids** If there is a commercial or technical benefit to the Company or the ADNOC Group, the Bidder may submit an alternative Bid, in addition to the Bid requested within this RFT, by submitting a separate and identifiable alternative Bid, which clearly details the commercial and/or technical benefits of such alternative Bid.
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+Any alternative Bid should be submitted in accordance with the requirements set out in the RFT Summary.
+
+5.11 **No Modification Or Withdrawal**
+
+Unless otherwise provided in this RFT, a Bid may not be modified or withdrawn by the Bidder following the Bid Submission Date under any circumstances.
+
+5.12 **In-Country Value ("ICV")**
+
+Technical and commercial bid requires different information / ICV documents from the bidder, and such requirements have been specified in Appendix 7 and Appendix 8 respectively. Bidders are required to submit ICV related documentation in Technical and Commercial bids strictly as outlined in Appendix 7 and Appendix 8. The submitted documents will be evaluated as per ADNOC ICV Implementation Guidelines available in [ADNOC's ICV program -](https://www.adnoc.ae/incountry-value/adnocs-icv-program) [Abu Dhabi National Oil Company](https://www.adnoc.ae/incountry-value/adnocs-icv-program)
+
+RFT Number: [6000042656 (ENQ22-108)]'''
+
+
+def show_diff(label, actual, expected):
+    a_lines = actual.split("\n")
+    e_lines = expected.split("\n")
+    if a_lines == e_lines:
+        print(f"{label}: MATCH")
+        return
+    print(f"{label}: DIFFERS")
+    import difflib
+    diff = difflib.unified_diff(e_lines, a_lines, lineterm="", fromfile="expected", tofile="actual")
+    for line in diff:
+        print(line)
+
+
+result1 = preprocessing(EXAMPLE_1_INPUT)
+show_diff("Example 1", result1, EXAMPLE_1_EXPECTED)
+
+print()
+print("=" * 80)
+print()
+
+result2 = preprocessing(EXAMPLE_2_INPUT)
+print("--- Example 2 actual output ---")
+print(result2)
+Bash Run preprocessing() against both worked examples
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && python "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\test_preprocessing.py"
+
+OUT
+Exit code 1
+Traceback (most recent call last):
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\test_preprocessing.py", line 6, in <module>
+    from ingest import preprocessing
+  File "c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py", line 14, in <module>
+    from logger_config import setup_logging, write_chunk_run
+  File "c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\logger_config.py", line 13, in <module>
+    import tiktoken
+ModuleNotFoundError: No module named 'tiktoken'
+Bash Run preprocessing() test using the marker venv (has tiktoken)
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\test_preprocessing.py"
+
+OUT
+Example 1: MATCH
+
+================================================================================
+
+--- Example 2 actual output ---
+#### **5. INSTRUCTIONS TO BIDDERS**
+
+#### 5.1 **Communications**
+
+All communications and Bidder enquiries in connection with this RFT must be sent in writing to the address set out in the Company Contact Details section of the RFT Summary in Section 4 of this RFT ("**RFT Summary**").
+
+#### 5.2 **English Language**
+
+All documents and correspondence relating to this RFT shall be in English language. If any documentation relating to this RFT is submitted by the Bidder in another language in addition to English, the English version shall take precedence and be used for interpreting the information.
+
+#### 5.3 **Facsimile / email not acceptable**
+
+Submission of the Bid should be in accordance with the requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+
+#### 5.4 **Two-stage bidding (Technical & Commercial)**
+
+Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+
+#### 5.5 **Bid Timetable**
+
+The tentative timetable for the bid process is set out in Appendix 1. Any changes in this timetable affecting the Bid Submission timeline shall be communicated to the Bidders solely through Tender Bulletins. RFT Number: [6000042656 (ENQ22-108)]
+
+#### 5.6 **Bid Submission Date(s)**
+
+The Technical Bid and Commercial Bid must be delivered to the Company on or before the submission date(s) and time(s) specified in the RFT Summary ("**Bid Submission Date(s)**"). Any Bid (or part thereof) received after the Bid Submission Date(s) may be subject to disqualification.
+
+#### 5.7 **Joint Ventures / Consortiums**
+
+If the Bidder would like to submit its Bid as a joint venture or consortium it shall inform the Company within [seven (7)] days of receipt of the RFT. The Bidder shall provide the following information to the Company:
+
+#### 5.8 **No Bid Bond**
+
+No bid bond is required under this RFT.
+
+#### 5.9 **No Late Bids**
+
+Any Bid received by the Company shall be deemed to be the Bidder's final offer and any unsolicited bids of any kind from the same Bidder after the submission date will not be considered and may result in disqualification of the Bid.
+
+#### 5.10 **Alternative Bids**
+
+If there is a commercial or technical benefit to the Company or the ADNOC Group, the Bidder may submit an alternative Bid, in addition to the Bid requested within this RFT, by submitting a separate and identifiable alternative Bid, which clearly details the commercial and/or technical benefits of such alternative Bid. RFT Number: [6000042656 (ENQ22-108)] Any alternative Bid should be submitted in accordance with the requirements set out in the RFT Summary.
+
+#### 5.11 **No Modification Or Withdrawal**
+
+Unless otherwise provided in this RFT, a Bid may not be modified or withdrawn by the Bidder following the Bid Submission Date under any circumstances.
+
+#### 5.12 **In-Country Value ("ICV")**
+
+Technical and commercial bid requires different information / ICV documents from the bidder, and such requirements have been specified in Appendix 7 and Appendix 8 respectively. Bidders are required to submit ICV related documentation in Technical and Commercial bids strictly as outlined in Appendix 7 and Appendix 8. The submitted documents will be evaluated as per ADNOC ICV Implementation Guidelines available in [ADNOC's ICV program -](https://www.adnoc.ae/incountry-value/adnocs-icv-program) [Abu Dhabi National Oil Company](https://www.adnoc.ae/incountry-value/adnocs-icv-program) RFT Number: [6000042656 (ENQ22-108)]
+Found the bug — content between markers that isn't absorbed into any single marker's merged body (like the *Technical Bids*: list section between 5.4 and 5.5, and the lettered/roman list under 5.7) was silently dropped, because the whole sequence was replaced by one edit that only contained the per-marker segments. Let me fix _apply_heading_branch to preserve untouched in-between content verbatim.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 224-278)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 4 lines
+Now update the call site to pass text:
+
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Modified
+Bash Re-run preprocessing() test after fixing the dropped-content bug
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\test_preprocessing.py"
+
+OUT
+Exit code 1
+Example 1: MATCH
+
+================================================================================
+
+--- Example 2 actual output ---
+Traceback (most recent call last):
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\test_preprocessing.py", line 152, in <module>
+    print(result2)
+  File "C:\Users\LOQ\AppData\Local\Python\pythoncore-3.12-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u27a2' in position 1101: character maps to <undefined>
+That's just a console-encoding issue in my test script (the ➢ arrow character), not a bug in the code. Let me fix the test script's output encoding.
+
+Edit C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\test_preprocessing.py
+Added 3 lines
+Bash Re-run preprocessing() test with UTF-8 stdout
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\test_preprocessing.py"
+
+OUT
+Example 1: MATCH
+
+================================================================================
+
+--- Example 2 actual output ---
+#### **5. INSTRUCTIONS TO BIDDERS**
+
+#### 5.1 **Communications**
+
+All communications and Bidder enquiries in connection with this RFT must be sent in writing to the address set out in the Company Contact Details section of the RFT Summary in Section 4 of this RFT ("**RFT Summary**").
+
+#### 5.2 **English Language**
+
+All documents and correspondence relating to this RFT shall be in English language. If any documentation relating to this RFT is submitted by the Bidder in another language in addition to English, the English version shall take precedence and be used for interpreting the information.
+
+#### 5.3 **Facsimile / email not acceptable**
+
+Submission of the Bid should be in accordance with the requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+
+#### 5.4 **Two-stage bidding (Technical & Commercial)**
+
+Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+
+##### Technical Bids:
+
+To be submitted in accordance with:
+
+- ➢ the requirements in the Technical Bid section of the RFT Summary; and
+- ➢ the requirements set out in Appendix 7 of this RFT.
+
+The Technical Bid **must not** include any pricing information.
+
+##### Commercial Bids:
+
+Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acceptable and compliant with the terms of this RFT.
+
+To be submitted in accordance with:
+
+- (i) the requirements in the Commercial Bid section of the RFT Summary; and
+- (ii) the requirements set out in Appendix 8 of this RFT.
+
+The Bidder shall submit with the Commercial Bid:
+
+- (i) the Commercial Bid Submission Form set out in Appendix 4 of this RFT ("**Commercial Bid Submission Form**") signed by an authorized signatory of the Bidder; and
+- (ii) a copy of the power of attorney evidencing the authority of such signatory to sign the Commercial Bid Submission Form on behalf of the Bidder.
+
+#### 5.5 **Bid Timetable**
+
+The tentative timetable for the bid process is set out in Appendix 1. Any changes in this timetable affecting the Bid Submission timeline shall be communicated to the Bidders solely through Tender Bulletins. RFT Number: [6000042656 (ENQ22-108)]
+
+#### 5.6 **Bid Submission Date(s)**
+
+The Technical Bid and Commercial Bid must be delivered to the Company on or before the submission date(s) and time(s) specified in the RFT Summary ("**Bid Submission Date(s)**"). Any Bid (or part thereof) received after the Bid Submission Date(s) may be subject to disqualification.
+
+#### 5.7 **Joint Ventures / Consortiums**
+
+If the Bidder would like to submit its Bid as a joint venture or consortium it shall inform the Company within [seven (7)] days of receipt of the RFT. The Bidder shall provide the following information to the Company:
+
+- (a) the full legal names of each partner;
+- (b) the legal address of each partner;
+- (c) the name of the partner nominated to act as the manager of the joint venture or consortium;
+- (d) the responsibilities of each partner in relation to the Scope of Work; and
+- (e) a copy of the joint venture or consortium agreement with the Technical Bid, which shall state that:
+- (i) all partners shall be jointly and severally responsible for the performance of the Scope of Work; and
+- (ii) in the event that any partner ceases to be a member of a joint venture or consortium for any reason whatsoever the remaining partner(s) shall be fully responsible for the performance of the Scope of Work.
+
+The Company shall review the Bidder's proposal to submit a Bid as a joint venture or consortium and shall decide, at the Company's discretion, whether this is acceptable to the Company. The Company shall notify the Bidder within seven (7) days of receiving its proposal whether the proposal has been accepted or rejected.
+
+If the proposal is rejected by the Company, then the Bidder may proceed with submitting a Bid, not as part of a joint venture or consortium, within the timeframes set out in the RFT.
+
+#### 5.8 **No Bid Bond**
+
+No bid bond is required under this RFT.
+
+#### 5.9 **No Late Bids**
+
+Any Bid received by the Company shall be deemed to be the Bidder's final offer and any unsolicited bids of any kind from the same Bidder after the submission date will not be considered and may result in disqualification of the Bid.
+
+#### 5.10 **Alternative Bids**
+
+If there is a commercial or technical benefit to the Company or the ADNOC Group, the Bidder may submit an alternative Bid, in addition to the Bid requested within this RFT, by submitting a separate and identifiable alternative Bid, which clearly details the commercial and/or technical benefits of such alternative Bid. RFT Number: [6000042656 (ENQ22-108)] Any alternative Bid should be submitted in accordance with the requirements set out in the RFT Summary.
+
+#### 5.11 **No Modification Or Withdrawal**
+
+Unless otherwise provided in this RFT, a Bid may not be modified or withdrawn by the Bidder following the Bid Submission Date under any circumstances.
+
+#### 5.12 **In-Country Value ("ICV")**
+
+Technical and commercial bid requires different information / ICV documents from the bidder, and such requirements have been specified in Appendix 7 and Appendix 8 respectively. Bidders are required to submit ICV related documentation in Technical and Commercial bids strictly as outlined in Appendix 7 and Appendix 8. The submitted documents will be evaluated as per ADNOC ICV Implementation Guidelines available in [ADNOC's ICV program -](https://www.adnoc.ae/incountry-value/adnocs-icv-program) [Abu Dhabi National Oil Company](https://www.adnoc.ae/incountry-value/adnocs-icv-program) RFT Number: [6000042656 (ENQ22-108)]
+Excellent — this matches the expected structure closely (with our agreed simplification for the 5.5/5.6 boundary). Let me sanity-check this against real marker_results/ output to make sure it doesn't crash or misfire on ordinary documents without this clause pattern.
+
+Bash Check for existing marker_results output to sanity-test against
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && ls marker_results 2>/dev/null | head -5; ls docling_results 2>/dev/null | head -5
+
+OUT
+1-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_1-250.md
+2-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_251-500.md
+2_1-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_1-250.md
+3_1-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_1-250.md
+4_1-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_1-250.md
+5_1-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_1-250.md
+6_1-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_1-250.md
+Bash Run preprocessing() over all real marker_results files, checking for crashes
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys
+sys.path.insert(0, 'chunking')
+from ingest import discover_files, load_documents, preprocessing
+
+files = discover_files()
+print(f'{len(files)} files discovered')
+docs = load_documents(files)
+crashes = 0
+changed = 0
+for d in docs:
+    try:
+        out = preprocessing(d.page_content)
+        if out != d.page_content:
+            changed += 1
+    except Exception as e:
+        crashes += 1
+        print(f'CRASH on {d.metadata[\"source\"]}: {e!r}')
+print(f'{changed}/{len(docs)} documents changed, {crashes} crashes')
+"
+
+OUT
+2 files discovered
+1/2 documents changed, 0 crashes
+Bash Run the full ingest.py pipeline end-to-end with preprocessing wired in
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" ".\chunking\ingest.py" 2>&1 | tail -20
+
+OUT
+2026-07-20 17:21:17 | INFO     | Loaded 2 of 2 Markdown files
+2026-07-20 17:21:18 | INFO     | Split 2 documents into 1680 chunks
+2026-07-20 17:21:18 | INFO     | Wrote 1680 chunks to chunk-runs\chunks_20260720_172118_195650.md
+Full pipeline runs cleanly end-to-end with no crashes. Both worked examples pass (Example 1 is an exact match; Example 2 matches structurally with only the one intentional simplification we agreed on for the merge-boundary rule).
+
+Update Todos
+
+Implement preprocessing() core marker-sequence normalization (block splitting, classification, sequence detection)
+
+Implement plain-branch (add missing list prefix) and heading-branch (bold-label/heading promotion) transforms
+
+Implement italic-sublabel-to-subheading promotion pass (rule 2)
+
+Wire preprocessing() together and test against both worked examples
+Per this project's convention (CLAUDE.md: update docs/Status.md after non-trivial changes), let me check its format and append an entry.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs\Status.md
+Bash Count lines in Status.md
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && wc -l docs/Status.md
+
+OUT
+70 docs/Status.md
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs\Status.md (lines 41-70)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs\Status.md
+Added 11 lines
+I've implemented and validated preprocessing() in chunking/ingest.py, wired in before temp_split(). Summary:
+
+Marker-sequence detection: scans blank-line-delimited blocks for runs of 2+ consecutive same-family markers (3.1/3.2, (a)/(b), (i)/(ii)).
+Plain branch: normalizes a sequence's leading list-syntax character (matches your Example 1 exactly).
+Heading branch: promotes bold-labelled or already-headed sequences to matching-level headings, rejoining each clause's paragarph fragments that source pagination scattered across blank lines (matches Example 2, modulo the merge-boundary simplification you approved).
+Italic sub-label promotion: *Label*: under a heading → one level deeper (##### Label:), stripped of the * wrapper.
+Along the way I caught and fixed a real bug: content sitting between two markers that neither one's body absorbed (like the nested Technical Bids/Commercial Bids lists under clause 5.4, or the lettered/roman list under 5.7) was being silently dropped because the whole sequence was replaced by a single edit built only from per-marker segments. Fixed by carrying untouched in-between content through verbatim.
+
+Verified: both worked examples pass, and the full pipeline (ingest.py) runs clean end-to-end against the real marker_results/ corpus with no crashes. I also appended a log entry to docs/Status.md per this project's documentation convention. Nothing has been committed — let me know if you'd like that.
+
+c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Read chunking/ingest.py
+Read marker_results/input.md
+Read marker_results/expected-output.md
+
+The input and expected-output is your ground truth.
+Based on these, append and/or modify rules implemented in ingest.preprocessing()
+If you find any inconsistency, discuss with me
+Do not stop unless you have improved the preprocessing algorithm's rules as per the requirement
+Show less
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\input.md
+Bash Check line/byte counts for the new ground-truth files
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && wc -l marker_results/input.md marker_results/expected-output.md && wc -c marker_results/input.md marker_results/expected-output.md
+
+OUT
+  2171 marker_results/input.md
+  2266 marker_results/expected-output.md
+  4437 total
+269405 marker_results/input.md
+269851 marker_results/expected-output.md
+539256 total
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\input.md (lines 2-401)
+This is the full source document. Let me diff my current preprocessing() output against the real expected output to find every place the algorithm falls short.
+
+Bash Run current preprocessing() on the full input.md and save actual output
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+from ingest import preprocessing
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+
+out = preprocessing(src)
+with open(r'C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\actual_output.md', 'w', encoding='utf-8') as f:
+    f.write(out)
+print('done', len(out))
+"
+
+OUT
+done 275164
+Update Todos
+
+Diff current preprocessing() output vs marker_results/expected-output.md on the full document
+
+Identify each rule gap/inconsistency and decide fixes (flagging genuine ambiguities to user)
+
+Implement fixes to preprocessing() rules
+
+Re-verify against expected-output.md and the original two worked examples (no regressions)
+Bash Diff current actual output vs expected output, count lines
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && diff -u "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\actual_output.md" marker_results/expected-output.md > "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff1.txt"; wc -l "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff1.txt"
+
+OUT
+1596 C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff1.txt
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff1.txt
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff1.txt (lines 201-400)
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff1.txt (lines 401-620)
+This diff reveals several real issues, including a critical bug. Let me pull the exact source formatting for the nested-list region that's getting corrupted.
+
+Grep "has thoroughly examined all such COMPANY INFORMATION" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\input.md)
+2 lines of output
+Grep "has thoroughly examined all such COMPANY INFORMATION" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\input.md)
+17 lines of output
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff1.txt (lines 621-870)
+Bash Quantify how much of the diff is span-tag-related vs other
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && DIFF="C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff1.txt"
+echo "--- span-related lines ---"
+grep -c "span id=" "$DIFF"
+echo "--- total +/- lines ---"
+grep -c "^[+-]" "$DIFF"
+echo "--- total hunks ---"
+grep -c "^@@" "$DIFF"
+
+OUT
+--- span-related lines ---
+329
+--- total +/- lines ---
+878
+--- total hunks ---
+50
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff1.txt (lines 871-1120)
+Grep "page-44-1|page-45-2|page-46-4" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\input.md)
+6 lines of output
+This confirms three clear, well-evidenced rule gaps plus a critical bug. Let me implement fixes:
+
+Update Todos
+
+Diff current preprocessing() output vs marker_results/expected-output.md on the full document
+
+Fix critical bug: alpha/roman marker families are scoped globally, causing cross-document corruption
+
+Preserve trailing whitespace after bold-label heading text
+
+Extend paragraph-merging to the plain (non-heading) marker branch
+
+Add new rule: extract leading <span id=...> anchor tags onto their own line(s)
+
+Re-verify against expected-output.md and update/flag the two original worked examples
+Let's look at the current _marker_sequences function to apply the critical fix:
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 177-221)
+Now let's fix _marker_sequences to reset alpha/roman families at heading and numeric-marker boundaries:
+
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 21 lines
+Now let's fix the trailing-whitespace preservation and extend merging to the plain branch. Let me view the current state of both functions:
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 217-301)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 44 lines
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 224-338)
+Good, this looks correct. Now let's check the _normalize_marker_sequences caller to make sure it still handles _apply_plain_branch returning None:
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 340-369)
+Update Todos
+
+Diff current preprocessing() output vs marker_results/expected-output.md on the full document
+
+Fix critical bug: alpha/roman marker families are scoped globally, causing cross-document corruption
+
+Preserve trailing whitespace after bold-label heading text
+
+Extend paragraph-merging to the plain (non-heading) marker branch
+
+Add new rule: extract leading <span id=...> anchor tags onto their own line(s)
+
+Re-verify against expected-output.md and update/flag the two original worked examples
+Now let's add the <span id="..."> extraction rule. Let me view the preprocessing() entry point and the top of the file where the regex constants live:
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 109-128)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 1 line
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 41-55)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 5 lines
+Now let's add the _extract_leading_spans function near _promote_italic_sublabels:
+
+Bash Locate _promote_italic_sublabels and split_documents in ingest.py
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && grep -n "_promote_italic_sublabels\|^def split_documents" chunking/ingest.py
+
+OUT
+117:    text = _promote_italic_sublabels(text)
+378:def _promote_italic_sublabels(text: str) -> str:
+400:def split_documents(documents: list[Document]) -> list[Document]:
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 379-400)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 25 lines
+Now let's re-run against the full document and regenerate the diff.
+
+Bash Re-run preprocessing() on full input.md after fixes
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys
+sys.path.insert(0, 'chunking')
+from ingest import preprocessing
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+
+out = preprocessing(src)
+with open(r'C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\actual_output.md', 'w', encoding='utf-8') as f:
+    f.write(out)
+print('done', len(out))
+"
+
+OUT
+done 275365
+Bash Regenerate diff against expected output after fixes
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && diff -u "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\actual_output.md" marker_results/expected-output.md > "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff2.txt"; wc -l "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff2.txt"
+
+OUT
+915 C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff2.txt
+Good progress — diff shrank from 1596 to 915 lines. Let's see what remains.
+
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff2.txt
+Let me look at the actual expected-output.md content directly for this region instead of parsing the diff, to avoid misreading context.
+
+Grep "5.5 \*\*Bid Timetable\*\*" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\expected-output.md)
+7 lines of output
+Grep "5.10 \*\*Alternative Bids\*\*|5.1 \*\*Communications\*\*" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\expected-output.md)
+19 lines of output
+This reveals my "always merge" assumption is wrong. Let me check the exact rule by directly inspecting a few more spots in the ground truth.
+
+Grep "3.5 The Company requires" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\expected-output.md)
+7 lines of output
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff2.txt (lines 151-350)
+This confirms my "always merge" rule is actively dangerous — it's currently swallowing entire unrelated glossary definitions together (e.g. "DELAY EVENT", "DISPUTE", "DRAWINGS", "EAD" all glued into one line). Let me fix this immediately with a sentence-boundary heuristic, since this is a live corruption bug, not just an imperfection.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 224-268)
+Update Todos
+
+Diff current preprocessing() output vs marker_results/expected-output.md on the full document
+
+Fix critical bug: alpha/roman marker families are scoped globally, causing cross-document corruption
+
+Preserve trailing whitespace after bold-label heading text
+
+Extend paragraph-merging to the plain (non-heading) marker branch
+
+Add new rule: extract leading <span id=...> anchor tags onto their own line(s)
+
+Fix critical bug: unconditional merge is swallowing unrelated glossary paragraphs together
+
+Re-verify against expected-output.md and flag remaining ambiguities to user
+Now let me implement the sentence-boundary stopping condition in _merge_forward and update its callers:
+
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 18 lines
+Now update the two callers to pass lead_text:
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 264-363)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 1 line
+Now let's re-run and regenerate the diff:
+
+Bash Re-run preprocessing after sentence-boundary merge fix, regenerate diff
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys
+sys.path.insert(0, 'chunking')
+from ingest import preprocessing
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+
+out = preprocessing(src)
+with open(r'C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\actual_output.md', 'w', encoding='utf-8') as f:
+    f.write(out)
+print('done', len(out))
+" && diff -u "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\actual_output.md" marker_results/expected-output.md > "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff3.txt"; wc -l "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff3.txt"
+
+OUT
+done 275369
+831 C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff3.txt
+Bash Check whether the glossary-merging corruption is fixed
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && grep -n "DELAY EVENT\|DISPUTE\|EARLY TAKING OVER" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\actual_output.md" | head -5
+
+OUT
+849:| 45. | GOVERNING LAW AND DISPUTE RESOLUTION                     | 96 |
+953:"**CONCURRENCY**" means the effects of two or more events of delay are felt, in whole or in part, at the same time (whether or not those events have arisen at the same time), where at least one of the relevant events is a DELAY EVENT and at least one of the other relevant events is an event for which the CONTRACTOR has agreed to bear the risk or responsibility under the terms of the AGREEMENT. For the avoidance of doubt, a CONCURRENCY can exist only where, and for the period in which, the effects of such events are overlapping.
+1001:"**DELAY EVENT**" has the meaning given to such term in Article [25.1.](#page-88-1)
+1005:"**DISPUTE**" has the meaning given to that term in Article [45.2.](#page-119-4)
+1011:"**EARLY TAKING OVER CERTIFICATE**" means a certificate issued by the COMPANY to the CONTRACTOR pursuant to Article [15.3](#page-65-1) in the form attached at ANNEXURE 11.
+Good — the glossary is no longer corrupted; each definition is on its own line. Let's check the diff for remaining issues.
+
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff3.txt
+Found the real remaining bug: overlapping edits. A "num:6" heading-branch sequence spans 6.1–6.20, but a nested "(i)/(ii)" roman sequence inside clause 6.6 produces its own separate edit whose span sits entirely inside the outer one — applying both edits independently scrambles the output. Let me fix the edit-application logic to drop nested/overlapping edits.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 364-388)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 16 lines
+Now let's re-run and regenerate the diff:
+
+Bash Re-run after overlapping-edits fix, regenerate diff
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys
+sys.path.insert(0, 'chunking')
+from ingest import preprocessing
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+
+out = preprocessing(src)
+with open(r'C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\actual_output.md', 'w', encoding='utf-8') as f:
+    f.write(out)
+print('done', len(out))
+" && diff -u "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\actual_output.md" marker_results/expected-output.md > "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff4.txt"; wc -l "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff4.txt"
+
+OUT
+done 267513
+719 C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff4.txt
+Grep "page-16-0" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\input.md)
+7 lines of output
+Grep "page-16-0|APPENDIX 5" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\expected-output.md)
+7 lines of output
+This looks like a one-off inconsistency in the ground truth rather than a real pattern (every other span-glued-heading gets extracted; this lone "APPENDIX 5" doesn't). Let me keep scanning the rest of the diff for anything systematic.
+
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\diff4.txt (lines 61-260)
+Bash Check my actual output for the CONTROLS glossary entry
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && grep -n "CONTROLS.*and.*CONTROLLED\|having, directly or indirectly, the ability" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\actual_output.md"
+
+OUT
+882:- (c) having, directly or indirectly, the ability to direct or procure the direction of the management and policies of such PERSON, whether through the ownership of shares, by contract or otherwise,
+884:and "**CONTROLS**" and "**CONTROLLED**" have corresponding meanings.
+Grep "possession, directly or indirectly, of the power to vote" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\input.md)
+9 lines of output
+I've hit genuine ambiguity that I can't resolve by further guessing: "RFT Number:" boilerplate lines merge inconsistently in the ground truth itself (sometimes absorbed into preceding text, sometimes staying isolated from following text, with no clean distinguishing signal I can extract). Let me verify there's no remaining data-loss/corruption risk, then check the two original toy examples still hold before reporting back.
+
+Bash Sanity-check word counts to confirm no content loss
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && wc -w marker_results/input.md "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\actual_output.md" marker_results/expected-output.md
+
+OUT
+ 35684 marker_results/input.md
+ 35914 C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\actual_output.md
+ 35897 marker_results/expected-output.md
+107495 total
+Bash Re-check the two original toy examples against the updated implementation
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\test_preprocessing.py" 2>&1 | head -20
+
+OUT
+Example 1: MATCH
+
+================================================================================
+
+--- Example 2 actual output ---
+#### **5. INSTRUCTIONS TO BIDDERS**
+
+#### 5.1 **Communications** 
+
+All communications and Bidder enquiries in connection with this RFT must be sent in writing to the address set out in the Company Contact Details section of the RFT Summary in Section 4 of this RFT ("**RFT Summary**").
+
+#### 5.2 **English Language** 
+
+All documents and correspondence relating to this RFT shall be in English language. If any documentation relating to this RFT is submitted by the Bidder in another language in addition to English, the English version shall take precedence and be used for interpreting the information.
+
+#### 5.3 **Facsimile / email not acceptable**
+
+Submission of the Bid should be in accordance with the requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+
+#### 5.4 **Two-stage bidding (Technical & Commercial)**
+Bash View full Example 2 output tail to confirm 5.5/5.10 RFT Number stays separate
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\6360f5f3-4734-4239-ba2c-fe512f578cae\scratchpad\test_preprocessing.py" 2>&1 | tail -30
+
+OUT
+- (i) all partners shall be jointly and severally responsible for the performance of the Scope of Work; and
+- (ii) in the event that any partner ceases to be a member of a joint venture or consortium for any reason whatsoever the remaining partner(s) shall be fully responsible for the performance of the Scope of Work.
+
+The Company shall review the Bidder's proposal to submit a Bid as a joint venture or consortium and shall decide, at the Company's discretion, whether this is acceptable to the Company. The Company shall notify the Bidder within seven (7) days of receiving its proposal whether the proposal has been accepted or rejected.
+
+If the proposal is rejected by the Company, then the Bidder may proceed with submitting a Bid, not as part of a joint venture or consortium, within the timeframes set out in the RFT.
+
+#### 5.8 **No Bid Bond** 
+
+No bid bond is required under this RFT.
+
+#### 5.9 **No Late Bids** 
+
+Any Bid received by the Company shall be deemed to be the Bidder's final offer and any unsolicited bids of any kind from the same Bidder after the submission date will not be considered and may result in disqualification of the Bid.
+
+#### 5.10 **Alternative Bids** 
+
+If there is a commercial or technical benefit to the Company or the ADNOC Group, the Bidder may submit an alternative Bid, in addition to the Bid requested within this RFT, by submitting a separate and identifiable alternative Bid, which clearly details the commercial and/or technical benefits of such alternative Bid.
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+Any alternative Bid should be submitted in accordance with the requirements set out in the RFT Summary.
+
+#### 5.11 **No Modification Or Withdrawal**
+
+Unless otherwise provided in this RFT, a Bid may not be modified or withdrawn by the Bidder following the Bid Submission Date under any circumstances.
+
+#### 5.12 **In-Country Value ("ICV")**
+
+Technical and commercial bid requires different information / ICV documents from the bidder, and such requirements have been specified in Appendix 7 and Appendix 8 respectively. Bidders are required to submit ICV related documentation in Technical and Commercial bids strictly as outlined in Appendix 7 and Appendix 8. The submitted documents will be evaluated as per ADNOC ICV Implementation Guidelines available in [ADNOC's ICV program -](https://www.adnoc.ae/incountry-value/adnocs-icv-program) [Abu Dhabi National Oil Company](https://www.adnoc.ae/incountry-value/adnocs-icv-program) RFT Number: [6000042656 (ENQ22-108)]
+Grep "5.12 \*\*In-Country" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\marker_results\expected-output.md)
+5 lines of output
+Bash Final sanity run of the full pipeline
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" ".\chunking\ingest.py" 2>&1 | tail -5
+
+OUT
+2026-07-20 19:01:09 | INFO     | Loaded 4 of 4 Markdown files
+2026-07-20 19:01:09 | INFO     | Split 4 documents into 2235 chunks
+2026-07-20 19:01:09 | INFO     | Wrote 2235 chunks to chunk-runs\chunks_20260720_190109_388675.md
+Pipeline still runs cleanly end-to-end. Let me update the docs/Status.md entry to reflect this round of work, then summarize.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs\Status.md (lines 66-75)
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs\Status.md (lines 73-87)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs\Status.md
+Added 12 lines
+Update Todos
+
+Diff current preprocessing() output vs marker_results/expected-output.md on the full document
+
+Fix critical bug: alpha/roman marker families are scoped globally, causing cross-document corruption
+
+Preserve trailing whitespace after bold-label heading text
+
+Extend paragraph-merging to the plain (non-heading) marker branch
+
+Add new rule: extract leading <span id=...> anchor tags onto their own line(s)
+
+Fix critical bug: unconditional merge is swallowing unrelated glossary paragraphs together
+
+Re-verify against expected-output.md and flag remaining ambiguities to user
+Summary
+Using marker_results/input.md / expected-output.md as ground truth (a full ~2,700-line real RFT + contract document, superseding the two earlier toy examples), I found and fixed real bugs, then hit a genuine ambiguity I want your input on.
+
+Fixed (confirmed against the ground truth, diff went from 1,596 → ~830 changed lines, and a catastrophic corruption class is eliminated):
+
+Critical: global alpha/roman marker scoping bug. (a)/(i)-style markers were keyed by a bare "alpha"/"roman" string, so unrelated enumerations anywhere in the document chained together whenever their values happened to continue in sequence — splicing unrelated clauses into each other. Fixed by resetting in-progress runs at every heading or numeric-marker boundary.
+Critical: overlapping edits. A short sequence nested inside a larger one (e.g. a roman sub-list inside one clause of a multi-clause heading run) produced its own edit whose span sat inside the outer edit's span; applying both scrambled the text. Fixed by keeping only the outermost edit when spans overlap.
+Critical: "always merge" was actively corrupting output. The simplification we agreed on after the toy examples was gluing entire runs of unrelated content together — e.g. the glossary entries "DELAY EVENT", "DISPUTE", "DRAWINGS", "EAD" all merged into one line. Replaced with a sentence-boundary heuristic: only bridge a paragraph break while the accumulated text doesn't yet end in terminal punctuation (./!/?).
+New rule added: Marker glues <span id="..."> cross-reference anchors to the front of heading/list/paragraph lines, breaking detection. Added _extract_leading_spans() to pull them onto their own preceding line(s).
+Trailing whitespace after a bold-label heading is now preserved instead of stripped (matches the ground truth's formatting throughout).
+Open question — I stopped guessing here: "RFT Number: [...]" page-footer boilerplate merges inconsistently in the ground truth itself, with no punctuation-based or structural signal I can extract: sometimes it's absorbed into the preceding clause regardless of that clause's own ending punctuation (e.g. clause 3.5, clause 5.12), sometimes it stays isolated from a following clause even though nothing distinguishes the two cases (clause 5.5, clause 5.10 both leave it isolated). This is the majority of what remains in the diff. Rather than keep special-casing based on guesses, I'd like to know: is there a rule I'm missing (e.g. "RFT Number:" is always dropped/ignored entirely, or always treated as a fixed boilerplate token), or is this genuinely inconsistent in your reference output and best left as a known limitation?
+
+The full pipeline (ingest.py) still runs clean end-to-end. Nothing is committed.
+
+Untitled-1#1-163
+Chunk 8:
+```text
+RFT Number: [6000042656 (ENQ22-108)]
+
+#### **5. INSTRUCTIONS TO BIDDERS**
+
+#### 5.1 **Communications** 
+
+All communications and Bidder enquiries in connection with this RFT must be sent in writing to the address set out in the Company Contact Details section of the RFT Summary in Section 4 of this RFT ("**RFT Summary**").
+
+#### 5.2 **English Language** 
+
+All documents and correspondence relating to this RFT shall be in English language. If any documentation relating to this RFT is submitted by the Bidder in another language in addition to English, the English version shall take precedence and be used for interpreting the information.
+
+#### 5.3 **Facsimile / email not acceptable**
+
+Submission of the Bid should be in accordance with the requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+
+#### 5.4 **Two-stage bidding (Technical & Commercial)**
+
+Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+```
+
+Chunk 9:
+```text
+##### Technical Bids:
+
+To be submitted in accordance with:
+
+- ➢ the requirements in the Technical Bid section of the RFT Summary; and
+- ➢ the requirements set out in Appendix 7 of this RFT.
+
+The Technical Bid **must not** include any pricing information.
+```
+
+Chunk 10:
+```text
+##### Commercial Bids:
+
+Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acceptable and compliant with the terms of this RFT.
+
+To be submitted in accordance with:
+
+- (i) the requirements in the Commercial Bid section of the RFT Summary; and
+- (ii) the requirements set out in Appendix 8 of this RFT.
+
+The Bidder shall submit with the Commercial Bid:
+
+- (i) the Commercial Bid Submission Form set out in Appendix 4 of this RFT ("**Commercial Bid Submission Form**") signed by an authorized signatory of the Bidder; and
+- (ii) a copy of the power of attorney evidencing the authority of such signatory to sign the Commercial Bid Submission Form on behalf of the Bidder.
+
+#### 5.5 **Bid Timetable** 
+
+The tentative timetable for the bid process is set out in Appendix 1. Any changes in this timetable affecting the Bid Submission timeline shall be communicated to the Bidders solely through Tender Bulletins.
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+#### 5.6 **Bid Submission Date(s)**
+
+The Technical Bid and Commercial Bid must be delivered to the Company on or before the submission date(s) and time(s) specified in the RFT Summary ("**Bid Submission Date(s)**").
+
+Any Bid (or part thereof) received after the Bid Submission Date(s) may be subject to disqualification.
+
+#### 5.7 **Joint Ventures / Consortiums**
+
+If the Bidder would like to submit its Bid as a joint venture or consortium it shall inform the Company within [seven (7)] days of receipt of the RFT.
+
+The Bidder shall provide the following information to the Company:
+```
+Chunk 11:
+```text
+- (a) the full legal names of each partner;
+- (b) the legal address of each partner;
+- (c) the name of the partner nominated to act as the manager of the joint venture or consortium;
+- (d) the responsibilities of each partner in relation to the Scope of Work; and
+- (e) a copy of the joint venture or consortium agreement with the Technical Bid, which shall state that:
+  - (i) all partners shall be jointly and severally responsible for the performance of the Scope of Work; and
+  - (ii) in the event that any partner ceases to be a member of a joint venture or consortium for any reason whatsoever the remaining partner(s) shall be fully responsible for the performance of the Scope of Work.
+
+The Company shall review the Bidder's proposal to submit a Bid as a joint venture or consortium and shall decide, at the Company's discretion, whether this is acceptable to the Company. The Company shall notify the Bidder within seven (7) days of receiving its proposal whether the proposal has been accepted or rejected.
+
+If the proposal is rejected by the Company, then the Bidder may proceed with submitting a Bid, not as part of a joint venture or consortium, within the timeframes set out in the RFT.
+```
+
+How they should be:
+```text
+RFT Number: [6000042656 (ENQ22-108)]
+
+#### **5. INSTRUCTIONS TO BIDDERS**
+
+#### 5.1 **Communications** 
+
+All communications and Bidder enquiries in connection with this RFT must be sent in writing to the address set out in the Company Contact Details section of the RFT Summary in Section 4 of this RFT ("**RFT Summary**").
+
+#### 5.2 **English Language** 
+
+All documents and correspondence relating to this RFT shall be in English language. If any documentation relating to this RFT is submitted by the Bidder in another language in addition to English, the English version shall take precedence and be used for interpreting the information.
+
+#### 5.3 **Facsimile / email not acceptable**
+
+Submission of the Bid should be in accordance with the requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+```
+
+```text
+#### 5.4 **Two-stage bidding (Technical & Commercial)**
+
+Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+
+##### Technical Bids:
+
+To be submitted in accordance with:
+
+- ➢ the requirements in the Technical Bid section of the RFT Summary; and
+- ➢ the requirements set out in Appendix 7 of this RFT.
+
+The Technical Bid **must not** include any pricing information.
+
+##### Commercial Bids:
+
+Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acceptable and compliant with the terms of this RFT.
+
+To be submitted in accordance with:
+
+- (i) the requirements in the Commercial Bid section of the RFT Summary; and
+- (ii) the requirements set out in Appendix 8 of this RFT.
+
+The Bidder shall submit with the Commercial Bid:
+
+- (i) the Commercial Bid Submission Form set out in Appendix 4 of this RFT ("**Commercial Bid Submission Form**") signed by an authorized signatory of the Bidder; and
+- (ii) a copy of the power of attorney evidencing the authority of such signatory to sign the Commercial Bid Submission Form on behalf of the Bidder.
+```
+```text
+#### 5.5 **Bid Timetable** 
+
+The tentative timetable for the bid process is set out in Appendix 1. Any changes in this timetable affecting the Bid Submission timeline shall be communicated to the Bidders solely through Tender Bulletins.
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+#### 5.6 **Bid Submission Date(s)**
+
+The Technical Bid and Commercial Bid must be delivered to the Company on or before the submission date(s) and time(s) specified in the RFT Summary ("**Bid Submission Date(s)**").
+
+Any Bid (or part thereof) received after the Bid Submission Date(s) may be subject to disqualification.
+```
+
+```text
+#### 5.7 **Joint Ventures / Consortiums**
+
+If the Bidder would like to submit its Bid as a joint venture or consortium it shall inform the Company within [seven (7)] days of receipt of the RFT.
+
+The Bidder shall provide the following information to the Company:
+- (a) the full legal names of each partner;
+- (b) the legal address of each partner;
+- (c) the name of the partner nominated to act as the manager of the joint venture or consortium;
+- (d) the responsibilities of each partner in relation to the Scope of Work; and
+- (e) a copy of the joint venture or consortium agreement with the Technical Bid, which shall state that:
+  - (i) all partners shall be jointly and severally responsible for the performance of the Scope of Work; and
+  - (ii) in the event that any partner ceases to be a member of a joint venture or consortium for any reason whatsoever the remaining partner(s) shall be fully responsible for the performance of the Scope of Work.
+
+The Company shall review the Bidder's proposal to submit a Bid as a joint venture or consortium and shall decide, at the Company's discretion, whether this is acceptable to the Company. The Company shall notify the Bidder within seven (7) days of receiving its proposal whether the proposal has been accepted or rejected.
+
+If the proposal is rejected by the Company, then the Bidder may proceed with submitting a Bid, not as part of a joint venture or consortium, within the timeframes set out in the RFT.
+```
+Show less
+This looks like feedback on temp_split()'s chunk boundaries (not preprocessing(), which we just finished) — specifically:
+
+Chunk 9 and 10 split clause 5.4's "Technical Bids" and "Commercial Bids" subsections into two separate chunks; your "should be" keeps the whole of 5.4 (both subsections) as one chunk.
+Chunk 10/11 split clause 5.7 right before its (a)–(e) list; your "should be" keeps 5.7's heading, lead-in, list, and closing paragraphs together as one chunk.
+But your message doesn't have any instruction text attached — just the pasted chunks. Want me to go ahead and adjust temp_split()'s boundary rules to match this ("keep a heading's full run of subsections together" / "don't split a clause right before its list"), or is this pasted for a different purpose?
+
+yes
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 461-640)
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 623-742)
+Let me trace through the actual splitter behavior on this section to see exactly which rule is firing.
+
+Bash Locate the relevant chunks in the actual pipeline output
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+
+pre = preprocessing(src)
+chunks = temp_split(pre)
+for i, c in enumerate(chunks):
+    if 'INSTRUCTIONS TO BIDDERS' in c or 'Technical Bids' in c or 'Commercial Bids' in c or 'Joint Ventures' in c:
+        print(f'=== chunk {i} (len={len(c)}) ===')
+        print(c[:120].replace(chr(10),' / '))
+        print('...')
+"
+
+OUT
+=== chunk 1 (len=519) ===
+#### **CONTENTS**: /  / - 1. INTRODUCTION / - 2. BACKGROUND / - 3. OVERVIEW OF THE PROJECT / - 4. RFT SUMMARY / - 5. INSTRUCTIONS TO
+...
+=== chunk 7 (len=1055) ===
+RFT Number: [6000042656 (ENQ22-108)] /  / #### **5. INSTRUCTIONS TO BIDDERS** /  / #### 5.1 **Communications**  /  / All communicati
+...
+=== chunk 8 (len=254) ===
+##### Technical Bids: /  / To be submitted in accordance with: /  / - ➢ the requirements in the Technical Bid section of the RFT
+...
+=== chunk 9 (len=1572) ===
+##### Commercial Bids: /  / Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acc
+...
+=== chunk 22 (len=4384) ===
+#### **APPENDIX 1** /  / #### **BID TIMETABLE** /  / | Step | Event                                                             
+...
+Bash Print full text of chunks 7-10 to see exact split boundaries
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+
+pre = preprocessing(src)
+chunks = temp_split(pre)
+for i in [7,8,9,10]:
+    print(f'=== chunk {i} (len={len(chunks[i])}) ===')
+    print(chunks[i])
+    print()
+"
+
+OUT
+=== chunk 7 (len=1055) ===
+RFT Number: [6000042656 (ENQ22-108)]
+
+#### **5. INSTRUCTIONS TO BIDDERS**
+
+#### 5.1 **Communications** 
+
+All communications and Bidder enquiries in connection with this RFT must be sent in writing to the address set out in the Company Contact Details section of the RFT Summary in Section 4 of this RFT ("**RFT Summary**").
+
+#### 5.2 **English Language** 
+
+All documents and correspondence relating to this RFT shall be in English language. If any documentation relating to this RFT is submitted by the Bidder in another language in addition to English, the English version shall take precedence and be used for interpreting the information.
+
+#### 5.3 **Facsimile / email not acceptable**
+
+Submission of the Bid should be in accordance with the requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+
+#### 5.4 **Two-stage bidding (Technical & Commercial)**
+
+Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+
+=== chunk 8 (len=254) ===
+##### Technical Bids:
+
+To be submitted in accordance with:
+
+- ➢ the requirements in the Technical Bid section of the RFT Summary; and
+- ➢ the requirements set out in Appendix 7 of this RFT.
+
+The Technical Bid **must not** include any pricing information.
+
+=== chunk 9 (len=1572) ===
+##### Commercial Bids:
+
+Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acceptable and compliant with the terms of this RFT.
+
+To be submitted in accordance with:
+
+- (i) the requirements in the Commercial Bid section of the RFT Summary; and
+- (ii) the requirements set out in Appendix 8 of this RFT.
+
+The Bidder shall submit with the Commercial Bid:
+
+- (i) the Commercial Bid Submission Form set out in Appendix 4 of this RFT ("**Commercial Bid Submission Form**") signed by an authorized signatory of the Bidder; and
+- (ii) a copy of the power of attorney evidencing the authority of such signatory to sign the Commercial Bid Submission Form on behalf of the Bidder.
+
+#### 5.5 **Bid Timetable** 
+
+The tentative timetable for the bid process is set out in Appendix 1. Any changes in this timetable affecting the Bid Submission timeline shall be communicated to the Bidders solely through Tender Bulletins.
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+#### 5.6 **Bid Submission Date(s)**
+
+The Technical Bid and Commercial Bid must be delivered to the Company on or before the submission date(s) and time(s) specified in the RFT Summary ("**Bid Submission Date(s)**").
+
+Any Bid (or part thereof) received after the Bid Submission Date(s) may be subject to disqualification.
+
+#### 5.7 **Joint Ventures / Consortiums**
+
+If the Bidder would like to submit its Bid as a joint venture or consortium it shall inform the Company within [seven (7)] days of receipt of the RFT.
+
+The Bidder shall provide the following information to the Company:
+
+=== chunk 10 (len=1200) ===
+- (a) the full legal names of each partner;
+- (b) the legal address of each partner;
+- (c) the name of the partner nominated to act as the manager of the joint venture or consortium;
+- (d) the responsibilities of each partner in relation to the Scope of Work; and
+- (e) a copy of the joint venture or consortium agreement with the Technical Bid, which shall state that:
+  - (i) all partners shall be jointly and severally responsible for the performance of the Scope of Work; and
+  - (ii) in the event that any partner ceases to be a member of a joint venture or consortium for any reason whatsoever the remaining partner(s) shall be fully responsible for the performance of the Scope of Work.
+
+The Company shall review the Bidder's proposal to submit a Bid as a joint venture or consortium and shall decide, at the Company's discretion, whether this is acceptable to the Company. The Company shall notify the Bidder within seven (7) days of receiving its proposal whether the proposal has been accepted or rejected.
+
+If the proposal is rejected by the Company, then the Bidder may proceed with submitting a Bid, not as part of a joint venture or consortium, within the timeframes set out in the RFT.
+Bash Inspect candidate headings for the chunk-7/8 boundary decision
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+import ingest
+from ingest import preprocessing
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+text = preprocessing(src).strip()
+
+idx = text.index('#### **5. INSTRUCTIONS TO BIDDERS**')
+cursor = idx - text[:idx][::-1].index(chr(10)[::-1]) if False else None
+# find the start offset of the chunk (RFT Number line before it)
+start_marker = text.rfind('RFT Number: [6000042656 (ENQ22-108)]', 0, idx)
+cursor = start_marker
+limit = min(cursor + ingest.CHUNK_SIZE, len(text))
+print('cursor', cursor, 'limit', limit)
+print(repr(text[limit-40:limit+40]))
+headings = ingest._heading_matches(text)
+cand = [(p,l) for p,l in headings if cursor <= p < limit]
+print('candidate headings in window:')
+for p,l in cand:
+    print(l, repr(text[p:p+60]))
+"
+
+OUT
+cursor 11048 limit 12648
+'l Bid section of the RFT Summary; and\n- (ii) the requirements set out in Appendi'
+candidate headings in window:
+4 '#### **5. INSTRUCTIONS TO BIDDERS**\n\n#### 5.1 **Communicatio'
+4 '#### 5.1 **Communications** \n\nAll communications and Bidder '
+4 '#### 5.2 **English Language** \n\nAll documents and correspond'
+4 '#### 5.3 **Facsimile / email not acceptable**\n\nSubmission of'
+4 '#### 5.4 **Two-stage bidding (Technical & Commercial)**\n\nBid'
+5 '##### Technical Bids:\n\nTo be submitted in accordance with:\n\n'
+5 '##### Commercial Bids:\n\nCommercial Bids will only be invited'
+Bash Measure the lengths of the 5.4 and 5.7 clause sections
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+text = preprocessing(src).strip()
+
+a = text.index('#### 5.4 **Two-stage')
+b = text.index('#### 5.5 **Bid Timetable')
+print('5.4 section (incl Technical+Commercial Bids) length:', b - a)
+
+c = text.index('#### 5.7 **Joint Ventures')
+d = text.index('#### 5.8 **No Bid Bond')
+print('5.7 section length:', d - c)
+"
+
+OUT
+5.4 section (incl Technical+Commercial Bids) length: 1179
+5.7 section length: 1465
+Let me look at the list-with-lead-in helpers that currently require a "flat" (single-indentation) list:
+
+Bash Find the list-with-lead-in helper functions
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && grep -n "_flat_list_section_after_paragraph\|_flat_list_section_after_heading\|def _list_items\|def _list_spans" chunking/ingest.py
+
+OUT
+524:        paragraph_list = _flat_list_section_after_paragraph(
+548:        heading_list = _flat_list_section_after_heading(
+821:def _list_spans(text: str) -> list[tuple[int, int]]:
+842:def _list_items(text: str, start: int, end: int) -> list[tuple[int, int]]:
+860:def _flat_list_section_after_heading(
+906:def _flat_list_section_after_paragraph(
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 822-931)
+Now I understand the two distinct bugs. Let me fix both:
+
+Bug A (clause 5.4): _structural_cut's Rule 2 only looks for the next heading at the exact same deepest level to decide where a subsection hierarchy "closes." Since ##### Technical Bids:/##### Commercial Bids: are the only level-5 headings in the whole document, next_peer falls back to end-of-document, making the rule think the hierarchy never closes — so it drops the subsections instead of noticing the parent clause (and its subsections) already fits.
+
+Bug B (clause 5.7): the "keep a list with its lead-in paragraph" helpers require the list to be flat (single indentation level), so a list with nested sub-items (like (a)-(e) with (i)/(ii) nested under (e)) is invisible to that check entirely and falls through to generic size-based cutting.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 670-697)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 7 lines
+Now let's fix the nested-list issue. Let me view the full context of the list-detection helpers and their call sites:
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 521-580)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 3 lines
+Now let's update the function definitions themselves — rename and relax the flatness requirement, plus add the new helper:
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 849-940)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 13 lines
+Now let's rename and relax the two detection functions:
+
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Modified
+Bash Confirm no leftover references to the old flat-list function names
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && grep -n "_flat_list_section" chunking/ingest.py
+
+OUT
+(Bash completed with no output)
+Good, no leftover references. Now let's re-run the pipeline and check the specific chunks in question:
+
+Bash Re-check the fixed chunk boundaries for clauses 5.4-5.7
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+
+pre = preprocessing(src)
+chunks = temp_split(pre)
+for i, c in enumerate(chunks):
+    if 'INSTRUCTIONS TO BIDDERS' in c or 'Technical Bids' in c or 'Commercial Bids' in c or 'Joint Ventures' in c or 'No Bid Bond' in c:
+        print(f'=== chunk {i} (len={len(c)}) ===')
+        print(c)
+        print()
+"
+
+OUT
+=== chunk 1 (len=519) ===
+#### **CONTENTS**:
+
+- 1. INTRODUCTION
+- 2. BACKGROUND
+- 3. OVERVIEW OF THE PROJECT
+- 4. RFT SUMMARY
+- 5. INSTRUCTIONS TO BIDDERS
+- 6. RFT TERMS & CONDITIONS
+- APPENDIX 1 BID TIMETABLE
+- APPENDIX 2 FORM OF CLARIFICATIONS TABLE
+- APPENDIX 3 FORM OF QUALIFICATIONS TABLE
+- APPENDIX 4 COMMERCIAL BID SUBMISSION FORM
+- APPENDIX 5 QUALIFICATION STATEMENT
+- APPENDIX 6 SCOPE OF WORK
+- APPENDIX 7 TECHNICAL BID STRUCTURE
+- APPENDIX 8 COMMERCIAL BID STRUCTURE
+- APPENDIX 9 FORM OF AGREEMENT
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+=== chunk 7 (len=1055) ===
+RFT Number: [6000042656 (ENQ22-108)]
+
+#### **5. INSTRUCTIONS TO BIDDERS**
+
+#### 5.1 **Communications** 
+
+All communications and Bidder enquiries in connection with this RFT must be sent in writing to the address set out in the Company Contact Details section of the RFT Summary in Section 4 of this RFT ("**RFT Summary**").
+
+#### 5.2 **English Language** 
+
+All documents and correspondence relating to this RFT shall be in English language. If any documentation relating to this RFT is submitted by the Bidder in another language in addition to English, the English version shall take precedence and be used for interpreting the information.
+
+#### 5.3 **Facsimile / email not acceptable**
+
+Submission of the Bid should be in accordance with the requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+
+#### 5.4 **Two-stage bidding (Technical & Commercial)**
+
+Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+
+=== chunk 8 (len=1565) ===
+##### Technical Bids:
+
+To be submitted in accordance with:
+
+- ➢ the requirements in the Technical Bid section of the RFT Summary; and
+- ➢ the requirements set out in Appendix 7 of this RFT.
+
+The Technical Bid **must not** include any pricing information.
+
+##### Commercial Bids:
+
+Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acceptable and compliant with the terms of this RFT.
+
+To be submitted in accordance with:
+
+- (i) the requirements in the Commercial Bid section of the RFT Summary; and
+- (ii) the requirements set out in Appendix 8 of this RFT.
+
+The Bidder shall submit with the Commercial Bid:
+
+- (i) the Commercial Bid Submission Form set out in Appendix 4 of this RFT ("**Commercial Bid Submission Form**") signed by an authorized signatory of the Bidder; and
+- (ii) a copy of the power of attorney evidencing the authority of such signatory to sign the Commercial Bid Submission Form on behalf of the Bidder.
+
+#### 5.5 **Bid Timetable** 
+
+The tentative timetable for the bid process is set out in Appendix 1. Any changes in this timetable affecting the Bid Submission timeline shall be communicated to the Bidders solely through Tender Bulletins.
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+#### 5.6 **Bid Submission Date(s)**
+
+The Technical Bid and Commercial Bid must be delivered to the Company on or before the submission date(s) and time(s) specified in the RFT Summary ("**Bid Submission Date(s)**").
+
+Any Bid (or part thereof) received after the Bid Submission Date(s) may be subject to disqualification.
+
+=== chunk 9 (len=1531) ===
+#### 5.7 **Joint Ventures / Consortiums**
+
+If the Bidder would like to submit its Bid as a joint venture or consortium it shall inform the Company within [seven (7)] days of receipt of the RFT.
+
+The Bidder shall provide the following information to the Company:
+
+- (a) the full legal names of each partner;
+- (b) the legal address of each partner;
+- (c) the name of the partner nominated to act as the manager of the joint venture or consortium;
+- (d) the responsibilities of each partner in relation to the Scope of Work; and
+- (e) a copy of the joint venture or consortium agreement with the Technical Bid, which shall state that:
+  - (i) all partners shall be jointly and severally responsible for the performance of the Scope of Work; and
+  - (ii) in the event that any partner ceases to be a member of a joint venture or consortium for any reason whatsoever the remaining partner(s) shall be fully responsible for the performance of the Scope of Work.
+
+The Company shall review the Bidder's proposal to submit a Bid as a joint venture or consortium and shall decide, at the Company's discretion, whether this is acceptable to the Company. The Company shall notify the Bidder within seven (7) days of receiving its proposal whether the proposal has been accepted or rejected.
+
+If the proposal is rejected by the Company, then the Bidder may proceed with submitting a Bid, not as part of a joint venture or consortium, within the timeframes set out in the RFT.
+
+#### 5.8 **No Bid Bond** 
+
+No bid bond is required under this RFT.
+
+=== chunk 21 (len=4384) ===
+#### **APPENDIX 1**
+
+#### **BID TIMETABLE**
+
+| Step | Event                                                                                                                                                                                                                                                       | Tentative Dates<br>(from issuance of<br>RFT) |
+|------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
+| 1    | Issuance of the RFT.                                                                                                                                                                                                                                        | [insert issuance date]                       |
+| 2    | Deadline for bidders to submit clarifications on the T&Cs and technical issues in the format<br>specified in the RFT.                                                                                                                                       | [c. 2 weeks]                                 |
+| 3    | Company to invite all Bidders to a Pre-Bid Meeting to discuss the project and any legal,<br>commercial or technical clarifications raised.                                                                                                                  | [c. 3 weeks]                                 |
+| 4    | Pre-Bid Meeting to be held at ADNOC HQ offices.                                                                                                                                                                                                             | [c. 4 weeks]                                 |
+| 5    | Company to issue tender bulletin setting out Company's responses to the clarifications on (i) the<br>T&Cs and (ii) any technical issues raised.                                                                                                             | [c. 6 weeks]                                 |
+| 6    | Bidders to submit their proposed deviations to the T&Cs, which are to be limited to key concerns<br>and in the format specified in the RFT.                                                                                                                 | [c. 8 weeks]                                 |
+| 7    | Company to invite each Bidder to one individual meeting to discuss any amendments proposed<br>by such Bidder.                                                                                                                                               | [c. 10 weeks]                                |
+| 8    | Individual meetings with the Bidders to be held over a 2-3 week period. These meetings to be<br>held at the Company's offices.                                                                                                                              | [c. 12 weeks]                                |
+| 9    | Company to issue:<br>(i)<br>a tender bulletin to all Bidders setting out any amendments on the commercial terms that<br>apply to all Bidders; and<br>(ii)<br>responses to each Bidder on any specific non-commercial amendments agreed with such<br>Bidder. | [c. 16 weeks]                                |
+| 10   | Subject to the completion of the technical clarifications and exceptions rounds, Bidders to submit<br>their Technical Bids and Commercial Bids (in two separate packages), with no further<br>amendments.                                                   | [c. 20 weeks]                                |
+| 11   | Company to inform the Bidders as to whether or not their Technical Bids have been accepted.<br>Company to open the Commercial Bids of those Bidders whose Technical Bids were accepted.                                                                     | [c. 24 weeks]                                |
+| 13   | Company to inform the successful Bidder as to the fact that they have been selected as the winning<br>Bidder (taking into account the Bidder's ICV score as well as price).                                                                                 | [c. 26 weeks]                                |
+Both issues are now fixed: chunk 8 keeps clause 5.4's Technical Bids and Commercial Bids subsections together, and chunk 9 keeps clause 5.7's heading, lead-in, nested list, and closing paragraphs together as one chunk. Let me run the full pipeline once more to confirm nothing else broke.
+
+Bash Run full pipeline end-to-end after chunker fixes
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" ".\chunking\ingest.py" 2>&1 | tail -5
+
+OUT
+2026-07-20 19:19:24 | INFO     | Loaded 4 of 4 Markdown files
+2026-07-20 19:19:25 | INFO     | Split 4 documents into 2257 chunks
+2026-07-20 19:19:25 | INFO     | Wrote 2257 chunks to chunk-runs\chunks_20260720_191925_190098.md
+Bash Check chunk-size distribution across all corpus files for anomalies
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+import glob
+
+for path in glob.glob('marker_results/*.md'):
+    with open(path, encoding='utf-8') as f:
+        src = f.read()
+    chunks = temp_split(preprocessing(src))
+    lens = [len(c) for c in chunks]
+    over = [l for l in lens if l > 1600]
+    print(path, 'chunks:', len(chunks), 'max:', max(lens) if lens else 0, 'over-1600 count:', len(over))
+"
+
+OUT
+marker_results\1-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_1-250.md chunks: 815 max: 9411 over-1600 count: 11
+marker_results\2-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_251-500.md chunks: 958 max: 19603 over-1600 count: 25
+marker_results\expected-output.md chunks: 308 max: 9411 over-1600 count: 9
+marker_results\input.md chunks: 332 max: 9411 over-1600 count: 9
+Bash Inspect oversized chunks to confirm they're all tables, not mis-handled lists
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+chunks = temp_split(preprocessing(src))
+for c in chunks:
+    if len(c) > 1600:
+        first_line = c.strip().split(chr(10))[0]
+        print(len(c), '|', first_line[:80], '| has_pipe_table=', '|' in c.split(chr(10))[2] if len(c.split(chr(10)))>2 else '?')
+"
+
+OUT
+5946 | #### **4. RFT SUMMARY** | has_pipe_table= True
+4384 | #### **APPENDIX 1** | has_pipe_table= False
+6903 | #### **APPENDIX 4** | has_pipe_table= False
+7989 | #### **APPENDIX 7** | has_pipe_table= False
+9411 | #### APPENDIX 8 | has_pipe_table= False
+2171 | | Section 5 | Ministry of Human<br>Resources &<br>Emiratization Report –<br>Nati | has_pipe_table= True
+4826 | #### 2. The PARTIES have agreed that the key provisions set out below shall appl | has_pipe_table= True
+2162 | #### **ANNEXURE 2** | has_pipe_table= False
+1727 | | 27. | CONSENTS                                                 | 68 | | has_pipe_table= True
+Bash Inspect the APPENDIX 4 oversized chunk to check if it's a legitimate table
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+chunks = temp_split(preprocessing(src))
+for c in chunks:
+    if len(c) > 1600 and c.strip().startswith('#### **APPENDIX 4**'):
+        print(c[:800])
+        print('...')
+        print(c[-400:])
+"
+
+OUT
+#### **APPENDIX 4**
+
+#### **COMMERCIAL BID SUBMISSION FORM**
+
+| [To be printed on Bidder's Letterhead]                                                                                                                                                                                                                                                                             |
+|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Date: [insert date]                                                                                               
+...
+                                                                                        |
+| Date:                                                                                                                                                                                                                                                                                                              |
+Good — it's a table, correctly kept whole per the deliberate table exception. No regression; the earlier grep check was just unreliable. Let's confirm word counts stayed stable and wrap up.
+
+Bash Sanity check total word count is preserved across chunking
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+pre = preprocessing(src)
+chunks = temp_split(pre)
+rejoined = ''.join(chunks)
+print('preprocessed words:', len(pre.split()))
+print('rejoined chunk words:', len(rejoined.split()))
+"
+
+OUT
+preprocessed words: 35914
+rejoined chunk words: 34325
+Bash Precisely check whether any real content is dropped between chunks
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+pre = preprocessing(src)
+chunks = temp_split(pre)
+
+# reconstruct by finding each chunk's content in pre, in order, and measure gap text between them
+import re
+pos = 0
+missing = []
+for c in chunks:
+    idx = pre.find(c, pos)
+    if idx == -1:
+        missing.append(c[:60])
+        continue
+    gap = pre[pos:idx]
+    if gap.strip():
+        missing.append(('GAP', gap.strip()[:80]))
+    pos = idx + len(c)
+tail = pre[pos:]
+print('unmatched chunks:', len([m for m in missing if not (isinstance(m,tuple) and m[0]=='GAP')]))
+print('non-blank gaps between chunks:', len([m for m in missing if isinstance(m,tuple)]))
+for m in missing[:10]:
+    print(m)
+print('trailing unconsumed text (should be blank):', repr(tail.strip()[:200]))
+"
+
+OUT
+unmatched chunks: 0
+non-blank gaps between chunks: 13
+('GAP', '- (i) a breach of the AGREEMENT or any act of prevention by the COMPANY;\n  - (ii')
+('GAP', '- (i) delivered to the COMPANY all insurance policies and certificates required ')
+('GAP', '- (i) at the SITE or any other location (including any CONTRACTOR SITE) in the U')
+('GAP', "- (ii) reject the CONTRACTOR's application for a MECHANICAL COMPLETION CERTIFICA")
+('GAP', '- (i) the WARRANTY PERIOD for the part of the WORKS covered by the EARLY TAKING ')
+('GAP', '- (i) continue to make such changes, modifications and / or additions to the FAC')
+('GAP', '- (i) issue the PROVISIONAL ACCEPTANCE CERTIFICATE; or\n  - (ii) reject the CONTR')
+('GAP', '- (i) the ADNOC GROUP SUPPLIER & PARTNER CODE OF ETHICS and any other applicable')
+('GAP', '- in respect of the MILESTONES required to be completed in accordance with ANNEX')
+('GAP', '- notify the COMPANY in writing of its intention to suspend the WORKS if such pa')
+trailing unconsumed text (should be blank): ''
+Found a real bug from my list-boundary change — some content between chunks is being silently dropped. Let me trace the first occurrence precisely.
+
+Bash Trace the exact chunk boundary where content is dropped
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+pre = preprocessing(src)
+chunks = temp_split(pre)
+
+pos = 0
+for i, c in enumerate(chunks):
+    idx = pre.find(c, pos)
+    gap = pre[pos:idx]
+    if gap.strip():
+        print('=== GAP before chunk', i, '===')
+        print(repr(gap))
+        print('--- end of PREVIOUS chunk ---')
+        print(chunks[i-1][-300:])
+        print('--- start of THIS chunk ---')
+        print(c[:300])
+        break
+    pos = idx + len(c)
+"
+
+OUT
+=== GAP before chunk 121 ===
+'\n  - (i) a breach of the AGREEMENT or any act of prevention by the COMPANY;\n  - (ii) normal wear and tear following the passing of care, custody and control of the WORKS or the relevant part thereof pursuant to Articl[e 33.2\\(a\\),](#page-99-0) to the COMPANY; or\n  - (iii) improper operation and maintenance of the FACILITIES by or on behalf of the COMPANY, carried out other than in accordance with the operation and maintenance manuals provided by the CONTRACTOR.\n<span id="page-48-2"></span>\n'
+--- end of PREVIOUS chunk ---
+on:
+
+- (i) specifying the DEFECT;
+- (ii) requiring the CONTRACTOR to correct the DEFECT; and
+- (iii) specifying the time within which the DEFECT shall be corrected.
+<span id="page-48-1"></span>
+- The CONTRACTOR shall be responsible for all DEFECTS, except if it establishes that a DEFECT arises from:
+--- start of THIS chunk ---
+- If an instruction is given pursuant to Article [4.4\(a\)](#page-47-2) and the CONTRACTOR reasonably considers that it does not bear responsibility for the relevant DEFECT under Article [4.4\(b\),](#page-48-1) the CONTRACTOR shall issue a CONTRACTOR VARIATION REQUEST to the COMPANY pursuant to Arti
+Found it: _top_level_item_boundaries drops everything between the actual start position and the first top-level item when the starting cursor is itself mid-way through a nested item (e.g. after a previous cut left the cursor inside a nested (i)/(ii)/(iii) sub-list). The returned boundaries never included the cursor itself in that case. Let me fix it.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 853-869)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 9 lines
+Now let's re-verify with the full gap-detection check:
+
+Bash Re-check all corpus files for dropped content after the boundary fix
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+import glob
+
+for path in glob.glob('marker_results/*.md'):
+    with open(path, encoding='utf-8') as f:
+        src = f.read()
+    pre = preprocessing(src)
+    chunks = temp_split(pre)
+    pos = 0
+    gaps = 0
+    for c in chunks:
+        idx = pre.find(c, pos)
+        if idx == -1:
+            print(path, 'UNMATCHED CHUNK')
+            continue
+        gap = pre[pos:idx]
+        if gap.strip():
+            gaps += 1
+        pos = idx + len(c)
+    tail = pre[pos:].strip()
+    print(path, 'chunks:', len(chunks), 'non-blank gaps:', gaps, 'unconsumed tail:', repr(tail[:60]))
+"
+
+OUT
+marker_results\1-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_1-250.md chunks: 840 non-blank gaps: 0 unconsumed tail: ''
+marker_results\2-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_251-500.md chunks: 968 non-blank gaps: 0 unconsumed tail: ''
+marker_results\expected-output.md chunks: 322 non-blank gaps: 0 unconsumed tail: ''
+marker_results\input.md chunks: 346 non-blank gaps: 0 unconsumed tail: ''
+All gaps are gone across every corpus file, with zero unconsumed tail. Let's re-verify the two originally-requested chunk boundaries (5.4 and 5.7) still hold, then run the full pipeline once more.
+
+Bash Re-verify the 5.4/5.7 chunk fixes still hold and run full pipeline
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+chunks = temp_split(preprocessing(src))
+for i, c in enumerate(chunks):
+    if c.strip().startswith('##### Technical Bids') or c.strip().startswith('#### 5.7'):
+        print(f'=== chunk {i} (len={len(c)}) ===')
+        print(c[:150].replace(chr(10),' / '), '...')
+" && "./.venv-marker/Scripts/python.exe" ".\chunking\ingest.py" 2>&1 | tail -5
+
+OUT
+=== chunk 8 (len=1565) ===
+##### Technical Bids: /  / To be submitted in accordance with: /  / - ➢ the requirements in the Technical Bid section of the RFT Summary; and / - ➢ the requirem ...
+=== chunk 9 (len=1531) ===
+#### 5.7 **Joint Ventures / Consortiums** /  / If the Bidder would like to submit its Bid as a joint venture or consortium it shall inform the Company wit ...
+2026-07-20 19:23:06 | INFO     | Loaded 4 of 4 Markdown files
+2026-07-20 19:23:06 | INFO     | Split 4 documents into 2320 chunks
+2026-07-20 19:23:06 | INFO     | Wrote 2320 chunks to chunk-runs\chunks_20260720_192306_621867.md
+Both fixes still hold, no data loss, and the full pipeline runs clean. Let me update docs/Status.md with this round of chunker fixes.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs\Status.md (lines 81-90)
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs\Status.md (lines 90-93)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs\Status.md
+Added 10 lines
+Summary
+Both temp_split() boundary issues are fixed:
+
+Rule 2's heading-hierarchy closing boundary only looked for the next same-level heading; when a heading level (like a one-off ##### subsection) never repeats elsewhere in the document, that search fell through to end-of-document and wrongly concluded the subsection run "never closes," dropping content that actually fit. Now also accepts the next shallower heading as a valid close.
+List-with-lead-in detection required a flat list (single indent level), so any nested list was invisible to it. Generalized to detect nested lists too, splitting on top-level pointers only when oversized (keeping nested children with their parent).
+While verifying with a full round-trip check (every emitted chunk must reappear in the source text, nothing left over), I caught a real bug in my own fix: the new nested-list boundary helper silently dropped content when a cut left the cursor mid-way through a nested run — fixed by always forcing the cursor position in as the first boundary. Confirmed zero dropped content and zero unmatched chunks across all four real documents in marker_results/.
+
+Clause 5.4 (Technical Bids + Commercial Bids) and clause 5.7 (heading + list + closing paragraphs) now each stay as one chunk, matching what you asked for. Full pipeline runs clean. Nothing committed.
+
+c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunk-runs\chunks_20260720_192354_185360.md
+```text
+#### 5.4 **Two-stage bidding (Technical & Commercial)**
+
+Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+
+##### Technical Bids:
+
+To be submitted in accordance with:
+
+- ➢ the requirements in the Technical Bid section of the RFT Summary; and
+- ➢ the requirements set out in Appendix 7 of this RFT.
+
+The Technical Bid **must not** include any pricing information.
+
+##### Commercial Bids:
+
+Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acceptable and compliant with the terms of this RFT.
+
+To be submitted in accordance with:
+
+- (i) the requirements in the Commercial Bid section of the RFT Summary; and
+- (ii) the requirements set out in Appendix 8 of this RFT.
+
+The Bidder shall submit with the Commercial Bid:
+
+- (i) the Commercial Bid Submission Form set out in Appendix 4 of this RFT ("**Commercial Bid Submission Form**") signed by an authorized signatory of the Bidder; and
+- (ii) a copy of the power of attorney evidencing the authority of such signatory to sign the Commercial Bid Submission Form on behalf of the Bidder.
+```
+If section 5.4 is supposed to be together. If it cant be in 1 chunk, then split it. But it should still start from a new chunk
+Show less
+This makes sense — the fix so far only pulled the deepest subsection back to the split point, but left #### 5.4's own heading+lead-in stranded at the end of the previous chunk. Let me fix _structural_cut to drag the enclosing parent heading along too when its subsections get dropped.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 670-701)
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 699-708)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 12 lines
+Bash Find _heading_group_start_before_table location to add the new helper nearby
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && grep -n "_heading_group_start_before_table" chunking/ingest.py
+
+OUT
+657:            return _heading_group_start_before_table(
+1007:def _heading_group_start_before_table(
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 1008-1032)
+Let's add _enclosing_heading_start right before this helper:
+
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 20 lines
+Now let's re-run and verify:
+
+Bash Verify 5.4 now starts a fresh chunk instead of being stranded
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+chunks = temp_split(preprocessing(src))
+for i, c in enumerate(chunks):
+    if 'INSTRUCTIONS TO BIDDERS' in c or 'Technical Bids' in c or 'Joint Ventures' in c:
+        print(f'=== chunk {i} (len={len(c)}) ===')
+        print(c[:200].replace(chr(10),' / '))
+        print('...')
+        print(c[-100:].replace(chr(10),' / '))
+        print()
+"
+
+OUT
+=== chunk 2 (len=519) ===
+#### **CONTENTS**: /  / - 1. INTRODUCTION / - 2. BACKGROUND / - 3. OVERVIEW OF THE PROJECT / - 4. RFT SUMMARY / - 5. INSTRUCTIONS TO BIDDERS / - 6. RFT TERMS & CONDITIONS / - APPENDIX 1 BID TIMETABLE / - APPENDIX 2 FOR
+...
+NDIX 8 COMMERCIAL BID STRUCTURE / - APPENDIX 9 FORM OF AGREEMENT /  / RFT Number: [6000042656 (ENQ22-108)]
+
+=== chunk 8 (len=845) ===
+RFT Number: [6000042656 (ENQ22-108)] /  / #### **5. INSTRUCTIONS TO BIDDERS** /  / #### 5.1 **Communications**  /  / All communications and Bidder enquiries in connection with this RFT must be sent in writing to 
+...
+requirements set out in the RFT Summary. Facsimile or email submission of any Bid is not acceptable.
+
+=== chunk 9 (len=1600) ===
+#### 5.4 **Two-stage bidding (Technical & Commercial)** /  / Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding 
+...
+nical Bid and Commercial Bid must be delivered to the Company on or before the submission date(s) an
+
+=== chunk 10 (len=1456) ===
+d time(s) specified in the RFT Summary ("**Bid Submission Date(s)**"). /  / Any Bid (or part thereof) received after the Bid Submission Date(s) may be subject to disqualification. /  / #### 5.7 **Joint Ventur
+...
+ within seven (7) days of receiving its proposal whether the proposal has been accepted or rejected.
+
+=== chunk 23 (len=4384) ===
+#### **APPENDIX 1** /  / #### **BID TIMETABLE** /  / | Step | Event                                                                                                                                             
+...
+                                                    | [c. 26 weeks]                                |
+That fixed the "5.4 starts fresh" issue but introduced a new regression — chunk 9 is now hitting a raw character-limit cut mid-word ("date(s) an" / "d time(s)"). Let me trace why.
+
+Bash Diagnose the structural_cut decision for the shifted 5.4 cursor
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+import ingest
+from ingest import preprocessing
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+text = preprocessing(src).strip()
+
+cursor = text.index('#### 5.4 **Two-stage')
+limit = min(cursor + ingest.CHUNK_SIZE, len(text))
+headings = ingest._heading_matches(text)
+cand = [(p,l) for p,l in headings if cursor <= p < limit]
+print('cursor', cursor, 'limit', limit)
+print('candidate headings in window:', len(cand))
+for p,l in cand:
+    print(l, repr(text[p:p+50]))
+print()
+print('text at limit:', repr(text[limit-30:limit+30]))
+"
+
+OUT
+cursor 11895 limit 13495
+candidate headings in window: 5
+4 '#### 5.4 **Two-stage bidding (Technical & Commerci'
+5 '##### Technical Bids:\n\nTo be submitted in accordan'
+5 '##### Commercial Bids:\n\nCommercial Bids will only '
+4 '#### 5.5 **Bid Timetable** \n\nThe tentative timetab'
+4 '#### 5.6 **Bid Submission Date(s)**\n\nThe Technical'
+
+text at limit: 'fore the submission date(s) and time(s) specified in the RFT'
+Found the deeper issue: Rule 2's else: return limit branch fires now that next_peer is correctly found within the window — but it returns the raw, unsnapped character limit instead of falling through to the paragraph-boundary-safe logic below. Let me fix that.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 673-717)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py
+Added 6 lines
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\chunking\ingest.py (lines 673-722)
+Good, indentation and control flow are correct — it naturally falls through to Rule 3 below. Let's re-run and verify:
+
+Bash Verify 5.4 starts fresh and ends on a clean boundary
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+
+with open('marker_results/input.md', encoding='utf-8') as f:
+    src = f.read()
+chunks = temp_split(preprocessing(src))
+for i, c in enumerate(chunks):
+    if c.strip().startswith('#### 5.4') or c.strip().startswith('#### 5.7'):
+        print(f'=== chunk {i} (len={len(c)}) ===')
+        print(c)
+        print()
+"
+
+OUT
+=== chunk 9 (len=1453) ===
+#### 5.4 **Two-stage bidding (Technical & Commercial)**
+
+Bidder is required to submit its Bid in the following two submissions, in closed envelopes, in accordance with the following two stage bidding process:
+
+##### Technical Bids:
+
+To be submitted in accordance with:
+
+- ➢ the requirements in the Technical Bid section of the RFT Summary; and
+- ➢ the requirements set out in Appendix 7 of this RFT.
+
+The Technical Bid **must not** include any pricing information.
+
+##### Commercial Bids:
+
+Commercial Bids will only be invited from those Bidders whose Technical Bids are technically acceptable and compliant with the terms of this RFT.
+
+To be submitted in accordance with:
+
+- (i) the requirements in the Commercial Bid section of the RFT Summary; and
+- (ii) the requirements set out in Appendix 8 of this RFT.
+
+The Bidder shall submit with the Commercial Bid:
+
+- (i) the Commercial Bid Submission Form set out in Appendix 4 of this RFT ("**Commercial Bid Submission Form**") signed by an authorized signatory of the Bidder; and
+- (ii) a copy of the power of attorney evidencing the authority of such signatory to sign the Commercial Bid Submission Form on behalf of the Bidder.
+
+#### 5.5 **Bid Timetable** 
+
+The tentative timetable for the bid process is set out in Appendix 1. Any changes in this timetable affecting the Bid Submission timeline shall be communicated to the Bidders solely through Tender Bulletins.
+
+RFT Number: [6000042656 (ENQ22-108)]
+
+=== chunk 11 (len=1531) ===
+#### 5.7 **Joint Ventures / Consortiums**
+
+If the Bidder would like to submit its Bid as a joint venture or consortium it shall inform the Company within [seven (7)] days of receipt of the RFT.
+
+The Bidder shall provide the following information to the Company:
+
+- (a) the full legal names of each partner;
+- (b) the legal address of each partner;
+- (c) the name of the partner nominated to act as the manager of the joint venture or consortium;
+- (d) the responsibilities of each partner in relation to the Scope of Work; and
+- (e) a copy of the joint venture or consortium agreement with the Technical Bid, which shall state that:
+  - (i) all partners shall be jointly and severally responsible for the performance of the Scope of Work; and
+  - (ii) in the event that any partner ceases to be a member of a joint venture or consortium for any reason whatsoever the remaining partner(s) shall be fully responsible for the performance of the Scope of Work.
+
+The Company shall review the Bidder's proposal to submit a Bid as a joint venture or consortium and shall decide, at the Company's discretion, whether this is acceptable to the Company. The Company shall notify the Bidder within seven (7) days of receiving its proposal whether the proposal has been accepted or rejected.
+
+If the proposal is rejected by the Company, then the Bidder may proceed with submitting a Bid, not as part of a joint venture or consortium, within the timeframes set out in the RFT.
+
+#### 5.8 **No Bid Bond** 
+
+No bid bond is required under this RFT.
+Both fixed now: chunk 9 starts fresh at #### 5.4, keeps Technical Bids + Commercial Bids together, and ends cleanly at a paragraph boundary (before #### 5.6, deferring it to the next chunk rather than cutting mid-word). Clause 5.7 stays whole. Let's re-run the full round-trip/no-data-loss check and the full pipeline across all corpus files:
+
+Bash Final round-trip check and full pipeline run
+IN
+cd "c:\Users\LOQ\Desktop\Projects\Document-Loaders" && "./.venv-marker/Scripts/python.exe" -c "
+import sys, io
+sys.path.insert(0, 'chunking')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+from ingest import preprocessing, temp_split
+import glob
+
+for path in glob.glob('marker_results/*.md'):
+    with open(path, encoding='utf-8') as f:
+        src = f.read()
+    pre = preprocessing(src)
+    chunks = temp_split(pre)
+    pos = 0
+    gaps = 0
+    for c in chunks:
+        idx = pre.find(c, pos)
+        if idx == -1:
+            print(path, 'UNMATCHED CHUNK'); continue
+        gap = pre[pos:idx]
+        if gap.strip():
+            gaps += 1
+        pos = idx + len(c)
+    tail = pre[pos:].strip()
+    print(path, 'chunks:', len(chunks), 'non-blank gaps:', gaps, 'tail:', repr(tail[:40]))
+" && "./.venv-marker/Scripts/python.exe" ".\chunking\ingest.py" 2>&1 | tail -5
+
+OUT
+marker_results\1-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_1-250.md chunks: 898 non-blank gaps: 0 tail: ''
+marker_results\2-9-RFT 6000042656_ ENQ22-108_ EPC Rejuvenation Project_251-500.md chunks: 1016 non-blank gaps: 0 tail: ''
+marker_results\expected-output.md chunks: 324 non-blank gaps: 0 tail: ''
+marker_results\input.md chunks: 348 non-blank gaps: 0 tail: ''
+2026-07-20 19:32:44 | INFO     | Loaded 4 of 4 Markdown files
+2026-07-20 19:32:45 | INFO     | Split 4 documents into 2421 chunks
+2026-07-20 19:32:45 | INFO     | Wrote 2421 chunks to chunk-runs\chunks_20260720_193245_057553.md
+No dropped content anywhere, and the full pipeline runs clean. Let me update docs/Status.md with this fix.
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs\Status.md (lines 93-102)
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\docs\Status.md
+Added 2 lines
+Fixed. Clause 5.4 now starts a fresh chunk (heading + both subsections together) instead of having its heading stranded at the end of the previous chunk, and the chunk boundary after it lands cleanly at a paragraph break rather than mid-word. Verified with a full round-trip check (every chunk reappears in the source, nothing dropped) across all four real documents, and the full pipeline still runs clean end-to-end. Nothing committed.

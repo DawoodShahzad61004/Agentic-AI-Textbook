@@ -11,16 +11,11 @@ from .feedback_store import FeedbackStore
 from .fix_llm_output import fix_llm_output, _parse_to_python
 from .learned_qa_store import get_or_create_learned_qa_collection
 from .llm_caller import llm_invoke
+from .switches import DEFAULT_SWITCHES
 
 logger = logging.getLogger(__name__)
 
-from app_workflow.config import (
-    VECTOR_STORE_PATH, 
-    LEARNED_COLLECTION,
-    ENABLE_QA_PAIR_GENERATION,
-    ENABLE_QA_PAIR_OUTPUT_FIX,
-    ENABLE_GLOBAL_LLM_OUTPUT_FIX,
-)
+from app_workflow.config import VECTOR_STORE_PATH, LEARNED_COLLECTION
 
 from .prompts import DISTILL_PROMPT, _THICK, _THIN
 
@@ -49,8 +44,9 @@ class SelfLearner:
         good = self.feedback_store.count_good()
         return good > 0 and good % self.learn_every_n == 0
 
-    def run_distillation(self, batch_size: int = 10, config=None) -> int:
-        if not ENABLE_QA_PAIR_GENERATION:
+    def run_distillation(self, batch_size: int = 10, config=None, switches: dict | None = None) -> int:
+        sw = switches or DEFAULT_SWITCHES
+        if not sw["ENABLE_QA_PAIR_GENERATION"]:
             logger.warning("\n[SelfLearner] QA-pair generation is disabled; skipping distillation.")
             return 0
 
@@ -92,7 +88,7 @@ class SelfLearner:
             logger.debug(f"  query : \"{interaction['query']}\"")
             logger.debug(_THICK)
 
-            pairs = self._generate_qa_pairs(interaction, config=config)
+            pairs = self._generate_qa_pairs(interaction, config=config, switches=sw)
             added = self._upsert_pairs(pairs, interaction)
             total_added += added
 
@@ -107,7 +103,8 @@ class SelfLearner:
 
         return total_added
 
-    def _generate_qa_pairs(self, interaction: dict, config=None) -> list[dict]:
+    def _generate_qa_pairs(self, interaction: dict, config=None, switches: dict | None = None) -> list[dict]:
+        sw = switches or DEFAULT_SWITCHES
         learned_qa_chunks = interaction.get("learned_qa_chunks", [])
         document_chunks = interaction.get("document_chunks", interaction.get("chunks", []))
         chunks_text = "\n---\n".join([
@@ -157,7 +154,7 @@ class SelfLearner:
             logger.debug(raw)
             logger.debug(_THIN)
 
-            if ENABLE_QA_PAIR_OUTPUT_FIX and ENABLE_GLOBAL_LLM_OUTPUT_FIX:
+            if sw["ENABLE_QA_PAIR_OUTPUT_FIX"] and sw["ENABLE_GLOBAL_LLM_OUTPUT_FIX"]:
                 llm_result, _ok = fix_llm_output("distill_qa", raw, llm=self.llm, config=config)
 
                 if _ok and isinstance(llm_result, list):
@@ -263,3 +260,7 @@ class SelfLearner:
             logger.warning(f"\n  STEP 7 — UPSERT SKIPPED (all {len(ids)} pair(s) already exist in collection)")
 
         return len(new_mask)
+
+
+from .operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Self Learning")

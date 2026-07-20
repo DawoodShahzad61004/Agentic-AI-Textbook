@@ -1,5 +1,53 @@
 # Bug Records
 
+### BUG-015 · `temp_split()` nested-list boundary helper silently dropped content between chunks
+
+| Field | Detail |
+|---|---|
+| **Issue** | While relaxing the list-with-lead-in rules to accept nested lists, `_top_level_item_boundaries()` omitted the starting cursor when that cursor sat mid-way through a nested run, so text between it and the next true top-level pointer vanished from every emitted chunk. |
+| **Found Date** | 2026-07-20 |
+| **Status** | Closed |
+| **Severity** | HIGH |
+| **File** | `chunking/ingest.py` (`_top_level_item_boundaries()`, `temp_split()`) |
+| **Description** | Surfaced by a full round-trip check (every emitted chunk must reappear in the preprocessed source with nothing left over) run across all four local `marker_results/` documents: 13 non-blank gaps appeared where a previous cut had left the cursor inside a nested `(i)/(ii)/(iii)` sub-list, and the returned boundary list started at the first top-level pointer instead of at the cursor. |
+| **Root Cause** | The new oversized-list fallback computed split points only at top-level list pointers and never forced the actual start position in as the first boundary, so any content before the first top-level pointer in the window was skipped. |
+| **Solution** | Always insert the start position as the first boundary in `_top_level_item_boundaries()`. Re-verified zero non-blank gaps and zero unconsumed tail across all four documents. |
+| **Date Resolved** | 2026-07-20 |
+
+---
+
+### BUG-014 · `preprocessing()` unconditional forward-merge concatenated unrelated blocks
+
+| Field | Detail |
+|---|---|
+| **Issue** | The clause-body rejoining step merged every following blank-line-delimited block into a clause until the next marker, regardless of content, gluing unrelated material together — e.g. a run of separate glossary definitions ("DELAY EVENT", "DISPUTE", "DRAWINGS", "EAD", …) collapsed onto a single line. |
+| **Found Date** | 2026-07-20 |
+| **Status** | Closed |
+| **Severity** | HIGH |
+| **File** | `chunking/ingest.py` (`_merge_forward()`, `_apply_heading_branch()`, `_apply_plain_branch()`) |
+| **Description** | Exposed by diffing `preprocessing()` output against the full `marker_results/expected-output.md` ground truth. The "always merge a clause's trailing fragment forward to the next marker" behaviour — a simplification agreed after the two earlier toy examples — was corrupting real output wherever consecutive non-clause blocks followed a marker. |
+| **Root Cause** | `_merge_forward()` had no stopping condition, so it bridged paragraph breaks past the end of the clause's actual body. |
+| **Solution** | Add a sentence-boundary heuristic: only bridge the next fragment while the accumulated text does not yet end in terminal punctuation (`.`/`!`/`?`). Also extended the merge behaviour, previously wired only into the heading branch, to the plain branch. |
+| **Date Resolved** | 2026-07-20 |
+
+---
+
+### BUG-013 · `preprocessing()` scoped alphabetic/roman marker families globally, chaining unrelated enumerations
+
+| Field | Detail |
+|---|---|
+| **Issue** | Alphabetic (`(a)`) and roman (`(i)`) marker sequences were keyed by a bare `"alpha"`/`"roman"` family string, so unrelated enumerations anywhere in the document chained into one run whenever their values happened to continue in sequence, splicing unrelated clauses together (e.g. a Section 6 roman sub-list glued after clause 6.20). |
+| **Found Date** | 2026-07-20 |
+| **Status** | Closed |
+| **Severity** | HIGH |
+| **File** | `chunking/ingest.py` (`_marker_sequences()`, `_marker_family_value()`) |
+| **Description** | Found by diffing `preprocessing()` output against the full `marker_results/expected-output.md` ground truth, which the two earlier toy examples were too small to expose. A related second defect applied both an outer heading-promoted edit and a fully-nested inner edit over overlapping spans, scrambling the text; resolved in the same pass by keeping only the outermost of any overlapping edits. |
+| **Root Cause** | Alphabetic and roman families carried no positional/section context, so distinct enumerations shared a single family key and were treated as one continuing run. |
+| **Solution** | Reset any in-progress alphabetic/roman run at every heading or numeric-marker boundary, and drop fully-nested/overlapping edits so only the outermost is applied. |
+| **Date Resolved** | 2026-07-20 |
+
+---
+
 ### BUG-012 · Marker flattens nested Markdown list pointers to one indentation level
 
 | Field | Detail |

@@ -29,3 +29,7 @@ def generate_draft(state: GraphState, config=None) -> dict:
 
     timing_tracker.record("Draft Generation", time.perf_counter() - _t0)
     return {"draft": draft}
+
+
+from services.operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Draft Generation Node", exclude={"generate_draft"})

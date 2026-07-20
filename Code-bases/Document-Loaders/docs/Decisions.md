@@ -83,3 +83,17 @@
 | **Impact** | Establishes the ingestion boundary and report location. It does not adopt a final splitting algorithm: the committed recursive splitter is a baseline, and the later custom heading/table/list prototype was rejected for replacement. |
 
 ---
+
+## ADR-007 · Normalize Marker clause structure in memory before chunking
+
+| Field | Detail |
+|---|---|
+| **Decision** | Add a `preprocessing()` pass in `chunking/ingest.py` that repairs Marker's inconsistent numbered-clause and heading formatting per document, in memory, immediately before `temp_split()`, without rewriting the Marker Markdown on disk. |
+| **Date** | 2026-07-20 |
+| **Context** | Marker renders one logical numbered clause (for example `5.1`) inconsistently as a plain paragraph, a dash-prefixed list item, or a bold-labelled line, and wraps a single clause's body across stray blank lines from source pagination. `temp_split()` chooses chunk boundaries from heading and list structure, so this inconsistency degraded chunking. The font size/weight signal that marked these as headings in the PDF is already gone by the time Marker emits Markdown, and bold is overloaded for inline defined terms, so headings cannot be recovered by a naive "promote bold" rule. The project principle (CLAUDE.md) is that "chunking is not a repair mechanism for source-conversion defects." |
+| **Options Considered** | Boundary-only soft-heading detection inside the splitter, feeding extra whole-line-anchored patterns to `_heading_matches()` without altering text (honors the principle strictly, but cannot rejoin fragmented clause bodies or supply missing list structure) · In-memory normalization before splitting that rewrites clause structure but never touches the `.md` files (repairs structure for the splitter while keeping the on-disk output authoritative) · Rewriting `marker_results/*.md` on disk (simplest downstream, but silently mutates the Marker output still under evaluation and destroys the audit trail) |
+| **Chosen Solution** | Apply `preprocessing(document.page_content)` inside `split_documents()` before `temp_split()`. It runs `_normalize_marker_sequences()`, `_promote_italic_sublabels()`, and `_extract_leading_spans()` on the in-memory text only; the on-disk Marker Markdown is left unchanged. Scope is limited to the numbered-clause, bold-label, italic-sublabel, and leading `<span id="…">` anchor patterns observed in the RFT/contract document family. |
+| **Rationale** | In-memory normalization gives the splitter reliable structure without mutating the Marker output the project is still assessing, preserving reproducibility and the "do not silently rewrite source" stance. Scoping to observed patterns keeps it a best-effort heuristic rather than a general Markdown normalizer. |
+| **Impact** | Adds the `preprocessing()` stage to the chunking pipeline in `Architecture.md`; introduced and closed BUG-013 through BUG-015 during ground-truth validation; documented in Research topic 9. It refines rather than overrides ADR-006 and the "chunking is not a repair mechanism" principle: repair is limited to in-memory structural normalization that feeds boundary detection, not authoritative correction of Marker's output, and remains bounded by defects such as BUG-012. |
+
+---

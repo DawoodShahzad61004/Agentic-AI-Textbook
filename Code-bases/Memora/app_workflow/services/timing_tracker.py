@@ -49,3 +49,7 @@ class TimingTracker:
 
 
 timing_tracker = TimingTracker()
+
+
+from .operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Timing")

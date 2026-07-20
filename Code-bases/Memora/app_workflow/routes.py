@@ -2,14 +2,8 @@ import logging
 from langgraph.graph import END
 from langgraph.types import Send
 from state import GraphState
-from app_workflow.config import (
-    ENABLE_COMPRESSION_VALIDATION,
-    ENABLE_ANSWER_DRAFT_CREATION,
-    ENABLE_ANSWER_QUALITY_CHECK,
-    ENABLE_AUTO_DISTILLATION,
-    ENABLE_SUB_QUERY_GENERATION,
-    LLM_RESPONSE_RETRY_LIMIT,
-)
+from app_workflow.config import LLM_RESPONSE_RETRY_LIMIT
+from app_workflow.services.switches import get_switches
 from app_workflow.services.services import self_learner
 from app_workflow.nodes.check_answer_quality import QUALITY_PASS_VERDICT
 
@@ -46,17 +40,17 @@ def route_user_input(state: GraphState) -> str:
 # ── Document compression track routes ────────────────────────────────────────
 
 def route_nac_documents_to_validator(state: GraphState) -> str:
-    return "validate_NAC_documents" if ENABLE_COMPRESSION_VALIDATION else "DC_documents"
+    return "validate_NAC_documents" if get_switches(state)["ENABLE_COMPRESSION_VALIDATION"] else "DC_documents"
 
 
 def route_dc_documents_to_validator(state: GraphState) -> str:
-    return "validate_DC_documents" if ENABLE_COMPRESSION_VALIDATION else "LBC_documents"
+    return "validate_DC_documents" if get_switches(state)["ENABLE_COMPRESSION_VALIDATION"] else "LBC_documents"
 
 
 # ── Learned-QA compression track routes ──────────────────────────────────────
 
 def route_dc_learned_qa_to_validator(state: GraphState) -> str:
-    return "validate_DC_learned_qa" if ENABLE_COMPRESSION_VALIDATION else "LBC_learned_qa"
+    return "validate_DC_learned_qa" if get_switches(state)["ENABLE_COMPRESSION_VALIDATION"] else "LBC_learned_qa"
 
 
 # ── Post-combine route ────────────────────────────────────────────────────────
@@ -74,13 +68,13 @@ def route_after_combine(state: GraphState) -> str:
             state.get("retry_count", 0),
         )
         return "retry"
-    return "generate_draft" if ENABLE_ANSWER_DRAFT_CREATION else "generate_answer"
+    return "generate_draft" if get_switches(state)["ENABLE_ANSWER_DRAFT_CREATION"] else "generate_answer"
 
 
 # ── Post-draft routes ─────────────────────────────────────────────────────────
 
 def route_after_generate_draft(state: GraphState) -> str:
-    return "check_answer_quality" if ENABLE_ANSWER_QUALITY_CHECK else "generate_answer"
+    return "check_answer_quality" if get_switches(state)["ENABLE_ANSWER_QUALITY_CHECK"] else "generate_answer"
 
 
 def route_after_quality_check(state: GraphState) -> str:
@@ -88,7 +82,7 @@ def route_after_quality_check(state: GraphState) -> str:
     if verdict == QUALITY_PASS_VERDICT:
         return "generate_answer"
     budget_ok = (
-        ENABLE_SUB_QUERY_GENERATION
+        get_switches(state)["ENABLE_SUB_QUERY_GENERATION"]
         and state.get("retry_count", 0) < LLM_RESPONSE_RETRY_LIMIT
     )
     if budget_ok:
@@ -106,6 +100,10 @@ def route_after_quality_check(state: GraphState) -> str:
 # ── Post-generate-answer route ────────────────────────────────────────────────
 
 def route_after_generate_answer(state: GraphState) -> str:
-    if ENABLE_AUTO_DISTILLATION and self_learner.should_learn():
+    if get_switches(state)["ENABLE_AUTO_DISTILLATION"] and self_learner.should_learn():
         return "auto_distillation"
     return END
+
+
+from services.operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Workflow Routing")

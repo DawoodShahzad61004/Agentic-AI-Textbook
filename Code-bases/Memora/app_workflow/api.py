@@ -34,6 +34,7 @@ from app_workflow.config import (
     ENABLE_PHOENIX_TRACING,
 )
 from app_workflow.nodes.check_answer_quality import QUALITY_PASS_VERDICT
+from app_workflow.services.switches import resolve_switches
 
 
 if ENABLE_PHOENIX_TRACING:
@@ -77,19 +78,52 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="LangGraph RAG API", lifespan=lifespan)
 
 
+class WorkflowSwitches(BaseModel):
+    """Per-request overrides for the ENABLE_* toggles in config.py.
+
+    Any field left as None keeps the config.py default for that switch.
+    """
+
+    ENABLE_SUB_QUERY_GENERATION: Optional[bool] = None
+    ENABLE_QUERY_VARIANTS_OUTPUT_FIX: Optional[bool] = None
+    ENABLE_RETRIEVAL_DEDUP_MERGE: Optional[bool] = None
+    ENABLE_RETRIEVAL_DEDUP_MERGE_OUTPUT_FIX: Optional[bool] = None
+    ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION: Optional[bool] = None
+    ENABLE_RETRIEVAL_DEDUP_MERGE_VALIDATION_OUTPUT_FIX: Optional[bool] = None
+    ENABLE_RETRIEVAL_VALIDATION: Optional[bool] = None
+    ENABLE_RETRIEVAL_VALIDATION_OUTPUT_FIX: Optional[bool] = None
+    ENABLE_NAC_COMPRESSION: Optional[bool] = None
+    ENABLE_DC_COMPRESSION: Optional[bool] = None
+    ENABLE_LBC_COMPRESSION: Optional[bool] = None
+    ENABLE_COMPRESSION_VALIDATION: Optional[bool] = None
+    ENABLE_COMPRESSION_OUTPUT_FIX: Optional[bool] = None
+    ENABLE_ANSWER_DRAFT_CREATION: Optional[bool] = None
+    ENABLE_ANSWER_QUALITY_CHECK: Optional[bool] = None
+    ENABLE_ANSWER_QUALITY_OUTPUT_FIX: Optional[bool] = None
+    ENABLE_AUTO_DISTILLATION: Optional[bool] = None
+    ENABLE_QA_PAIR_GENERATION: Optional[bool] = None
+    ENABLE_QA_PAIR_OUTPUT_FIX: Optional[bool] = None
+    ENABLE_GLOBAL_LLM_OUTPUT_FIX: Optional[bool] = None
+
+
 class QueryRequest(BaseModel):
     query: str
+    switches: Optional[WorkflowSwitches] = None
 
 
 class FeedbackRequest(BaseModel):
     feedback: str = ""
 
 
-def _build_initial_state(query: str, request_id: str = "") -> GraphState:
+def _build_initial_state(
+    query: str, request_id: str = "", switches: Optional[WorkflowSwitches] = None
+) -> GraphState:
+    overrides = switches.model_dump(exclude_none=True) if switches else None
     return GraphState(
         user_input=query,
         query=query,
         request_id=request_id,
+        switches=resolve_switches(overrides),
         user_feedback="",
         query_variants=[],
         answer="",
@@ -124,7 +158,7 @@ async def query(req: QueryRequest):
     set_request_id(request_id)
     logger.info("Request received: request_id=%s", request_id)
 
-    state = _build_initial_state(req.query, request_id=request_id)
+    state = _build_initial_state(req.query, request_id=request_id, switches=req.switches)
 
     try:
         final_state = await asyncio.to_thread(

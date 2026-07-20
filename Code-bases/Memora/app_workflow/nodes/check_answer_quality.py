@@ -1,7 +1,7 @@
 import logging
 import time
 from state import GraphState
-from app_workflow.config import ENABLE_ANSWER_QUALITY_OUTPUT_FIX, ENABLE_GLOBAL_LLM_OUTPUT_FIX
+from app_workflow.services.switches import get_switches
 from app_workflow.services.llm_setup import judge_llm
 from app_workflow.services.llm_caller import llm_invoke
 from app_workflow.services.prompts import GROUNDING_PROMPT
@@ -24,6 +24,7 @@ def _build_context(compressed_docs: list[dict]) -> str:
 
 def check_answer_quality(state: GraphState, config=None) -> dict:
     _t0 = time.perf_counter()
+    sw = get_switches(state)
     compressed_docs = state["compressed_docs"]
     user_input = state["user_input"]
     context = _build_context(compressed_docs)
@@ -51,7 +52,7 @@ def check_answer_quality(state: GraphState, config=None) -> dict:
 
     raw = quality_result.content or ""
 
-    if ENABLE_ANSWER_QUALITY_OUTPUT_FIX and ENABLE_GLOBAL_LLM_OUTPUT_FIX:
+    if sw["ENABLE_ANSWER_QUALITY_OUTPUT_FIX"] and sw["ENABLE_GLOBAL_LLM_OUTPUT_FIX"]:
         llm_result, _ok = fix_llm_output("grounding_judge", raw, llm=judge_llm, config=config)
         if not _ok or not isinstance(llm_result, dict) or "verdict" not in llm_result:
             logger.warning("[CHECK_ANSWER_QUALITY] failed to fix malformed judge output.")
@@ -81,3 +82,7 @@ def check_answer_quality(state: GraphState, config=None) -> dict:
 
     timing_tracker.record("CAQ", time.perf_counter() - _t0)
     return {"quality_verdict": verdict}
+
+
+from services.operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Answer Quality Node", exclude={"check_answer_quality"})

@@ -8,19 +8,14 @@ from app_workflow.services.validators import validate_redundancy
 from app_workflow.services.fix_llm_output import fix_llm_output, _parse_to_python
 from app_workflow.services.llm_caller import llm_invoke, LLMErrorKind
 from app_workflow.services.timing_tracker import timing_tracker
-from app_workflow.config import (
-    LLM_RESPONSE_RETRY_LIMIT,
-    DC_WINDOW_SIZE,
-    ENABLE_DC_COMPRESSION,
-    ENABLE_COMPRESSION_OUTPUT_FIX,
-    ENABLE_GLOBAL_LLM_OUTPUT_FIX,
-)
+from app_workflow.services.switches import get_switches
+from app_workflow.config import LLM_RESPONSE_RETRY_LIMIT, DC_WINDOW_SIZE
 from app_workflow.services.prompts import _DC_SCAN_PROMPT, _THIN
 
 logger = logging.getLogger(__name__)
 
 
-def _run_dc(chunks: list[dict], config=None) -> tuple[list[dict], list[dict]]:
+def _run_dc(chunks: list[dict], switches: dict, config=None) -> tuple[list[dict], list[dict]]:
     """Core DC logic. Returns (result_chunks, dc_groups_per_window)."""
     window_size = DC_WINDOW_SIZE
 
@@ -84,7 +79,7 @@ def _run_dc(chunks: list[dict], config=None) -> tuple[list[dict], list[dict]]:
             )
             continue
 
-        if ENABLE_COMPRESSION_OUTPUT_FIX and ENABLE_GLOBAL_LLM_OUTPUT_FIX:
+        if switches["ENABLE_COMPRESSION_OUTPUT_FIX"] and switches["ENABLE_GLOBAL_LLM_OUTPUT_FIX"]:
             flagged, _ok = fix_llm_output("dc_scan", raw, llm=llm, config=config)
         else:
             flagged = _parse_to_python(raw)
@@ -195,12 +190,12 @@ def _run_dc(chunks: list[dict], config=None) -> tuple[list[dict], list[dict]]:
     return result, dc_groups_per_window
 
 
-def _validate_dc_groups(tag: str, windows: list[dict], config=None) -> None:
+def _validate_dc_groups(tag: str, windows: list[dict], switches: dict, config=None) -> None:
     if not windows:
         logger.info("[%s] no redundancy groups to validate", tag)
         return
     for i, entry in enumerate(windows):
-        check = validate_redundancy(entry["window_chunks"], entry["groups"], judge_llm, config=config)
+        check = validate_redundancy(entry["window_chunks"], entry["groups"], judge_llm, config=config, switches=switches)
         logger.info(
             "[%s] window %d: confirmed=%d  rejected=%d",
             tag, i, len(check["confirmed_groups"]), len(check["rejected_groups"]),
@@ -211,13 +206,14 @@ def _validate_dc_groups(tag: str, windows: list[dict], config=None) -> None:
 
 def execute_dc_documents(state: GraphState, config=None) -> dict:
     _t0 = time.perf_counter()
+    sw = get_switches(state)
     chunks = state.get("nac_output_document_chunks") or []
     logger.info("[COMPRESS] running DC_documents on %d chunk(s)", len(chunks))
-    if not ENABLE_DC_COMPRESSION:
+    if not sw["ENABLE_DC_COMPRESSION"]:
         logger.debug("[DC] disabled — passing through %d chunk(s)", len(chunks))
         timing_tracker.record("Compression", time.perf_counter() - _t0)
         return {"dc_output_document_chunks": chunks, "dc_groups_per_window_documents": []}
-    result, groups = _run_dc(chunks, config=config)
+    result, groups = _run_dc(chunks, sw, config=config)
     logger.info("[COMPRESS] DC_documents complete — %d chunk(s) remain", len(result))
     timing_tracker.record("Compression", time.perf_counter() - _t0)
     return {"dc_output_document_chunks": result, "dc_groups_per_window_documents": groups}
@@ -225,7 +221,9 @@ def execute_dc_documents(state: GraphState, config=None) -> dict:
 
 def validate_dc_documents(state: GraphState, config=None) -> dict:
     _t0 = time.perf_counter()
-    _validate_dc_groups("validate_DC_documents", state.get("dc_groups_per_window_documents") or [], config=config)
+    _validate_dc_groups(
+        "validate_DC_documents", state.get("dc_groups_per_window_documents") or [], get_switches(state), config=config
+    )
     timing_tracker.record("Compression", time.perf_counter() - _t0)
     return {}
 
@@ -234,13 +232,14 @@ def validate_dc_documents(state: GraphState, config=None) -> dict:
 
 def execute_dc_learned_qa(state: GraphState, config=None) -> dict:
     _t0 = time.perf_counter()
+    sw = get_switches(state)
     chunks = state.get("dedup_merged_learned_qa_chunks") or []
     logger.info("[COMPRESS] running DC_learned_qa on %d chunk(s)", len(chunks))
-    if not ENABLE_DC_COMPRESSION:
+    if not sw["ENABLE_DC_COMPRESSION"]:
         logger.debug("[DC] disabled — passing through %d chunk(s)", len(chunks))
         timing_tracker.record("Compression", time.perf_counter() - _t0)
         return {"dc_output_learned_qa_chunks": chunks, "dc_groups_per_window_learned_qa": []}
-    result, groups = _run_dc(chunks, config=config)
+    result, groups = _run_dc(chunks, sw, config=config)
     logger.info("[COMPRESS] DC_learned_qa complete — %d chunk(s) remain", len(result))
     timing_tracker.record("Compression", time.perf_counter() - _t0)
     return {"dc_output_learned_qa_chunks": result, "dc_groups_per_window_learned_qa": groups}
@@ -248,6 +247,12 @@ def execute_dc_learned_qa(state: GraphState, config=None) -> dict:
 
 def validate_dc_learned_qa(state: GraphState, config=None) -> dict:
     _t0 = time.perf_counter()
-    _validate_dc_groups("validate_DC_learned_qa", state.get("dc_groups_per_window_learned_qa") or [], config=config)
+    _validate_dc_groups(
+        "validate_DC_learned_qa", state.get("dc_groups_per_window_learned_qa") or [], get_switches(state), config=config
+    )
     timing_tracker.record("Compression", time.perf_counter() - _t0)
     return {}
+
+
+from services.operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "DC Compression", exclude={"execute_dc_documents", "validate_dc_documents", "execute_dc_learned_qa", "validate_dc_learned_qa"})

@@ -223,3 +223,7 @@ class RAGRetriever:
                     }
                 )
         return docs
+
+
+from .operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Retriever")

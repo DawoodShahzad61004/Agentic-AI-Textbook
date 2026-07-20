@@ -65,3 +65,7 @@ def retrieve(state: GraphState) -> dict:
         "variants_with_chunks": [variant_entry],
         "newly_failed_variants": newly_failed,
     }
+
+
+from services.operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Retrieval Node", exclude={"retrieve"})

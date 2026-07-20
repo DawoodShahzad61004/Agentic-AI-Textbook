@@ -201,7 +201,6 @@ class FeedbackStore:
             "Thumbdown persisted to MongoDB: request_id=%s normalized_query=%r",
             request_id, normalized,
         )
-
     def find_thumbdowns_for_query(self, query: str) -> list[dict]:
         norm = self._normalize_query(query)
         return [
@@ -229,3 +228,7 @@ class FeedbackStore:
             "[FAILED VARIANTS] saved %d variant(s) to MongoDB for norm=%r",
             len(variants), norm,
         )
+
+
+from .operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Feedback Store")

@@ -7,20 +7,14 @@ from app_workflow.services.validators import validate_lbc as _validate_lbc_chunk
 from app_workflow.services.fix_llm_output import fix_llm_output, _parse_to_python
 from app_workflow.services.llm_caller import llm_invoke, LLMErrorKind
 from app_workflow.services.timing_tracker import timing_tracker
-from app_workflow.config import (
-    LLM_RESPONSE_RETRY_LIMIT,
-    LBC_MIN_RETENTION_RATIO,
-    ENABLE_LBC_COMPRESSION,
-    ENABLE_COMPRESSION_OUTPUT_FIX,
-    ENABLE_GLOBAL_LLM_OUTPUT_FIX,
-    ENABLE_COMPRESSION_VALIDATION,
-)
+from app_workflow.services.switches import get_switches
+from app_workflow.config import LLM_RESPONSE_RETRY_LIMIT, LBC_MIN_RETENTION_RATIO
 from app_workflow.services.prompts import _LBC_COMPRESS_PROMPT, _LBC_DEFAULT_INSTRUCTIONS, _THIN
 
 logger = logging.getLogger(__name__)
 
 
-def _run_lbc(chunks: list[dict], query: str, config=None) -> tuple[list[dict], list[dict]]:
+def _run_lbc(chunks: list[dict], query: str, switches: dict, config=None) -> tuple[list[dict], list[dict]]:
     """Core LBC logic. Returns (result_chunks, lbc_validation_pairs)."""
     instructions = _LBC_DEFAULT_INSTRUCTIONS
     min_retention_ratio = LBC_MIN_RETENTION_RATIO
@@ -84,7 +78,7 @@ def _run_lbc(chunks: list[dict], query: str, config=None) -> tuple[list[dict], l
                 logger.warning(f"  [LBC] chunk {idx}: empty response on attempt {attempt}, retrying…")
                 continue
 
-            if ENABLE_COMPRESSION_OUTPUT_FIX and ENABLE_GLOBAL_LLM_OUTPUT_FIX:
+            if switches["ENABLE_COMPRESSION_OUTPUT_FIX"] and switches["ENABLE_GLOBAL_LLM_OUTPUT_FIX"]:
                 candidate, _ok = fix_llm_output("lbc_compress", raw, llm=llm, config=config)
             else:
                 candidate = _parse_to_python(raw)
@@ -174,15 +168,15 @@ def _run_lbc(chunks: list[dict], query: str, config=None) -> tuple[list[dict], l
     return result, lbc_validation_pairs
 
 
-def _validate_lbc_pairs(tag: str, pairs: list[dict], query: str, config=None) -> None:
+def _validate_lbc_pairs(tag: str, pairs: list[dict], query: str, switches: dict, config=None) -> None:
     """Pass-through when ENABLE_COMPRESSION_VALIDATION is False."""
-    if not ENABLE_COMPRESSION_VALIDATION:
+    if not switches["ENABLE_COMPRESSION_VALIDATION"]:
         return
     if not pairs:
         logger.info("[%s] no compressed chunks to validate", tag)
         return
     for i, pair in enumerate(pairs):
-        check = _validate_lbc_chunk(query, pair["original"], pair["compressed"], judge_llm, config=config)
+        check = _validate_lbc_chunk(query, pair["original"], pair["compressed"], judge_llm, config=config, switches=switches)
         logger.info(
             "[%s] chunk %d: verdict=%s  fabricated=%d  lost_relevant=%d",
             tag, i, check["verdict"],
@@ -195,14 +189,15 @@ def _validate_lbc_pairs(tag: str, pairs: list[dict], query: str, config=None) ->
 
 def execute_lbc_documents(state: GraphState, config=None) -> dict:
     _t0 = time.perf_counter()
+    sw = get_switches(state)
     chunks = state.get("dc_output_document_chunks") or []
     query = state["query"]
     logger.info("[COMPRESS] running LBC_documents on %d chunk(s)", len(chunks))
-    if not ENABLE_LBC_COMPRESSION:
+    if not sw["ENABLE_LBC_COMPRESSION"]:
         logger.debug("[LBC] disabled — passing through %d chunk(s)", len(chunks))
         timing_tracker.record("Compression", time.perf_counter() - _t0)
         return {"compressed_document_chunks": chunks, "lbc_validation_pairs_documents": []}
-    result, pairs = _run_lbc(chunks, query, config=config)
+    result, pairs = _run_lbc(chunks, query, sw, config=config)
     logger.info("[COMPRESS] LBC_documents complete — %d chunk(s) remain", len(result))
     timing_tracker.record("Compression", time.perf_counter() - _t0)
     return {"compressed_document_chunks": result, "lbc_validation_pairs_documents": pairs}
@@ -215,6 +210,7 @@ def validate_lbc_documents(state: GraphState, config=None) -> dict:
         "validate_LBC_documents",
         state.get("lbc_validation_pairs_documents") or [],
         state.get("query", ""),
+        get_switches(state),
         config=config,
     )
     timing_tracker.record("Compression", time.perf_counter() - _t0)
@@ -225,14 +221,15 @@ def validate_lbc_documents(state: GraphState, config=None) -> dict:
 
 def execute_lbc_learned_qa(state: GraphState, config=None) -> dict:
     _t0 = time.perf_counter()
+    sw = get_switches(state)
     chunks = state.get("dc_output_learned_qa_chunks") or []
     query = state["query"]
     logger.info("[COMPRESS] running LBC_learned_qa on %d chunk(s)", len(chunks))
-    if not ENABLE_LBC_COMPRESSION:
+    if not sw["ENABLE_LBC_COMPRESSION"]:
         logger.debug("[LBC] disabled — passing through %d chunk(s)", len(chunks))
         timing_tracker.record("Compression", time.perf_counter() - _t0)
         return {"compressed_learned_qa_chunks": chunks, "lbc_validation_pairs_learned_qa": []}
-    result, pairs = _run_lbc(chunks, query, config=config)
+    result, pairs = _run_lbc(chunks, query, sw, config=config)
     logger.info("[COMPRESS] LBC_learned_qa complete — %d chunk(s) remain", len(result))
     timing_tracker.record("Compression", time.perf_counter() - _t0)
     return {"compressed_learned_qa_chunks": result, "lbc_validation_pairs_learned_qa": pairs}
@@ -245,7 +242,12 @@ def validate_lbc_learned_qa(state: GraphState, config=None) -> dict:
         "validate_LBC_learned_qa",
         state.get("lbc_validation_pairs_learned_qa") or [],
         state.get("query", ""),
+        get_switches(state),
         config=config,
     )
     timing_tracker.record("Compression", time.perf_counter() - _t0)
     return {}
+
+
+from services.operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "LBC Compression", exclude={"execute_lbc_documents", "validate_lbc_documents", "execute_lbc_learned_qa", "validate_lbc_learned_qa"})

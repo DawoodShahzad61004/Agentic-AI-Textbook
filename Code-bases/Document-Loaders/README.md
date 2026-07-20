@@ -90,7 +90,7 @@ To chunk every Markdown file currently under `marker_results/` and write a times
 & .\.venv-marker\Scripts\python.exe .\chunking\ingest.py
 ```
 
-Each report records the source path, zero-based per-source chunk sequence, character count, `cl100k_base` token count, and average tokens across the run. The splitter remains experimental: the committed implementation is a custom heading/table/list splitter that replaced the earlier recursive-splitter baseline and dropped the `langchain-text-splitters` dependency, and an uncommitted, hand-authored rule-based rewrite is actively replacing it in turn.
+Each report records the source path, zero-based per-source chunk sequence, character count, `cl100k_base` token count, and average tokens across the run. The splitter remains experimental: the committed implementation is a custom heading/table/list splitter that replaced the earlier recursive-splitter baseline and dropped the `langchain-text-splitters` dependency, and an uncommitted, hand-authored rule-based rewrite is actively replacing it in turn. That uncommitted rewrite also adds an in-memory preprocessing pass that normalizes Marker's inconsistent numbered-clause and heading formatting before splitting; it operates on the loaded text only and never rewrites the Markdown under `marker_results/`.
 
 To inspect the `cl100k_base` token size of every pipe-style Markdown table in `marker_results/`:
 
@@ -146,7 +146,7 @@ This is deliberately lightweight and does not preserve every metadata or layout 
 
 ### Marker Markdown chunking
 
-`chunking/ingest.py` recursively reads only `.md` and `.markdown` files under `marker_results/`, retains each source-relative path, and assigns per-source chunk sequence numbers. `chunking/logger_config.py` writes the resulting chunks and token statistics to `chunk-runs/`. These files support experimentation; they do not yet define a production-ready or final section-splitting policy.
+`chunking/ingest.py` recursively reads only `.md` and `.markdown` files under `marker_results/`, retains each source-relative path, and assigns per-source chunk sequence numbers. In the current uncommitted revision it first runs an in-memory preprocessing pass that repairs Marker's inconsistent numbered-clause and heading formatting (best-effort, scoped to the observed RFT/contract patterns) before splitting, without modifying the source Markdown. `chunking/logger_config.py` writes the resulting chunks and token statistics to `chunk-runs/`. These files support experimentation; they do not yet define a production-ready or final section-splitting policy.
 
 ## Comparing Results
 

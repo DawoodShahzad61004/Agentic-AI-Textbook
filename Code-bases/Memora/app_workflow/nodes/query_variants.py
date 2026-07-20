@@ -7,10 +7,8 @@ from app_workflow.services.services import embedding_manager
 from app_workflow.services.timing_tracker import timing_tracker
 from app_workflow.services.prompts import _ROLE_AND_RULES, _PROCESS_INSTRUCTIONS
 from app_workflow.services.fix_llm_output import fix_llm_output, _parse_to_python
+from app_workflow.services.switches import get_switches
 from config import (
-    ENABLE_SUB_QUERY_GENERATION,
-    ENABLE_QUERY_VARIANTS_OUTPUT_FIX,
-    ENABLE_GLOBAL_LLM_OUTPUT_FIX,
     PRE_RETRIEVAL_SIM_THRESHOLD,
     BRANCH_BUDGET_SHORT_WORD_COUNT,
     BRANCH_BUDGET_MEDIUM_WORD_COUNT,
@@ -192,8 +190,9 @@ def _build_system_prompt(
 def generate_query_variants(state: GraphState, config=None) -> dict:
     _t0 = time.perf_counter()
     user_query = state["user_input"]
+    sw = get_switches(state)
 
-    if not ENABLE_SUB_QUERY_GENERATION:
+    if not sw["ENABLE_SUB_QUERY_GENERATION"]:
         logger.debug("[QUERY_VARIANTS] sub-query generation disabled — using original query")
         timing_tracker.record("Sub-Query Generation", time.perf_counter() - _t0)
         return {"query_variants": [user_query], "retry_count": state["retry_count"] + 1}
@@ -225,7 +224,7 @@ def generate_query_variants(state: GraphState, config=None) -> dict:
 
     if result.ok:
         raw = result.content
-        if ENABLE_QUERY_VARIANTS_OUTPUT_FIX and ENABLE_GLOBAL_LLM_OUTPUT_FIX:
+        if sw["ENABLE_QUERY_VARIANTS_OUTPUT_FIX"] and sw["ENABLE_GLOBAL_LLM_OUTPUT_FIX"]:
             parsed, parsed_ok = fix_llm_output("query_variants", raw, llm=llm_tool, config=config)
         else:
             parsed = _parse_to_python(raw)
@@ -274,3 +273,7 @@ def generate_query_variants(state: GraphState, config=None) -> dict:
     # Each variant is dispatched to a parallel `retrieve` node via fan_out_retrievals
     # (routes.py Send mechanism) — that is where each variant's query runs in parallel.
     return {"query_variants": query_variants, "retry_count": state["retry_count"] + 1}
+
+
+from services.operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Query Variants", exclude={"generate_query_variants"})

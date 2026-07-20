@@ -10,12 +10,8 @@ from app_workflow.services.validators import validate_merge
 from app_workflow.services.fix_llm_output import fix_llm_output, _parse_to_python
 from app_workflow.services.llm_caller import llm_invoke, LLMErrorKind
 from app_workflow.services.timing_tracker import timing_tracker
-from app_workflow.config import (
-    LLM_RESPONSE_RETRY_LIMIT,
-    ENABLE_NAC_COMPRESSION,
-    ENABLE_COMPRESSION_OUTPUT_FIX,
-    ENABLE_GLOBAL_LLM_OUTPUT_FIX,
-)
+from app_workflow.services.switches import get_switches
+from app_workflow.config import LLM_RESPONSE_RETRY_LIMIT
 from app_workflow.services.prompts import _CHUNK_MERGE_PROMPT, _THIN
 
 logger = logging.getLogger(__name__)
@@ -39,6 +35,7 @@ def _merge_similar_chunks(
     feedback: str = "",
     *,
     output_fix_enabled: bool,
+    switches: dict,
     config=None,
 ) -> dict:
     original_sources = [c["source"] for c in similar_chunks]
@@ -104,7 +101,7 @@ def _merge_similar_chunks(
             raise json.JSONDecodeError("empty response after retry", "", 0)
 
         pre = re.sub(r'\[Source:\s*"([^"]+)"\]', r'[Source: \1]', raw)
-        if output_fix_enabled and ENABLE_GLOBAL_LLM_OUTPUT_FIX:
+        if output_fix_enabled and switches["ENABLE_GLOBAL_LLM_OUTPUT_FIX"]:
             parsed, _ok = fix_llm_output("merge", pre, llm=_llm, config=config)
         else:
             parsed = _parse_to_python(pre)
@@ -151,6 +148,7 @@ def _merge_similar_chunks(
 
 def execute_nac_documents(state: GraphState, config=None) -> dict:
     _t0 = time.perf_counter()
+    sw = get_switches(state)
     accumulated_chunks = state.get("dedup_merged_document_chunks") or []
     logger.info("[COMPRESS] running NAC_documents on %d chunk(s)", len(accumulated_chunks))
 
@@ -158,7 +156,7 @@ def execute_nac_documents(state: GraphState, config=None) -> dict:
         timing_tracker.record("Compression", time.perf_counter() - _t0)
         return {"nac_output_document_chunks": [], "nac_merge_pairs_documents": []}
 
-    if not ENABLE_NAC_COMPRESSION:
+    if not sw["ENABLE_NAC_COMPRESSION"]:
         logger.debug("[NAC] disabled — passing through %d chunk(s)", len(accumulated_chunks))
         timing_tracker.record("Compression", time.perf_counter() - _t0)
         return {"nac_output_document_chunks": accumulated_chunks, "nac_merge_pairs_documents": []}
@@ -222,7 +220,8 @@ def execute_nac_documents(state: GraphState, config=None) -> dict:
             source_chunks_for_merge,
             llm,
             embedding_manager,
-            output_fix_enabled=ENABLE_COMPRESSION_OUTPUT_FIX,
+            output_fix_enabled=sw["ENABLE_COMPRESSION_OUTPUT_FIX"],
+            switches=sw,
             config=config,
         )
         candidate["chunk_seq_start"] = run[0][1]["chunk_seq"]
@@ -252,13 +251,14 @@ def execute_nac_documents(state: GraphState, config=None) -> dict:
 
 def validate_nac_documents(state: GraphState, config=None) -> dict:
     _t0 = time.perf_counter()
+    sw = get_switches(state)
     pairs = state.get("nac_merge_pairs_documents", [])  # type: ignore[attr-defined]
     if not pairs:
         logger.info("[validate_NAC_documents] no merge pairs to validate")
         timing_tracker.record("Compression", time.perf_counter() - _t0)
         return {}
     for i, pair in enumerate(pairs):
-        check = validate_merge(pair["source_chunks"], pair["merged"], judge_llm, config=config)
+        check = validate_merge(pair["source_chunks"], pair["merged"], judge_llm, config=config, switches=sw)
         logger.info(
             "[validate_NAC_documents] pair %d: verdict=%s  fabricated=%d  dropped=%d",
             i, check["verdict"],
@@ -267,3 +267,7 @@ def validate_nac_documents(state: GraphState, config=None) -> dict:
         )
     timing_tracker.record("Compression", time.perf_counter() - _t0)
     return {}
+
+
+from services.operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "NAC Compression", exclude={"execute_nac_documents", "validate_nac_documents"})

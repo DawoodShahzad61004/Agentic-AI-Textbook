@@ -47,6 +47,10 @@ ENABLE_GLOBAL_LLM_OUTPUT_FIX = True
 ENABLE_PHOENIX_TRACING = False
 ENABLE_LANGFUSE_TRACING = True
 
+_EXCLUDED_ARGUMENTS = {"self", "cls", "config", "callbacks", "client", "handler"}
+_MAX_TEXT_CHARS = 2_000
+_MAX_COLLECTION_ITEMS = 20
+
 
 # CONSTANTS
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent

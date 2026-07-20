@@ -924,3 +924,7 @@ def llm_invoke(
     # Exhausted all attempts while rate-limited — release and return last result
     _gate_release_to_next()
     return result  # type: ignore[return-value]
+
+
+from .operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "LLM Caller")

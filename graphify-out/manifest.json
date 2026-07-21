@@ -1,8 +1,8 @@
 {
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Document-Loaders\\chunking\\ingest.py": {
-    "mtime": 1784299541.0418594,
-    "ast_hash": "0debf182b17288e89b1e92f99c776651",
-    "semantic_hash": "0debf182b17288e89b1e92f99c776651"
+    "mtime": 1784557936.2295542,
+    "ast_hash": "6a7e6e0ed5bd164948c37662e8cce1ed",
+    "semantic_hash": "6a7e6e0ed5bd164948c37662e8cce1ed"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Document-Loaders\\chunking\\logger_config.py": {
     "mtime": 1784275191.8485954,
@@ -145,14 +145,14 @@
     "semantic_hash": "85915404bc6da02511265c52145b4083"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\api.py": {
-    "mtime": 1783679521.2517061,
-    "ast_hash": "a417e74e536aec69a142f24378f89f51",
-    "semantic_hash": "a417e74e536aec69a142f24378f89f51"
+    "mtime": 1784021375.3202715,
+    "ast_hash": "49c3e6cac38d505cfe44eed10deb5e72",
+    "semantic_hash": "49c3e6cac38d505cfe44eed10deb5e72"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\config.py": {
-    "mtime": 1783682950.9359143,
-    "ast_hash": "a31ac4537f2be716ab72e46c1a3d8110",
-    "semantic_hash": "a31ac4537f2be716ab72e46c1a3d8110"
+    "mtime": 1783941231.4554565,
+    "ast_hash": "5e026595b60b2889fe78c87ef410531d",
+    "semantic_hash": "5e026595b60b2889fe78c87ef410531d"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\graph.py": {
     "mtime": 1782985972.4331107,
@@ -170,14 +170,14 @@
     "semantic_hash": "0c5f2a9c572d2a09ad65451dcb848b96"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\auto_distillation.py": {
-    "mtime": 1783677347.6925764,
-    "ast_hash": "c49b90e9a8409f6404bb3a7841fd0faf",
-    "semantic_hash": "c49b90e9a8409f6404bb3a7841fd0faf"
+    "mtime": 1784021773.194402,
+    "ast_hash": "82785ff98ea6316d5d93ee16ebb0c576",
+    "semantic_hash": "82785ff98ea6316d5d93ee16ebb0c576"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\check_answer_quality.py": {
-    "mtime": 1783677128.7539895,
-    "ast_hash": "c6888a63925f1fcb6e37e0370b7635bc",
-    "semantic_hash": "c6888a63925f1fcb6e37e0370b7635bc"
+    "mtime": 1784021725.5073135,
+    "ast_hash": "3ffc5f465dd8b1f0989e7a757ff60359",
+    "semantic_hash": "3ffc5f465dd8b1f0989e7a757ff60359"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\combine_tracks.py": {
     "mtime": 1781789326.3848379,
@@ -185,39 +185,39 @@
     "semantic_hash": "ba9421957c7747edea7eba87c6289486"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\commands.py": {
-    "mtime": 1783677352.913666,
-    "ast_hash": "824c151a83704b4fabc5a5ec072da7e0",
-    "semantic_hash": "824c151a83704b4fabc5a5ec072da7e0"
+    "mtime": 1784021783.3207633,
+    "ast_hash": "6742d981af9b541e04e907d00beede9f",
+    "semantic_hash": "6742d981af9b541e04e907d00beede9f"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\dc.py": {
-    "mtime": 1783677185.160217,
-    "ast_hash": "a4cb1d8c54b1b3c205a2f8a2f3263ca1",
-    "semantic_hash": "a4cb1d8c54b1b3c205a2f8a2f3263ca1"
+    "mtime": 1784021635.170273,
+    "ast_hash": "a57bcfe04ac65e3e883a048d341e5412",
+    "semantic_hash": "a57bcfe04ac65e3e883a048d341e5412"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\dedup_merge.py": {
-    "mtime": 1783677317.1701646,
-    "ast_hash": "def1e888a6314b8aeae7ca279b2de51d",
-    "semantic_hash": "def1e888a6314b8aeae7ca279b2de51d"
+    "mtime": 1784021581.5933776,
+    "ast_hash": "43707b4c3fa40836d81f54cc59d3d8ba",
+    "semantic_hash": "43707b4c3fa40836d81f54cc59d3d8ba"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\generate_answer.py": {
-    "mtime": 1783677137.9891348,
-    "ast_hash": "d7b6dc686c9e9ba217e2185b569cccf0",
-    "semantic_hash": "d7b6dc686c9e9ba217e2185b569cccf0"
+    "mtime": 1783928494.9811535,
+    "ast_hash": "5bd50141e2a93c14044611fa891c7863",
+    "semantic_hash": "5bd50141e2a93c14044611fa891c7863"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\generate_draft.py": {
-    "mtime": 1783677145.9488745,
-    "ast_hash": "c90e951e15deb925b4355742b142f330",
-    "semantic_hash": "c90e951e15deb925b4355742b142f330"
+    "mtime": 1783928494.7737985,
+    "ast_hash": "97cd70fb4ec829ac3acef88b6efb106f",
+    "semantic_hash": "97cd70fb4ec829ac3acef88b6efb106f"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\lbc.py": {
-    "mtime": 1783677226.1970549,
-    "ast_hash": "3901acd35c55d19976b51fe2b0fe52fe",
-    "semantic_hash": "3901acd35c55d19976b51fe2b0fe52fe"
+    "mtime": 1784021677.883063,
+    "ast_hash": "a80ab9ef953ae8bb024df3a43a2d9301",
+    "semantic_hash": "a80ab9ef953ae8bb024df3a43a2d9301"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\nac.py": {
-    "mtime": 1783677257.776311,
-    "ast_hash": "d1315e80f38070f36fa41d9b1e9c8395",
-    "semantic_hash": "d1315e80f38070f36fa41d9b1e9c8395"
+    "mtime": 1784021533.510449,
+    "ast_hash": "f0299caa96814faca548619ab0a4a400",
+    "semantic_hash": "f0299caa96814faca548619ab0a4a400"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\no_context_answer.py": {
     "mtime": 1781861819.9085047,
@@ -230,14 +230,14 @@
     "semantic_hash": "d196414aed3d6979038e923210a58f36"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\query_variants.py": {
-    "mtime": 1783677115.0904598,
-    "ast_hash": "4dc4c0fe5e9ea0712185b77bba69c2d7",
-    "semantic_hash": "4dc4c0fe5e9ea0712185b77bba69c2d7"
+    "mtime": 1784021432.979626,
+    "ast_hash": "239fe0aa303b67984dd414c457bab295",
+    "semantic_hash": "239fe0aa303b67984dd414c457bab295"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\retrieve.py": {
-    "mtime": 1782739155.5415277,
-    "ast_hash": "d578ce0c1a9d49717c718093f9a6dac9",
-    "semantic_hash": "d578ce0c1a9d49717c718093f9a6dac9"
+    "mtime": 1783928493.9839325,
+    "ast_hash": "af9528c1edb58cd526f2d6cb4775c891",
+    "semantic_hash": "af9528c1edb58cd526f2d6cb4775c891"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\user_input.py": {
     "mtime": 1781861744.3204236,
@@ -245,34 +245,34 @@
     "semantic_hash": "dd116ca41eae5cd4a4345f742163df1f"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\nodes\\validate_retrieval.py": {
-    "mtime": 1783677275.988403,
-    "ast_hash": "08c2adbe13de8e67716a21d86fcd9a9f",
-    "semantic_hash": "08c2adbe13de8e67716a21d86fcd9a9f"
+    "mtime": 1784021707.0124154,
+    "ast_hash": "ce1d85adbe8fffade1843c26ffcbeade",
+    "semantic_hash": "ce1d85adbe8fffade1843c26ffcbeade"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\routes.py": {
-    "mtime": 1782982523.3037188,
-    "ast_hash": "0ba49df520ca8a808979331ae10e9883",
-    "semantic_hash": "0ba49df520ca8a808979331ae10e9883"
+    "mtime": 1784021417.204468,
+    "ast_hash": "bf98cfbfe8062cdca02968370fe837f8",
+    "semantic_hash": "bf98cfbfe8062cdca02968370fe837f8"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\db.py": {
-    "mtime": 1782558371.4720993,
-    "ast_hash": "eb18db244ef8d5174eb29f1643820946",
-    "semantic_hash": "eb18db244ef8d5174eb29f1643820946"
+    "mtime": 1783928430.125772,
+    "ast_hash": "79127ca3ff3728e80a17461095d9fb6c",
+    "semantic_hash": "79127ca3ff3728e80a17461095d9fb6c"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\embedding_manager.py": {
-    "mtime": 1782120903.4142668,
-    "ast_hash": "83959dcce0b16fad0cad3536dba13791",
-    "semantic_hash": "83959dcce0b16fad0cad3536dba13791"
+    "mtime": 1783928430.3221092,
+    "ast_hash": "689f5f220b3bc66f84b17a8fc202eec9",
+    "semantic_hash": "689f5f220b3bc66f84b17a8fc202eec9"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\feedback_store.py": {
-    "mtime": 1782982557.1461432,
-    "ast_hash": "39a5ecbc8d5455d9bc382f09194bd6e8",
-    "semantic_hash": "39a5ecbc8d5455d9bc382f09194bd6e8"
+    "mtime": 1783928450.666643,
+    "ast_hash": "574a0e292f14b39b10a31114940cb998",
+    "semantic_hash": "574a0e292f14b39b10a31114940cb998"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\fix_llm_output.py": {
-    "mtime": 1783677033.1546288,
-    "ast_hash": "56453cbeec535b7dbe8f3d1a61c58e23",
-    "semantic_hash": "56453cbeec535b7dbe8f3d1a61c58e23"
+    "mtime": 1783928430.6771493,
+    "ast_hash": "ced6fea07927d7a8692beb120e4e015b",
+    "semantic_hash": "ced6fea07927d7a8692beb120e4e015b"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\langfuse_tracing.py": {
     "mtime": 1783670079.7891397,
@@ -280,14 +280,14 @@
     "semantic_hash": "b419b72821ada165573471b86fb5bb60"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\learned_qa_store.py": {
-    "mtime": 1781781375.1932611,
-    "ast_hash": "33a3049b3a77d5566f9eeb784bced639",
-    "semantic_hash": "33a3049b3a77d5566f9eeb784bced639"
+    "mtime": 1783928430.8651614,
+    "ast_hash": "e13035475302c4d75b58209a834eeb01",
+    "semantic_hash": "e13035475302c4d75b58209a834eeb01"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\llm_caller.py": {
-    "mtime": 1783677000.3864975,
-    "ast_hash": "7bf84ac47c68a1d20fb2e74ec68b66d8",
-    "semantic_hash": "7bf84ac47c68a1d20fb2e74ec68b66d8"
+    "mtime": 1783928431.04321,
+    "ast_hash": "bb38b6e6cf1ef64d7e4648594955562a",
+    "semantic_hash": "bb38b6e6cf1ef64d7e4648594955562a"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\llm_setup.py": {
     "mtime": 1783684048.9437025,
@@ -295,9 +295,9 @@
     "semantic_hash": "3a1acd3e9dfe523aa81e21cd23394c44"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\logger_config.py": {
-    "mtime": 1783604978.7329369,
-    "ast_hash": "b078eef3d3d36a2a2204f619740e2b34",
-    "semantic_hash": "b078eef3d3d36a2a2204f619740e2b34"
+    "mtime": 1783933056.3695061,
+    "ast_hash": "efe1208dcba79466aa8c46fa4d98a35f",
+    "semantic_hash": "efe1208dcba79466aa8c46fa4d98a35f"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\phoenix_tracing.py": {
     "mtime": 1783595049.0040717,
@@ -310,34 +310,14 @@
     "semantic_hash": "33477ea08cce347d9b947506806990d3"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\retriever.py": {
-    "mtime": 1782739146.7438846,
-    "ast_hash": "d5a3e0ee257e0787eabd08e787340046",
-    "semantic_hash": "d5a3e0ee257e0787eabd08e787340046"
-  },
-  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\run_logs\\test_output_fixes_20260701_163420.debug.json": {
-    "mtime": 1782905660.5325482,
-    "ast_hash": "8507c1d7b41cbedbeb3395b7bb598c25",
-    "semantic_hash": "8507c1d7b41cbedbeb3395b7bb598c25"
-  },
-  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\run_logs\\test_output_fixes_20260701_165717.debug.json": {
-    "mtime": 1782907037.4939847,
-    "ast_hash": "8507c1d7b41cbedbeb3395b7bb598c25",
-    "semantic_hash": "8507c1d7b41cbedbeb3395b7bb598c25"
-  },
-  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\run_logs\\test_output_fixes_20260701_180220.debug.json": {
-    "mtime": 1782910940.5712063,
-    "ast_hash": "8507c1d7b41cbedbeb3395b7bb598c25",
-    "semantic_hash": "8507c1d7b41cbedbeb3395b7bb598c25"
-  },
-  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\run_logs\\test_output_fixes_20260701_184326.debug.json": {
-    "mtime": 1782913406.4559872,
-    "ast_hash": "8507c1d7b41cbedbeb3395b7bb598c25",
-    "semantic_hash": "8507c1d7b41cbedbeb3395b7bb598c25"
+    "mtime": 1783928431.2237673,
+    "ast_hash": "995c7701ea3b31e69c0fc36f61791c38",
+    "semantic_hash": "995c7701ea3b31e69c0fc36f61791c38"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\self_learner.py": {
-    "mtime": 1783677342.3301404,
-    "ast_hash": "171387a7c6e255c760c4c1da185f9ab3",
-    "semantic_hash": "171387a7c6e255c760c4c1da185f9ab3"
+    "mtime": 1784021766.5140398,
+    "ast_hash": "e05e90ef451eb281c85858ca8e300e3f",
+    "semantic_hash": "e05e90ef451eb281c85858ca8e300e3f"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\services.py": {
     "mtime": 1782557893.2662716,
@@ -345,24 +325,24 @@
     "semantic_hash": "9441427679ab89e7d220773f07c105d4"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\timing_tracker.py": {
-    "mtime": 1782222897.967781,
-    "ast_hash": "2a60c3947e665b91e66ffd5d86ae93d3",
-    "semantic_hash": "2a60c3947e665b91e66ffd5d86ae93d3"
+    "mtime": 1783928578.574877,
+    "ast_hash": "dd9104c2f393b8c9f0a5bf2e6e830641",
+    "semantic_hash": "dd9104c2f393b8c9f0a5bf2e6e830641"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\validators.py": {
-    "mtime": 1783677100.7054865,
-    "ast_hash": "af1760414e7c43e55a84888ce72e2c43",
-    "semantic_hash": "af1760414e7c43e55a84888ce72e2c43"
+    "mtime": 1784021488.9558492,
+    "ast_hash": "58fe92423cbe5a5a5f5cf0400dcd7f69",
+    "semantic_hash": "58fe92423cbe5a5a5f5cf0400dcd7f69"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\vector_store.py": {
-    "mtime": 1781621267.6034245,
-    "ast_hash": "85915404bc6da02511265c52145b4083",
-    "semantic_hash": "85915404bc6da02511265c52145b4083"
+    "mtime": 1783928431.8321264,
+    "ast_hash": "3d50b49ced81fa076c71ab45ee59f6cd",
+    "semantic_hash": "3d50b49ced81fa076c71ab45ee59f6cd"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\state.py": {
-    "mtime": 1782734933.7773793,
-    "ast_hash": "ccc63c43a47a6640a2e0781b5aacef51",
-    "semantic_hash": "ccc63c43a47a6640a2e0781b5aacef51"
+    "mtime": 1784021347.318916,
+    "ast_hash": "81154df8e62c504a1aa19af1412bd27e",
+    "semantic_hash": "81154df8e62c504a1aa19af1412bd27e"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Paperclip\\background-tutor\\scripts\\fetch_arxiv.py": {
     "mtime": 1783717188.115415,
@@ -765,34 +745,34 @@
     "semantic_hash": "a5b3202300013cb621c447ad15a2e796"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Document-Loaders\\README.md": {
-    "mtime": 1784497834.1243513,
-    "ast_hash": "7438d8084f7a01d743084e65b732b6a2",
-    "semantic_hash": "7438d8084f7a01d743084e65b732b6a2"
+    "mtime": 1784590825.7750046,
+    "ast_hash": "1b70311d1eff8fa152c847649f619d7e",
+    "semantic_hash": "1b70311d1eff8fa152c847649f619d7e"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Document-Loaders\\docs\\Architecture.md": {
-    "mtime": 1784496524.8241224,
-    "ast_hash": "0e9abbfecd25fcfec6f6a97f7ed1d2ac",
-    "semantic_hash": "0e9abbfecd25fcfec6f6a97f7ed1d2ac"
+    "mtime": 1784590472.6749578,
+    "ast_hash": "46122a4aa4b0ddc8ec2d7eaea5eaf32d",
+    "semantic_hash": "46122a4aa4b0ddc8ec2d7eaea5eaf32d"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Document-Loaders\\docs\\Bugs.md": {
-    "mtime": 1784496471.510491,
-    "ast_hash": "41f16eefc11fddf83db3069269ddc6be",
-    "semantic_hash": "41f16eefc11fddf83db3069269ddc6be"
+    "mtime": 1784590392.3070295,
+    "ast_hash": "de2473756dbefc78fea11d824f160ad6",
+    "semantic_hash": "de2473756dbefc78fea11d824f160ad6"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Document-Loaders\\docs\\Decisions.md": {
-    "mtime": 1784274079.008568,
-    "ast_hash": "d9de2ff3fa6d936bec6cded5d622dd93",
-    "semantic_hash": "d9de2ff3fa6d936bec6cded5d622dd93"
+    "mtime": 1784590411.1791313,
+    "ast_hash": "90d4ee792edb1271d8c47a8480d5dce7",
+    "semantic_hash": "90d4ee792edb1271d8c47a8480d5dce7"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Document-Loaders\\docs\\Research.md": {
-    "mtime": 1784496484.228889,
-    "ast_hash": "38e9cc1ffe3682f77c535938c23ca1d8",
-    "semantic_hash": "38e9cc1ffe3682f77c535938c23ca1d8"
+    "mtime": 1784590434.9325747,
+    "ast_hash": "f236c341cb9ad07c5cb4faac69addb9e",
+    "semantic_hash": "f236c341cb9ad07c5cb4faac69addb9e"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Document-Loaders\\docs\\Status.md": {
-    "mtime": 1784496463.337711,
-    "ast_hash": "29c24a91d5da4b370e4805140b928000",
-    "semantic_hash": "29c24a91d5da4b370e4805140b928000"
+    "mtime": 1784557981.0941627,
+    "ast_hash": "3340e8508e76bfb5caddcb66040280af",
+    "semantic_hash": "3340e8508e76bfb5caddcb66040280af"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\README.md": {
     "mtime": 1784009562.4466228,
@@ -1198,5 +1178,35 @@
     "mtime": 1783852251.514135,
     "ast_hash": "2fde6e797e216194f55488b048391c45",
     "semantic_hash": "2fde6e797e216194f55488b048391c45"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\langfuse_logging.py": {
+    "mtime": 1783931238.6675754,
+    "ast_hash": "c31dc13912723caa2564286c670a8f7b",
+    "semantic_hash": "c31dc13912723caa2564286c670a8f7b"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\operation_tracing.py": {
+    "mtime": 1783941231.6140342,
+    "ast_hash": "bb465d59ac61aadfc8c1a720655565f0",
+    "semantic_hash": "bb465d59ac61aadfc8c1a720655565f0"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\services\\switches.py": {
+    "mtime": 1784021341.4526615,
+    "ast_hash": "73df87a94a4286fe9def7b38abafd4e7",
+    "semantic_hash": "73df87a94a4286fe9def7b38abafd4e7"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Runs\\langgraph_api_20260715_130847.debug.json": {
+    "mtime": 1784107978.2574773,
+    "ast_hash": "c0777c5e7c70ced0f9f433ae45004a29",
+    "semantic_hash": "c0777c5e7c70ced0f9f433ae45004a29"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 30 (July 20).txt": {
+    "mtime": 1784589320.8781648,
+    "ast_hash": "d3d1f76155b1286b8fd8f2e6427d429b",
+    "semantic_hash": "d3d1f76155b1286b8fd8f2e6427d429b"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Research\\My Local LLM Server.md": {
+    "mtime": 1784591156.3825426,
+    "ast_hash": "f472ab4c27a70a79d855df1186d1e29f",
+    "semantic_hash": "f472ab4c27a70a79d855df1186d1e29f"
   }
 }

@@ -67,6 +67,18 @@
 5.7 Handling messy and scanned PDFs (OCR fallbacks)
 5.8 Building a unified file-discovery helper across multiple data roots
 
+### Chapter 5B — Evaluating Document-Conversion Engines: Docling, Unstructured, and Marker-PDF
+5B.1 Why revisit loading — when `UnstructuredLoader` output isn't faithful enough for layout-dependent documents (contracts, RFTs, engineering drawings)
+5B.2 The comparison harness — one script and one result tree per loader, recursive source discovery, and mirrored relative paths (`source/**/*` → `<loader>_results/**/*.md`) so outputs sit side by side for inspection
+5B.3 Docling — `DocumentConverter.export_to_markdown()`, model-backed layout/OCR analysis, and first-run asset download
+5B.4 Unstructured — `partition.auto.partition()` and the local `elements_to_markdown()` adapter (mapping `Title` / `Header` / `ListItem` to Markdown, everything else to plain paragraphs)
+5B.5 Marker-PDF — `PdfConverter` built with `create_model_dict()`, `text_from_rendered()`, its PDF-oriented scope, and first-run model initialization
+5B.6 Dependency isolation — why the three loaders can't share one environment (the Pillow `<11` vs `≥11.1` conflict, the Numba/Torch metadata traps, and `marker` vs `marker-pdf` package shadowing) and the per-loader `.venv-docling` / `.venv-unstructured` / `.venv-marker` solution
+5B.7 Reading the Marker-PDF quality report — strong on ordinary prose and simple tables; unreliable on complex/merged tables, forms, engineering title blocks, heading hierarchy, repeated page furniture, nested lists, reading order, and visual semantics
+5B.8 The two silent-failure modes — high word-retention masking structural corruption, and missing image assets (131 referenced, none supplied) plus mojibake
+5B.9 The adoption decision — why raw converter Markdown was kept as an evaluation utility rather than made the authoritative representation, and what a production path would still require (asset/link validation, encoding normalization, page-aware cleanup, heading repair, structural quality checks, manual review of complex pages)
+5B.10 What this leaves for later — the converted Markdown still has to be chunked, and its unreliable heading/list structure breaks the structure-aware splitters of Chapter 7; that thread is picked up in Chapter 7B
+
 ### Chapter 6 — When RAG Is the Wrong Tool: The Two-Track Problem
 6.1 The CSV-stats trap — why "give me the average age" can't be answered by similarity search
 6.2 Semantic retrieval vs aggregation — a fundamental mismatch
@@ -86,6 +98,20 @@
 7.8 Document-structure-aware chunking (headers, sections)
 7.9 Chunk hygiene — stripping boilerplate, deduplication, length filters
 7.10 Experimenting: how chunking choices visibly change retrieval quality
+
+### Chapter 7B — Chunking Converted Documents: Repairing Structure Before Splitting
+7B.1 The problem this chapter inherits — Chapter 5B's converters emit Markdown whose heading and list structure is inconsistent, and Chapter 7's structure-aware splitters depend on exactly that structure being trustworthy
+7B.2 Scoping the experiment — chunking only `marker_results/`, so splitter comparisons aren't confounded by three loaders' different output conventions
+7B.3 Preserving traceability — attaching source identity and per-source sequence numbers to every chunk (the `chunk_seq` metadata later relied on by neighbor-aware compression, §22B.3.1)
+7B.4 Keeping derived artifacts out of version control — timestamped per-run diagnostic reports under an ignored `chunk-runs/` directory
+7B.5 The principle — "chunking is not a repair mechanism for source-conversion defects," and why it needed qualifying rather than abandoning
+7B.6 Three ways to handle malformed structure — boundary-only soft-heading detection inside the splitter, in-memory normalization before splitting, or rewriting the converted `.md` on disk; the trade-offs, and why the middle path won
+7B.7 The `preprocessing()` pass — `_normalize_marker_sequences()`, `_promote_italic_sublabels()`, and `_extract_leading_spans()` applied to in-memory text only, immediately before `temp_split()`, leaving the on-disk output authoritative and the audit trail intact
+7B.8 Why headings can't be recovered by a naive "promote bold" rule — the font-size/weight signal is already gone by the time Marker emits Markdown, and bold is overloaded for inline defined terms
+7B.9 Validating chunks against full-document ground truth — the method that exposed the boundary bugs below
+7B.10 The boundary bugs — nested-list content silently dropped between chunks, an unconditional forward-merge concatenating unrelated blocks, and globally-scoped alphabetic/roman marker families chaining unrelated enumerations
+7B.11 Bounded by the converter — defects such as flattened nested-list indentation that no amount of pre-split normalization can recover, and knowing where to stop
+7B.12 Baseline vs custom splitter — why the committed recursive splitter remained the baseline and the custom heading/table/list prototype was rejected as a replacement
 
 ### Chapter 8 — Embeddings Deep Dive
 8.1 Dense vectors as compressed meaning
@@ -252,7 +278,7 @@
 
 ### Chapter 19B — Porting the Agent to a LangGraph State Machine
 19B.1 The migration plan — from `agent_query.py` loop to a node-per-phase graph
-19B.2 One module per node — `user_input.py`, `query_variants.py`, `retrieve.py`, `validate_retrieval.py`, `dedup_merge.py`, `nac.py`, `dc.py`, `lbc.py`, `combine_tracks.py`, `generate_draft.py`, `check_answer_quality.py`, `generate_answer.py`, `no_context_answer.py`, `commands.py`, `auto_distillation.py`
+19B.2 One module per node — `user_input.py`, `query_variants.py`, `retrieve.py`, `validate_retrieval.py`, `post_retrieve.py`, `dedup_merge.py`, `nac.py`, `dc.py`, `lbc.py`, `combine_tracks.py`, `generate_draft.py`, `check_answer_quality.py`, `generate_answer.py`, `no_context_answer.py`, `commands.py`, `auto_distillation.py`
 19B.3 The `graph.py` module — assembling nodes, edges, and entry/exit points
 19B.4 The `state.py` schema — every field the graph reads or writes, in one place
 19B.5 The `routes.py` module — every conditional-edge function gathered together
@@ -485,6 +511,7 @@
 36.5 Detecting memory drift and regression
 36.6 When to manually review and prune the learned collection
 36.7 Comparing to research benchmarks (Self-RAG, Pistis-RAG, RAGAS)
+36.8 The long-lived single-process benchmark runner — `run_all_workflow_batches.py` starting one `app_workflow/api.py` subprocess, polling `GET /stats` until ready, and firing a 15-batch / 100-scenario catalog back-to-back (query / thumbdown / stats / forced-learn entries) so in-memory services, tracing setup, the MongoDB client, and the learned-QA vector-store view persist across the whole suite
 
 ### Chapter 36B — Feature-Flag-Driven Development for RAG Pipelines
 36B.1 Why every pipeline stage needs a kill-switch — incremental rollout, A/B testing, and ablation
@@ -495,6 +522,7 @@
 36B.6 The post-retrieval-separation dry run — comparing chunks before and after track-split refactoring
 36B.7 Cross-run diffing — `new_log.txt` vs `old_log.txt` for regression hunting
 36B.8 What to flag-gate vs what to hard-wire — a heuristic
+36B.9 Per-request flag overrides — `switches.py`, the nested `switches` object on `QueryRequest`, `resolve_switches()` overlaying non-`None` request values on `config.py` defaults, `get_switches(state)`, and carrying the resolved dictionary in `GraphState["switches"]` (20 `ENABLE_*` toggles across nine functional areas, with omitted fields retaining their configuration defaults)
 
 ### Chapter 36C — Evidence-Based Retrieval Tuning From Production Logs
 36C.1 Why hand-picked thresholds fail — the retrieval knobs that need real-data calibration
@@ -536,6 +564,9 @@
 38.18 Choosing between the three — a decision matrix: hosted vs self-hosted, callback vs ambient, UI vs API-first
 38.19 Debugging retrieval failures
 38.20 Debugging LangGraph flows that don't terminate — recursion limits, state snapshots, node-level breakpoints
+38.21 Function-level tracing beyond node boundaries — `operation_tracing.py`, the `@traced_operation(name)` decorator that wraps a function in a `RunnableLambda` so it nests inside the ambient trace hierarchy, and `instrument_namespace(globals(), group, exclude={…})` for auto-wrapping every module-defined function and method (applied to all 17 `app_workflow/` node + service modules)
+38.22 Shaping the trace payload — the `TraceSpec` dataclass (`input_builder` / `output_builder`), `_summarize()` size-bounding (`_MAX_TEXT_CHARS`, `_MAX_COLLECTION_ITEMS`, numpy-array-to-shape reduction, service-object reduction, depth cap), and `_include_argument()` noise filtering (`self`, `cls`, `config`, `callbacks`, `client`, `handler`)
+38.23 The dedicated `LangfuseHandler` — a fourth root log handler (`langfuse_logging.py`) that converts every `LogRecord` into a Langfuse `event` observation on the active trace, the `ContextVar` re-entrancy guard against SDK-log feedback loops, the deliberate `INFO` → `DEBUG` level choice, and why it is a separate handler from `_TracingHandler` rather than an extension of it
 
 ### Chapter 39 — Performance and Cost Optimization
 39.1 Batching embeddings — sweet-spot batch sizes
@@ -550,6 +581,7 @@
 39.10 The GPU-driver failure fallback — falling back to CPU embeddings when NVIDIA Code 43 is detected
 39.11 The `merge_llm` / `judge_llm` / `json_fix_llm` split — routing cheap operations to a smaller model
 39.12 Latency budgeting in a multi-stage pipeline — where the seconds actually go
+39.13 The singleton `timing_tracker.py` — `initialize` / `record` / `record_llm` / `_write` capturing per-phase and per-LLM-call durations to a JSON file, and reading the per-stage long-tail (retrieval-validation, merge, and compression calls ranging from milliseconds to 5–12+ minutes) rather than assuming a uniform per-stage cost
 
 ### Chapter 40 — Security and Safety
 40.1 Prompt injection — how attackers hide instructions in documents
@@ -575,6 +607,7 @@
 41.13 MongoDB replica sets and why multi-document transactions require them
 41.14 `DuplicateKeyError` as an idempotency guard for LangGraph node retries — safer than a check-then-insert race
 41.15 Migration path — copying `interactions.jsonl`, `failed_variants.json`, and `user_thumbdowns.json` into MongoDB collections without losing history
+41.16 Per-request pipeline control — the optional nested `switches` object on `QueryRequest`, letting a caller overlay any subset of the 20 `ENABLE_*` workflow flags on a single `/query` without a restart (see 36B.9), and how `resolve_switches()` stores the resolved dictionary in `GraphState` for the whole run
 
 ### Chapter 42 — Advanced Topics and Extensions
 42.1 Multi-modal RAG — images, tables, audio
@@ -592,9 +625,9 @@
 43.1 What you built, file by file
 43.2 Architecture diagram of the complete system (`rag_graph.png` — the rendered LangGraph)
 43.3 The three failure-memory mechanisms working together (`failed_variants`, `user_thumbdowns`, `learned_qa`)
-43.4 Documentation discipline — keeping `Architecture.md`, `Status.md`, `Decisions.md`, `Bugs.md`, and `Research.md` in sync with the code
-43.5 Architecture Decision Records (ADRs) — the `Decisions.md` ledger and how to write a new one
-43.6 The structured bug catalogue — `Bugs.md` with `BUG-XXX` IDs, severity, root cause, and status
+43.4 Documentation discipline — one `docs/` folder per codebase, each holding the same five ledgers (`Architecture.md`, `Status.md`, `Decisions.md`, `Bugs.md`, `Research.md`), and keeping every set in sync with its own code
+43.5 Architecture Decision Records (ADRs) — the `Decisions.md` ledger, how to write a new one, and why each codebase numbers its ADRs independently, so IDs must always be cited qualified ("*Memora* ADR-005", never a bare "ADR-005") — see Appendix K
+43.6 The structured bug catalogue — `Bugs.md` with `BUG-XXX` IDs, severity, root cause, and status, replicated per codebase with its own independent numbering — see Appendix C
 43.7 The chronological status log — `Status.md` as a write-once-per-week development diary
 43.8 Known limitations and honest tradeoffs
 43.9 Ten enhancement ideas, ranked by effort
@@ -606,17 +639,28 @@
 ## **APPENDICES**
 
 - **Appendix A** — Full Source Code Listings
-  - LangChain pipeline (`app/`): `ingest.py`, `embedding_manager.py`, `vector_store.py`, `retriever.py`, `tools.py`, `llm_caller.py`, `llm_setup.py`, `fix_llm_output.py`, `context_compression.py`, `agent_query.py`, `validators.py`, `feedback_store.py`, `self_learner.py`, `learned_qa_store.py`, `query.py`, `run_batch.py`, `api.py`, `test_llm_caller.py`, `test_output_fixes.py`
-  - LangGraph pipeline (`app_workflow/`): `main.py`, `api.py`, `graph.py`, `state.py`, `routes.py`, `config.py`, and the node modules — `user_input.py`, `commands.py`, `query_variants.py`, `retrieve.py`, `validate_retrieval.py`, `dedup_merge.py`, `nac.py`, `dc.py`, `lbc.py`, `combine_tracks.py`, `generate_draft.py`, `check_answer_quality.py`, `generate_answer.py`, `no_context_answer.py`, `auto_distillation.py`
-  - Services (`app_workflow/services/`): `llm_setup.py`, `llm_caller.py`, `fix_llm_output.py`, `validators.py`, `logger_config.py`, `prompts.py`, `services.py`, `phoenix_tracing.py`, `langfuse_tracing.py`, `trace_events.py`
+  - LangChain pipeline (`app/`): `ingest.py`, `embedding_manager.py`, `vector_store.py`, `retriever.py`, `tools.py`, `llm_caller.py`, `llm_setup.py`, `fix_llm_output.py`, `context_compression.py`, `agent_query.py`, `validators.py`, `feedback_store.py`, `self_learner.py`, `learned_qa_store.py`, `query.py`, `run_batch.py`, `api.py`, `config.py`, `db.py`, `logger_config.py`, `phoenix_tracing.py`, `prompts.py`, `timing_tracker.py`, `test_llm_caller.py`, `test_output_fixes.py`
+  - LangGraph pipeline (`app_workflow/`): `main.py`, `api.py`, `graph.py`, `state.py`, `routes.py`, `config.py`, and the node modules — `user_input.py`, `commands.py`, `query_variants.py`, `retrieve.py`, `validate_retrieval.py`, `post_retrieve.py`, `dedup_merge.py`, `nac.py`, `dc.py`, `lbc.py`, `combine_tracks.py`, `generate_draft.py`, `check_answer_quality.py`, `generate_answer.py`, `no_context_answer.py`, `auto_distillation.py`
+  - Services (`app_workflow/services/`): `llm_setup.py`, `llm_caller.py`, `fix_llm_output.py`, `validators.py`, `logger_config.py`, `prompts.py`, `services.py`, `phoenix_tracing.py`, `langfuse_tracing.py`, `langfuse_logging.py`, `operation_tracing.py`, `trace_events.py`, `switches.py`, `timing_tracker.py`, `db.py`, `embedding_manager.py`, `vector_store.py`, `retriever.py`, `feedback_store.py`, `learned_qa_store.py`, `self_learner.py`
+  - Document-loader evaluation harness (`Document-Loaders/`): `codes/docling_test.py`, `codes/unstructured_test.py`, `codes/marker_test.py` (see Chapter 5B); `chunking/ingest.py` (Marker-Markdown-scoped chunking with the in-memory `preprocessing()` normalization pass), `chunking/logger_config.py` (see Chapter 7B) — kept as evaluation utilities, not production ingestion
+  - LangSmith-Masterclass observability sandbox (`langsmith-masterclass/`, see Chapter 38): `1_simple_llm_call.py`, `2_sequential_chain.py`, `3_rag_v1.py`–`3_rag_v4.py`, `4_agent.py`, `5_langgraph.py`, `llm_setup.py` — a progressive ladder of standalone demos showing how a tracing backend renders projects, traces, and runs as complexity grows from one call to a fan-out/fan-in graph
+  - Utility scripts: `run_all_workflow_batches.py` (long-lived single-process 100-scenario benchmark runner)
 - **Appendix B** — Full Annotated Dry-Run Trace (every step from question to answer for one real query, including embedding logs, compression telemetry, per-iteration context-size telemetry, the `[CTXSIZE]` greppable lines, and Phoenix + LangSmith span IDs)
-- **Appendix C** — Bug Catalogue
-  - Pre-refactor bugs: the `args`-mutation context leak, the tuple-vs-string return bug in `tools.py`, the JSON-vs-Python merge-output bug, the fence-stripping bug, the parent-root double-ingestion bug, the intra-chunk DC group bug, the greedy-regex JSON extraction bug, the verdict-deduplication bug, the redundancy-judge subject-misidentification bug, the DC judge emitting Python instead of JSON, the Outlines + Groq `json_schema`-unsupported-model failure, the `tool_use_failed` recovery path, the chunk-merge JSON-escaping bug with Windows backslash paths, the assistant↔`tool_call_id` pairing break during message scrubbing, the LLM-skips-compress-and-CAQ phase-bypass attempts
-  - Behavioral / judge bugs (BUG-001 – BUG-010): tool-call overflow silently drops requests, retrieval judge over-lenient on bibliography chunks, DC redundancy judge false positives, LBC over-expansion, `check_answer_quality` blind to semantic extension, no schema awareness for data-interpretation questions, near-synonym-loop enforcement, self-reported confidence, exact-string thumbdown matching, weak coverage checker for multi-part queries
-  - Fatal-cause / environment bugs (BUG-F001 – BUG-F010+): the merge JSON escaping bug on Windows paths, `OPENAI_BASE_URL` resolved before `load_dotenv()`, `CUSTOM_API_BASE` double-appending `/chat/completions`, local server returning `function.arguments` as dict, DC silent JSON-parse failure, DC judge Python output, `compression.py` shadowing Python 3.14 stdlib module, early COMPRESS trigger blocking multi-query retrieval, `json-repair` missing from `requirements.txt`, inconsistent source-path formatting polluting `learned_qa`
-  - Late-refactor bugs (BUG-057 – BUG-076): NVIDIA GPU Code 43 fallback, LLM-repair-tier fabricates JSON, wrong balanced-JSON candidate selection, `combine_tracks` fan-in non-barrier, `generate_answer` returns draft verbatim, `ChatGroq` + HF-path `model_not_found` 404, HF Router HTTP 402 under load, LBC fabricates from citation-only sources, DC deletes before `validate_redundancy` can reject, missing quality gate after `generate-answer-from-draft`, Phoenix never initialized in CLI entry point, `_TracingHandler` filters DEBUG before spans see it, `get_current_span()` returns non-recording span, LangSmith UI cannot render custom events, Windows cp1252 crash on trace payloads, circular import via mixed absolute/relative styles, Langfuse `CallbackHandler` was a no-op without `config` threading, Langfuse evicts Phoenix span exporter from global `TracerProvider`
+- **Appendix C** — Bug Catalogue, by codebase
+  - *How to read this appendix:* every codebase in this project keeps its own `docs/Bugs.md`, and **each one numbers independently from BUG-001**. A bare "BUG-001" is therefore ambiguous — three different bugs carry that ID. Always cite them qualified: *Memora* BUG-001 vs *Document-Loaders* BUG-001 vs *LangSmith-Masterclass* BUG-001.
+  - **C.1 — Memora** (the book's main system; Parts III–VII)
+    - Pre-refactor bugs: the `args`-mutation context leak, the tuple-vs-string return bug in `tools.py`, the JSON-vs-Python merge-output bug, the fence-stripping bug, the parent-root double-ingestion bug, the intra-chunk DC group bug, the greedy-regex JSON extraction bug, the verdict-deduplication bug, the redundancy-judge subject-misidentification bug, the DC judge emitting Python instead of JSON, the Outlines + Groq `json_schema`-unsupported-model failure, the `tool_use_failed` recovery path, the chunk-merge JSON-escaping bug with Windows backslash paths, the assistant↔`tool_call_id` pairing break during message scrubbing, the LLM-skips-compress-and-CAQ phase-bypass attempts
+    - Behavioral / judge bugs (BUG-001 – BUG-010): tool-call overflow silently drops requests, retrieval judge over-lenient on bibliography chunks, DC redundancy judge false positives, LBC over-expansion, `check_answer_quality` blind to semantic extension, no schema awareness for data-interpretation questions, near-synonym-loop enforcement, self-reported confidence, exact-string thumbdown matching, weak coverage checker for multi-part queries
+    - Fatal-cause / environment bugs (BUG-F001 – BUG-F010+): the merge JSON escaping bug on Windows paths, `OPENAI_BASE_URL` resolved before `load_dotenv()`, `CUSTOM_API_BASE` double-appending `/chat/completions`, local server returning `function.arguments` as dict, DC silent JSON-parse failure, DC judge Python output, `compression.py` shadowing Python 3.14 stdlib module, early COMPRESS trigger blocking multi-query retrieval, `json-repair` missing from `requirements.txt`, inconsistent source-path formatting polluting `learned_qa`
+    - Late-refactor bugs (BUG-057 – BUG-076): NVIDIA GPU Code 43 fallback, LLM-repair-tier fabricates JSON, wrong balanced-JSON candidate selection, `combine_tracks` fan-in non-barrier, `generate_answer` returns draft verbatim, `ChatGroq` + HF-path `model_not_found` 404, HF Router HTTP 402 under load, LBC fabricates from citation-only sources, DC deletes before `validate_redundancy` can reject, missing quality gate after `generate-answer-from-draft`, Phoenix never initialized in CLI entry point, `_TracingHandler` filters DEBUG before spans see it, `get_current_span()` returns non-recording span, LangSmith UI cannot render custom events, Windows cp1252 crash on trace payloads, circular import via mixed absolute/relative styles, Langfuse `CallbackHandler` was a no-op without `config` threading, Langfuse evicts Phoenix span exporter from global `TracerProvider`
+  - **C.2 — Document-Loaders** (the conversion + chunking evaluation harness; Chapters 5B and 7B)
+    - Environment / dependency bugs (BUG-001, BUG-005 – BUG-008): Unstructured PDF conversion failing because the PDF extras were missing, the shared installation selecting a Python-incompatible Numba release, Marker and Unstructured carrying incompatible Pillow constraints, the shared environment accumulating incomplete Torch metadata, and the unrelated `marker` package shadowing `marker-pdf`
+    - Conversion-fidelity bugs (BUG-011, BUG-012): Marker silently corrupting structural completeness despite high word retention, and Marker flattening nested Markdown list pointers to a single indentation level
+    - Chunking-boundary bugs (BUG-013 – BUG-015): `preprocessing()` scoping alphabetic/roman marker families globally and chaining unrelated enumerations, `preprocessing()`'s unconditional forward-merge concatenating unrelated blocks, and `temp_split()`'s nested-list boundary helper silently dropping content between chunks
+  - **C.3 — LangSmith-Masterclass** (the observability teaching scripts; Chapter 38)
+    - BUG-001 – BUG-003: the local custom chat-completions server having no embeddings endpoint (`OpenAIEmbeddings` 404s regardless of config), `with_structured_output` being incompatible with the local TGI proxy (breaking `5_langgraph.py`'s evaluation nodes), and the Weatherstack API key in `4_agent.py` hitting its monthly usage limit
 - **Appendix D** — Data Files and Reference Outputs (`interactions.jsonl`, `failed_variants.json`, `user_thumbdowns.json`, `learned_qa` collection, `rag_graph.png`, `langchain_api_*_debug.log`, `langgraph_api_*_debug.log`, `new_log.txt`, `old_log.txt`)
-- **Appendix E** — Three-Run Stress Test Tables (token counts, query lists, where the model breaks) — plus the `All_flags_True`, `All_flags_True_except_*`, `Post-retrieval-separation` flag-ablation runs
+- **Appendix E** — Three-Run Stress Test Tables (token counts, query lists, where the model breaks) — plus the `All_flags_True`, `All_flags_True_except_*`, `Post-retrieval-separation` flag-ablation runs, and the 15-batch / 100-scenario workflow benchmark with its per-stage `timing_tracker` JSON (the millisecond-to-12-minute per-stage long-tail)
 - **Appendix F** — Troubleshooting Cookbook (common errors and fixes)
 - **Appendix G** — Glossary of terms (agent, chunk, embedding, RAG, distillation, ReAct, hybrid retrieval, thumbdown, variant, groundedness, relevance, MMR, RRF, NAC, DC, LBC, GraphState, fan-out/fan-in, reducer-typed field, `defer=True` barrier, non-barrier fan-in, multi-verdict judge, Conservative-Grounding Prompt Pattern, `MERGE_SIMILARITY_THRESHOLD`, `LBC_MIN_RETENTION_RATIO`, `DC_WINDOW_SIZE`, `RETRIEVAL_TOP_K`, `RETRIEVAL_TOP_L`, `DOCUMENTS_MIN_SIMILARITY`, `LEARNED_QA_MIN_SIMILARITY`, `LLM_RATE_LIMIT_*`, ambient vs callback tracing, `OpenInference`, `TracerProvider`, span exporter, self-edit, ReSTEM, LoRA, catastrophic forgetting, PRM, …)
 - **Appendix H** — Recommended Reading and Video Resources
@@ -628,7 +672,11 @@
   - Framework docs: LangGraph, LangSmith, Arize Phoenix, Langfuse, OpenInference Semantic Conventions
 - **Appendix I** — Comparison Tables — Vector DBs, Embedding Models, LLM Providers, Tracing Backends (Phoenix vs LangSmith vs Langfuse: self-hosting, egress, callback vs ambient, UI-render surface)
 - **Appendix J** — Suggested Exercises and Project Extensions
-- **Appendix K** — Architecture Decision Records (the full `Decisions.md` ledger — ADR-001 embedding model, ADR-002 vector store, ADR-003 classic-to-agentic, ADR-007 NAC→DC→LBC pipeline, ADR-010 four-phase state machine, ADR-012 split system prompt, ADR-013 thumbdown persistence, ADR-020 `check_answer_quality` removal from tool schema, ADR-053 evidence-based threshold tuning, ADR-054 HF Router adoption, ADR-055 dedicated `json_fix_llm`, ADR-056 multi-verdict quality judge, ADR-057 `combine_tracks` with `defer=True`, ADR-058 draft-as-synthesis-input, ADR-059 Conservative-Grounding Prompt Pattern, ADR-060 LLM backend consolidation, ADR-061 direct JSON list for query variants, ADR-062 full backend consolidation, ADR-063 Phoenix as primary observability backend, ADR-064 `_TracingHandler` logging bridge, ADR-065 divergent `llm_setup` between pipelines, ADR-066 Langfuse as third tracing backend, ADR-067 explicit `config` threading — and the ~50 others)
+- **Appendix K** — Architecture Decision Records, by codebase
+  - *How to read this appendix:* as with the bug catalogue, every codebase keeps its own `docs/Decisions.md` and **numbers independently from ADR-001**. Three different decisions are called ADR-001 here, and two unrelated ones are called ADR-002 — both happen to be "standardize on Python 3.12," for entirely different reasons. Always cite them qualified: *Memora* ADR-005, not ADR-005.
+  - **K.1 — Memora** (the book's main system) — the full `Decisions.md` ledger: ADR-001 embedding model, ADR-002 vector store, ADR-003 classic-to-agentic, ADR-007 NAC→DC→LBC pipeline, ADR-010 four-phase state machine, ADR-012 split system prompt, ADR-013 thumbdown persistence, ADR-020 `check_answer_quality` removal from tool schema, ADR-053 evidence-based threshold tuning, ADR-054 HF Router adoption, ADR-055 dedicated `json_fix_llm`, ADR-056 multi-verdict quality judge, ADR-057 `combine_tracks` with `defer=True`, ADR-058 draft-as-synthesis-input, ADR-059 Conservative-Grounding Prompt Pattern, ADR-060 LLM backend consolidation, ADR-061 direct JSON list for query variants, ADR-062 full backend consolidation, ADR-063 Phoenix as primary observability backend, ADR-064 `_TracingHandler` logging bridge, ADR-065 divergent `llm_setup` between pipelines, ADR-066 Langfuse as third tracing backend, ADR-067 explicit `config` threading, ADR-068 central tracing policy (`instrument_namespace` + `TraceSpec` function-level tracing), ADR-069 dedicated `LangfuseHandler` log mirroring, ADR-070 long-lived single-process benchmark runner, ADR-071 per-request workflow switches carried in `GraphState`, ADR-072 document-loader converters kept as evaluation utilities — and the ~50 others
+  - **K.2 — Document-Loaders** (the conversion + chunking evaluation harness; Chapters 5B and 7B) — ADR-001 one comparable script and result directory per loader, ADR-002 standardize the Windows environment on Python 3.12, ADR-003 use PowerShell as the verified execution shell, ADR-004 batch every source file and mirror relative output paths, ADR-005 isolate each loader in its own Python environment, ADR-006 scope chunking to Marker Markdown and keep run reports untracked, ADR-007 normalize Marker clause structure in memory before chunking
+  - **K.3 — LangSmith-Masterclass** (the observability teaching scripts; Chapter 38) — ADR-001 embeddings sourced from the Hugging Face Inference Router rather than the local custom LLM endpoint, ADR-002 project `.venv` built on Python 3.12 rather than 3.14, ADR-003 remaining OpenAI-dependent scripts migrated onto the local TGI proxy + HF Router stack, ADR-004 tracking docs moved into `docs/` and no longer Git-ignored
 - **Appendix L** — API Endpoints Reference (the contents of `API_ENDPOINTS.txt`: dual-port LangChain/LangGraph setup, request/response shapes, Postman recipes)
 - **Appendix M** — Concurrency and Rate-Limiting Patterns Cookbook — `ThreadPoolExecutor` timeout wrapper, semaphore-guarded LLM calls, FIFO-queue serializer, capped exponential backoff with jitter, `LLMRateLimitAbortError` handling
 - **Appendix N** — The Five LLM Roles Reference — `llm`, `judge_llm`, `json_fix_llm`, `llm_tool`, `merge_llm`: what each does, which provider serves it in the current build, and how to swap

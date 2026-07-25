@@ -1,0 +1,1701 @@
+Today 11:47 AM
+Explain the following in simple terms. I was facing an error and asked a coding agent to help. It solved but when i asked it to explain it gave me a tough answer
+
+What was wrong
+Two files in the corpus failed Marker conversion, for two unrelated reasons that were initially conflated:
+
+File 1 — RecursionError: maximum recursion depth exceeded. Bare message, no location.
+File 2 — "A worker process died while extracting", during PDF text extraction, never reaching the GPU stages.
+The starting task was narrow: bump sys.setrecursionlimit to find out whether file 1's recursion was genuinely infinite or merely deeper than Python's default 1000.
+
+Methods tried, and why each fell short
+Raising sys.setrecursionlimit alone. Would have made things worse, not better. The limit caps Python's frame counter; it doesn't grow the OS stack underneath. Windows gives the main thread 1 MB, which the default limit of 1000 is already sized around — so a raised limit on the main thread trades a catchable RecursionError for a silent process death with no traceback. Fix: run the conversion on a spawned thread with threading.stack_size() (run_with_deep_stack, marker_test.py:138).
+
+A 512 MB thread stack. Rejected by CPython outright — threading.stack_size() raises ValueError rather than clamping at anything ≥ 256 MB (THREAD_MAX_STACK_SIZE). Probing found 255 MB is the ceiling; settled on a 128 MB default with the override clamped.
+
+Classifying "infinite vs. deep" from the stack shape. This one was tested against known-shape stacks before spending a GPU run on it, and the test killed it. A deep-but-finite finite(5000) produces an identical 1-frame repeating cycle to genuinely infinite recursion — and that same call returns fine once the limit is raised. Frame shape cannot separate the two cases. The report was rewritten to state only where the recursion is, and to surface depth-at-failure vs. limit as the discriminating number across two runs.
+
+Blaming the table stage. The log had Table OCR failed for block /page/28/Table/6 right before the crash. Wrong lead: that message comes from marker/processors/table.py, which logs it and continues; the stats line for the whole table stage printed successfully afterward. The real crash was ~3.5 seconds later in marker/renderers/markdown.py. Both the OCR failure and the Overflow in columns warning are caught-and-ignored quality defects, not the crash.
+
+ripgrep searches returning "no matches". Every one of those results was meaningless — .venv-marker/ is gitignored and ripgrep skips ignored files by default. Redone with Select-String, which found the strings immediately.
+
+"Nesting accumulates across the document." The hypothesis was that ~2 unbalanced inline tags per page compound across 250 pages to blow the ceiling. A direct probe overturned it: a closed block-level tag resets the nesting. 200 blocks each containing 10 unclosed <i> tags → depth 11, not 2200. One pathological block surrounded by 1000 clean blocks → depth unchanged. Depth is set by the worst single block, not by document length — which meant splitting the PDF or using page_range could not fix the recursion at all.
+
+The final solution
+Three independent changes, each targeting a different failure:
+
+Recursion (file 1) — raised limit plus a real stack behind it. Measured markdownify burns ~1.99 frames per DOM nesting level, so the default 1000 buys ~480 levels of nested HTML; depth 501 broke, 481 survived. Verified the depth is bounded (it can't exceed the tag count): DOM depths of 1001, 3001 and 8001 all convert at limit 20000. So the limit bump is a genuine fix, not a band-aid. Mechanism: markdownify parses with Python's html.parser, which does not auto-close unclosed inline tags, so each one swallows the rest of its block as a child — exactly one extra level per unclosed tag.
+
+Dead worker (file 2) — pdftext_workers=1 (marker_test.py:223). pdftext sizes its pool as min(pdftext_workers, pages // 10) and only skips the ProcessPoolExecutor when that lands ≤ 1, so every document here (154/192/250 pages) was getting 4 spawned workers, and one dying took the whole conversion with it. Note this also retired the batching idea for this failure: a 50-page slice still yields min(4, 5) = 4 workers.
+
+Batching kept as a fallback only — convert_batched (marker_test.py:170) runs on the exception path, not by default, because slicing costs cross-page context (a table spanning a boundary gets split). Plus a resume-by-mtime skip so a retry after one bad file doesn't reconvert hours of successful work, and flush=True throughout — the first diagnostic run was unreadable live because Marker's logs go to stderr unbuffered while every print() sat in a buffered stdout.
+
+How we got there
+The through-line was refusing to accept any explanation that hadn't been measured, and each measurement overturned the step before it:
+
+Test the diagnostic before spending the GPU run on it → caught the illegal stack size and the overclaiming verdict.
+Grep for the actual log strings instead of trusting log adjacency → moved the crash from the table processor to the Markdown renderer.
+Sanity-check that the search tool is even reading the files → exposed the gitignore blind spot that had made several searches silently empty.
+Probe the mechanism synthetically rather than reasoning about it → gave the exact frames ÷ 2 = max depth rule, proved the depth is bounded, and then killed the accumulation theory that would have justified splitting the documents.
+That last probe is the one that mattered most: it turned "split the PDFs and use page_range" from a plausible fix into a demonstrably ineffective one, and pushed the real second-file fix onto pdftext_workers instead.
+
+Worth noting: this whole episode — the renderer recursion, the 480-level ceiling, pdftext_workers=1, and the two retracted hypotheses — warrants a docs/Bugs.md entry and possibly an ADR. I haven't written anything to docs/; say the word if you want me to.
+
+
+The coding agent discovered that two different PDF files were failing for two completely different reasons. At first, the errors and warning messages were mixed together, which made the real causes harder to identify.
+
+The short version
+File 1 failed because its generated HTML was nested too deeply.
+File 2 failed because one of several PDF text-extraction processes crashed.
+Splitting PDFs into batches looked promising, but testing showed it would not fix either root cause reliably.
+File 1: The recursion error
+What does “maximum recursion depth exceeded” mean?
+
+Recursion happens when one function calls another function, which calls another, and so on. Python keeps track of these calls using a stack.
+
+Python normally allows approximately 1,000 nested function calls. If the program goes beyond this limit, Python stops it with:
+
+RecursionError: maximum recursion depth exceeded
+
+Marker was converting the document into Markdown. During this process, it used markdownify to process HTML.
+
+The PDF had HTML similar to this:
+
+<i>
+  <i>
+    <i>
+      <i>
+        Text
+
+Some inline tags such as <i> were not properly closed. Therefore, each new tag became a child of the previous one, creating a very deeply nested structure.
+
+Why not simply increase Python’s recursion limit?
+
+The original idea was:
+
+sys.setrecursionlimit(20000)
+
+However, there are two limits involved:
+
+Python’s recursion limit — the maximum number of calls Python permits.
+The operating system’s thread stack — the actual memory available for those calls.
+
+Raising only Python’s limit is dangerous. Python may allow additional calls, but Windows may not have enough stack memory to hold them. Instead of receiving a useful Python error, the entire program could suddenly terminate without a traceback.
+
+The actual fix
+
+The conversion now runs inside a separate thread with:
+
+A higher Python recursion limit.
+A larger amount of real stack memory.
+
+In simple terms, the solution did both:
+
+Allow more nested calls + provide enough memory for those calls
+
+The agent tested the behavior and found that Markdown conversion uses roughly two Python calls for each HTML nesting level.
+
+Therefore:
+
+A recursion limit of 1,000 supports approximately 480 nested HTML levels.
+A limit of 20,000 provides enough room for several thousand levels.
+
+Testing also showed that the nesting was extremely deep but finite, rather than truly infinite. This means increasing the limit and stack size is a legitimate fix.
+
+Why a 512 MB thread stack was not used
+
+The agent initially considered allocating a 512 MB stack to the thread.
+
+However, CPython does not allow a thread stack that large through threading.stack_size(). Instead of automatically lowering the value, Python raises a ValueError.
+
+Testing found:
+
+Approximately 255 MB was the maximum accepted value.
+128 MB was selected as a safer default.
+User-provided values are restricted so they cannot exceed the supported maximum.
+Why inspecting the repeated calls did not prove infinite recursion
+
+The agent initially tried to determine whether the recursion was:
+
+Truly infinite, or
+Very deep but eventually terminating.
+
+It attempted to determine this by examining the repeating functions in the error stack.
+
+That approach does not work reliably.
+
+For example, a function that recursively counts to 5,000 may show the same repeated function call as a function that never stops:
+
+def finite(n):
+    if n == 0:
+        return
+    finite(n - 1)
+
+The stack looks repetitive in both situations. Therefore, the shape of the stack cannot distinguish between deep and infinite recursion.
+
+The more useful test is:
+
+Run with one recursion limit.
+Record the depth where it fails.
+Increase the limit.
+See whether it completes or fails again near the new limit.
+
+In this case, it completed with a sufficiently high limit, proving that the recursion was bounded.
+
+The table warning was not the cause
+
+Immediately before the crash, the logs showed something like:
+
+Table OCR failed for block /page/28/Table/6
+
+That made it look as though table processing caused the crash.
+
+However, Marker is designed to catch that table error, log it, and continue. The table-processing stage later reported that it completed successfully.
+
+The actual recursion error happened about 3.5 seconds later in:
+
+marker/renderers/markdown.py
+
+Therefore:
+
+The table OCR failure may reduce the quality of one table.
+The column overflow warning may affect formatting.
+Neither warning crashed the conversion.
+The actual crash happened while generating Markdown.
+
+This is an important distinction: the message nearest to a crash is not necessarily its cause.
+
+The file-search problem
+
+The agent searched Marker's installed files using ripgrep, but it returned no matches.
+
+The searches were misleading because Marker's files were inside:
+
+.venv-marker/
+
+That folder was ignored by Git. By default, ripgrep also skips files and directories ignored by Git.
+
+So “no matches” did not mean the text was absent. It meant the tool had not searched those files.
+
+The agent repeated the search using PowerShell’s Select-String, which does not follow the same Git-ignore behavior, and found the relevant code immediately.
+
+Why PDF length was not causing the recursion
+
+One theory was that malformed HTML accumulated across the entire document.
+
+For example:
+
+Page 1 adds two unclosed tags
+Page 2 adds two more
+Page 3 adds two more
+...
+250 pages eventually create excessive nesting
+
+Testing proved this theory wrong.
+
+A completed block-level element resets the nesting. This means malformed tags in one block generally do not accumulate into later blocks.
+
+The actual rule is:
+
+Recursion depth depends on the single worst block,
+not on the total number of pages.
+
+For example:
+
+200 blocks containing 10 unclosed tags each only reached a depth of approximately 11.
+One block containing hundreds of unclosed tags produced very deep nesting.
+Adding 1,000 normal blocks before or after that bad block did not change its nesting depth.
+
+Therefore, splitting the PDF into smaller page ranges would not fix File 1. The problematic block would remain deeply nested regardless of which batch contained it.
+
+File 2: The worker process died
+
+File 2 failed earlier, while text was being extracted from the PDF. It never reached the GPU-based processing stages.
+
+Marker’s pdftext component was creating multiple independent worker processes. For these large documents, it created four workers.
+
+Conceptually:
+
+Main conversion
+├── Text worker 1
+├── Text worker 2
+├── Text worker 3
+└── Text worker 4
+
+If any one worker suddenly died, the entire text-extraction job failed with:
+
+A worker process died while extracting
+
+The fix was:
+
+pdftext_workers = 1
+
+With only one worker, pdftext avoids creating the multi-process worker pool. This removes the unstable multi-process behavior.
+
+The trade-off is that text extraction may be slower, but it is more reliable.
+
+Why batching did not fix the worker problem
+
+The agent considered processing the PDF in 50-page batches.
+
+However, pdftext calculates its worker count using approximately:
+
+min(pdftext_workers, pages // 10)
+
+For a 50-page batch with a configured maximum of four workers:
+
+min(4, 50 // 10)
+min(4, 5)
+= 4 workers
+
+Therefore, each batch would still use four worker processes. A worker could still die, producing the same failure.
+
+Setting pdftext_workers=1 directly targets the real problem.
+
+Why batching is still available as a fallback
+
+Batching was retained, but it is only attempted if normal conversion fails.
+
+It is not used by default because splitting a PDF can damage cross-page context. For example, if a table begins on page 49 and continues onto page 50, splitting there may cause Marker to treat it as two unrelated tables.
+
+So the chosen order is:
+
+Try converting the whole PDF normally.
+Apply the recursion and worker fixes.
+Use batching only as a fallback after an exception.
+Two additional reliability improvements
+Skip completed files
+
+The program now uses file modification times to identify files that were already converted successfully.
+
+This means that if one file fails after several hours, rerunning the script will skip completed files instead of converting everything again.
+
+Immediately print logs
+
+Python’s print() normally buffers some output. Marker’s own logs were appearing immediately on stderr, while custom messages remained waiting in buffered stdout.
+
+This made the live output appear out of order.
+
+Using:
+
+print(..., flush=True)
+
+forces messages to appear immediately, making debugging easier.
+
+Final fixes at a glance
+Problem	Actual cause	Fix
+File 1 recursion error	One HTML block had extremely deep nesting caused by unclosed inline tags	Higher recursion limit plus a larger thread stack
+File 2 dead worker	One of several PDF text-extraction processes crashed	Set pdftext_workers=1
+Reprocessing completed files	Script restarted every conversion	Skip outputs that are already up to date
+Confusing live logs	Standard output was buffered	Use flush=True
+Possible fallback failures	Some files may still fail normally	Retry using batches only after failure
+
+The central lesson is that the agent stopped relying on guesses based on nearby log messages and tested each theory directly. Those tests showed that the table warning and document length were distractions: the real problems were deeply nested HTML in File 1 and unstable parallel text extraction in File 2.
+
+
+
+The following is our chat from a different session. Explain:
+-  What was wrong?
+- What methods we used? Why did they fail?
+- What was the final solution?
+- How did we arrive to this solution
+
+Chat:
+do this:
+add sys.setrecursionlimit(...) bump in marker_test.py to see whether file 1 is a genuine infinite recursion or just a deep-but-finite one, and/or
+Show less
+I'll implement this properly. One thing to get right up front: raising sys.setrecursionlimit alone on Windows will just turn the RecursionError into a silent process crash, because the limit guards Python's frame counter, not the 1 MB OS stack behind the main thread. The experiment only produces a readable answer if the conversion also gets a bigger stack — which means running it in a spawned thread.
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py
+Added 3 lines
+Those unused-import hints resolve as I add the rest. Now the constants and the diagnostic helpers:
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py
+Added 93 lines
+Only spell-checker noise. Now wire the report into the failure path and switch the entry point:
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py
+Added 4 lines
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py
+Added 4 lines
+Before spending a long Marker run on it, let me verify the report logic actually classifies both cases correctly. I'll exec the real helper source out of the file (avoiding the heavy marker import) and feed it a known-infinite and a known-finite recursion:
+Write C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py
+58 lines
+"""Exercise marker_test.py's recursion_report on known-shape stacks."""
+import sys, threading, traceback
+from pathlib import Path
+
+SRC = Path(r"c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py")
+text = SRC.read_text(encoding="utf-8")
+start = text.index("def _cycle_length")
+end = text.index("def run_with_deep_stack")
+ns = {"traceback": traceback, "Path": Path}
+exec(text[start:end], ns)
+recursion_report = ns["recursion_report"]
+def infinite(n=0):
+    return infinite(n + 1)
+def mutual_a(n=0):
+    return mutual_b(n + 1)
+def mutual_b(n=0):
+    return mutual_a(n + 1)
+def finite(n):
+    if n == 0:
+        return 0
+    return finite(n - 1) + 1
+def run(label, fn):
+    try:
+        fn()
+    except RecursionError as e:
+        print(f"--- {label} ---")
+        print(recursion_report(e))
+        print()
+def main():
+    sys.setrecursionlimit(3000)
+    run("self-recursive (expect: unbounded, 1-frame cycle)", infinite)
+    run("mutual recursion (expect: unbounded, 2-frame cycle)", mutual_a)
+    # Deep but finite: needs more depth than the limit allows, so it still
+    # raises, but its stack is one function repeating -> should look unbounded.
+    run("deep finite, over limit", lambda: finite(5000))
+    # And the case that matters: does a deep-but-finite call SUCCEED once the
+    # limit is raised? That is the real experiment marker_test.py runs.
+    sys.setrecursionlimit(20000)
+    print("deep finite (5000) at limit 20000 ->", finite(5000))
+threading.stack_size(512 * 1024 * 1024)
+t = threading.Thread(target=main)
+t.start()
+t.join()
+PowerShell Test recursion report classifier on known stacks
+IN
+& "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Scripts\python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py"
+OUT
+Exit code 1
+Traceback (most recent call last):
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py", line 54, in <module>
+    threading.stack_size(512 * 1024 * 1024)
+ValueError: size not valid: 536870912 bytes
+threading.stack_size has a hard upper bound on Windows. Let me find the real ceiling rather than guess:
+
+PowerShell Probe valid thread stack size range on Windows
+IN
+& "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Scripts\python.exe" -c @'
+import threading
+for mb in (512, 256, 255, 192, 128, 64):
+    try:
+        threading.stack_size(mb*1024*1024); print(mb, "MB OK")
+    except ValueError as e:
+        print(mb, "MB rejected:", e)
+'@
+
+OUT
+Exit code 1
+  File "<string>", line 4
+    threading.stack_size(mb*1024*1024); print(mb, MB
+                                             ^
+SyntaxError: '(' was never closed
+PowerShell is eating the quotes. Writing to a file instead:
+
+Write C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\probe_stack.py
+9 lines
+import threading
+
+for mb in (512, 256, 255, 192, 128, 64):
+    try:
+        threading.stack_size(mb * 1024 * 1024)
+        print(mb, "MB OK")
+    except ValueError as e:
+        print(mb, "MB rejected:", e)
+PowerShell Probe valid thread stack sizes
+IN
+& "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Scripts\python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\probe_stack.py"
+
+OUT
+512 MB rejected: size not valid: 536870912 bytes
+256 MB rejected: size not valid: 268435456 bytes
+255 MB OK
+192 MB OK
+128 MB OK
+64 MB OK
+Confirmed — CPython rejects any thread stack ≥ 256 MB, so my 512 MB default would have aborted the script instantly. Fixing that:
+
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py
+Added 6 lines
+Now re-running the classifier test with a valid stack size:
+
+Edit C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py
+Modified
+PowerShell Test recursion classifier on known stacks
+IN
+& "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Scripts\python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py"
+
+OUT
+--- self-recursive (expect: unbounded, 1-frame cycle) ---
+  stack depth at failure: 2996 frames
+  VERDICT: unbounded recursion - 1-frame cycle repeated 2995x; a higher limit will not help
+  repeating cycle:
+    test_report.py:15 infinite()
+
+--- mutual recursion (expect: unbounded, 2-frame cycle) ---
+  stack depth at failure: 2996 frames
+  VERDICT: unbounded recursion - 2-frame cycle repeated 1497x; a higher limit will not help
+  repeating cycle:
+    test_report.py:23 mutual_b()
+    test_report.py:19 mutual_a()
+
+--- deep finite, over limit ---
+  stack depth at failure: 2996 frames
+  VERDICT: unbounded recursion - 1-frame cycle repeated 2994x; a higher limit will not help
+  repeating cycle:
+    test_report.py:29 finite()
+
+deep finite (5000) at limit 20000 -> 5000
+The test exposes a real flaw in my classifier, and it's worth being precise about. Look at case 3: finite(5000) is a deep-but-finite descent, yet it produced the identical "unbounded, 1-frame cycle" verdict as genuine infinite recursion — and the last line proves that verdict wrong by converting fine at limit 20000.
+
+Frame shape alone cannot separate the two cases when the recursion is self-similar. The decisive evidence is empirical: does the depth track the limit? Let me correct the wording so the report doesn't overclaim:
+
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py
+Added 6 lines
+PowerShell Re-test corrected recursion report
+IN
+& "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Scripts\python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py"
+
+OUT
+Exception in thread Thread-1 (main):
+Traceback (most recent call last):
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py", line 15, in infinite
+    return infinite(n + 1)
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py", line 15, in infinite
+    return infinite(n + 1)
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py", line 15, in infinite
+    return infinite(n + 1)
+           ^^^^^^^^^^^^^^^
+  [Previous line repeated 997 more times]
+RecursionError: maximum recursion depth exceeded
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\LOQ\AppData\Local\Python\pythoncore-3.12-64\Lib\threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "C:\Users\LOQ\AppData\Local\Python\pythoncore-3.12-64\Lib\threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py", line 43, in main
+    run("self-recursive (expect: unbounded, 1-frame cycle)", infinite)
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py", line 37, in run
+    print(recursion_report(e))
+          ^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 42, in recursion_report
+NameError: name 'RECURSION_LIMIT' is not defined
+--- self-recursive (expect: unbounded, 1-frame cycle) ---
+Test-harness artifact — RECURSION_LIMIT is a module global in the real file but absent from my exec namespace. Adding it:
+
+Edit C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py
+Modified
+PowerShell Re-test corrected recursion report
+IN
+& "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Scripts\python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\test_report.py"
+
+OUT
+--- self-recursive (expect: unbounded, 1-frame cycle) ---
+  depth at failure: 2996 frames (limit 3000)
+  shape: 1-frame cycle repeated 2995x
+  repeating cycle:
+    test_report.py:15 infinite()
+  NEXT: re-run with MARKER_RECURSION_LIMIT doubled. If the depth roughly doubles too, the recursion is unbounded and no limit will help; if it converts, it was only deep.
+
+--- mutual recursion (expect: unbounded, 2-frame cycle) ---
+  depth at failure: 2996 frames (limit 3000)
+  shape: 2-frame cycle repeated 1497x
+  repeating cycle:
+    test_report.py:23 mutual_b()
+    test_report.py:19 mutual_a()
+  NEXT: re-run with MARKER_RECURSION_LIMIT doubled. If the depth roughly doubles too, the recursion is unbounded and no limit will help; if it converts, it was only deep.
+
+--- deep finite, over limit ---
+  depth at failure: 2996 frames (limit 3000)
+  shape: 1-frame cycle repeated 2994x
+  repeating cycle:
+    test_report.py:29 finite()
+  NEXT: re-run with MARKER_RECURSION_LIMIT doubled. If the depth roughly doubles too, the recursion is unbounded and no limit will help; if it converts, it was only deep.
+
+deep finite (5000) at limit 20000 -> 5000
+Report now locates the recursion without overclaiming, and depth-vs-limit is the discriminating number. Let me syntax-check the real file and confirm the constants resolve:
+
+PowerShell Syntax-check marker_test.py
+IN
+& "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Scripts\python.exe" -m py_compile "c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py"; if ($?) { Write-Output "compile OK" }
+
+OUT
+compile OK
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py (lines 37-91)
+One formatting nit — the two comment blocks ran together. Separating them:
+
+Edit c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py
+Added 1 line
+The instrumentation is in place and verified. Now let me actually run the experiment — this is GPU-bound on a 250-page PDF, so I'll run it in the background:
+
+PowerShell Run marker with raised recursion limit
+IN
+Set-Location "c:\Users\LOQ\Desktop\Projects\Document-Loaders"; & ".\.venv-marker\Scripts\python.exe" ".\codes\marker_test.py"
+
+OUT
+Command running in background with ID: bwjh3wlrs. Output is being written to: C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\tasks\bwjh3wlrs.output. You will be notified when it completes. To check interim output, use Read on that file path.
+Instrumentation is in and verified; the diagnostic run is going in the background. Here's what I added to marker_test.py:
+
+1. Raised limit + a stack that can actually hold it (lines 40-59)
+RECURSION_LIMIT defaults to 20000, overridable via MARKER_RECURSION_LIMIT. Critically, the conversion now runs on a spawned thread with a 128 MB stack via run_with_deep_stack() — because sys.setrecursionlimit only raises Python's frame counter, not the OS stack under it. On Windows the main thread gets 1 MB, which the default limit of 1000 is sized around, so bumping the limit on the main thread would have converted a catchable RecursionError into a silent process crash with no traceback at all — the opposite of a diagnostic.
+
+2. A stack-shape report on failure (recursion_report)
+The bare message "maximum recursion depth exceeded" says nothing about where it looped, which is the actual question. This prints depth-at-failure, detects the shortest repeating frame cycle, and names the looping functions.
+
+Two things the testing caught that would otherwise have wasted the run
+I tested the classifier against known-shape stacks before spending a GPU run on it, and it caught two real problems:
+
+My original 512 MB stack was illegal. CPython rejects any thread stack ≥ 256 MB (THREAD_MAX_STACK_SIZE), and threading.stack_size() raises ValueError rather than clamping — the script would have died on line 1 every time. Probed the real ceiling (255 MB OK, 256 MB rejected), defaulted to 128 MB, and clamped the env override.
+
+My first verdict wording was wrong, and I can prove it. I had the report concluding "unbounded recursion — a higher limit will not help" whenever it found a repeating cycle. But a deep-but-finite finite(5000) produces an identical 1-frame repeating cycle to genuine infinite recursion — and that same call returns 5000 perfectly fine once the limit is raised to 20000. Frame shape simply cannot separate the two cases. I rewrote the report to state the cycle location only, and to surface depth at failure vs limit as the number that actually discriminates:
+
+if you double the limit and the depth roughly doubles with it, it's unbounded; if it converts, it was only deep.
+
+So the run in progress is one half of a two-point measurement, not a self-contained verdict.
+
+One caveat worth flagging: the script converts both PDFs, so file 2 will still hit the dead-worker crash — the recursion bump does nothing for that one; it's a separate failure. I'll report the depth figure and cycle location as soon as the run finishes.
+
+In simple terms, tell me why did the conversion of first file failed
+Let me check whether the background run has produced file 1's result yet, so I answer from evidence rather than just the original error:
+
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\tasks\bwjh3wlrs.output
+Still loading models — no result for file 1 yet. So here's the plain-terms answer from the error itself.
+
+Short version
+Marker got stuck going in circles trying to make sense of one broken table, and Python cut it off.
+
+Slightly longer
+Marker handles tables with code that calls itself — to read a table it looks at the table, then calls itself again for the parts inside, and again for the parts inside those. That's normal and it's how nested structures get processed.
+
+Python only lets that self-calling go about 1000 levels deep, then hard-stops it as a safety net. That stop is the error you saw: maximum recursion depth exceeded. It's a tripwire, not a crash from bad memory or a bad GPU.
+
+What tripped it is visible one line earlier in your log:
+
+
+Overflow in columns: 0 >= 3 or rows: 1 >= 1
+That means a table came out malformed — Marker expected 3 columns but found 0. That document is table-heavy (56 tables, and one already failed OCR), and it looks like Marker hit a table it couldn't make sense of, tried to break it down, got the same nonsense back, tried again, and kept digging deeper without ever resolving it — until it blew past the 1000 limit.
+
+What that means for you
+Not your fault. Not your script, your GPU, or your setup. It's a defect in Marker's table handling, triggered by the messy tables in that specific PDF. This matches the note already in your CLAUDE.md that Marker misbehaves on dense, cross-page tables.
+Your script behaved correctly — it caught the error, reported it, and moved on to the next file instead of dying.
+It's a separate problem from file 2. File 2 failed for a completely different reason (a helper process died, most likely out of memory).
+The one open question
+There are two ways this could be true, and they need different fixes:
+
+Truly endless loop — Marker will never finish that table no matter what. Raising the limit changes nothing; the file needs a workaround.
+Just very deep — it would finish, it simply needs more than 1000 levels. Raising the limit fixes it outright.
+The two look identical from the error message alone, which is exactly why I raised the limit to 20000 — the run that's going now will tell us which one it is. I'll report back when it finishes.
+
+Till then, can u tell me which table was it?
+Good question — the log has two different table signals in it, and it's worth checking whether they even point at the same table. Let me find where that "Overflow in columns" message comes from:
+
+Grep "Overflow in (columns|rows)" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages)
+1 line of output
+Grep "Overflow in" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages)
+1 line of output
+Grep "[Oo]verflow" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages, glob: *.py)
+4 lines of output
+The message isn't in any Python source — so it's coming from a compiled extension. Let me scan binaries for it, and simultaneously check how Marker numbers the page in that /page/28/Table/6 id:
+
+Write C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\find_msg.py
+20 lines
+"""Locate the 'Overflow in columns' string, including inside binaries."""
+from pathlib import Path
+
+ROOT = Path(r"c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages")
+needles = [b"Overflow in", b"verflow in col", b"tables_ocr_failed", b"Table OCR failed"]
+
+for path in ROOT.rglob("*"):
+    if not path.is_file():
+        continue
+    try:
+        blob = path.read_bytes()
+    except Exception:
+        continue
+    for n in needles:
+        if n in blob:
+            i = blob.find(n)
+            ctx = blob[max(0, i - 60): i + 90]
+            print(f"{n.decode()!r:22} -> {path.relative_to(ROOT)}")
+            print(f"    ...{ctx!r}")
+PowerShell Scan binaries for the overflow message
+IN
+& "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Scripts\python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\scratchpad\find_msg.py"
+
+OUT
+Command did not complete within its 120s timeout and was moved to the background (ID: b7hlyhdlh). Output is being written to: C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\tasks\b7hlyhdlh.output. You will be notified when it completes. To check interim output, use Read on that file path.
+While that scans, let me look at the messages that are in Python source — they'll tell me how the block id is built:
+
+Grep "Table OCR failed|tables_ocr_failed|Table processing stats" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages\marker)
+1 line of output
+Grep "Table OCR failed" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages)
+1 line of output
+Let me sanity-check that my search is actually reaching these files — grepping for a string I know exists:
+
+Grep "Spawning \{backend\} server on port" (in c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages)
+1 line of output
+That confirms it — my searches were silently finding nothing because .venv-marker/ is gitignored, and ripgrep skips ignored files by default. Every "No matches found" above was meaningless. Let me redo this with Select-String, which has no such filter:
+
+PowerShell Search marker and surya for the log messages
+IN
+$sp = "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages"
+Get-ChildItem -Path "$sp\marker","$sp\surya" -Filter *.py -Recurse -ErrorAction SilentlyContinue |
+  Select-String -Pattern "Overflow in","Table OCR failed","Table processing stats" |
+  ForEach-Object { "{0}:{1}: {2}" -f $_.Path.Replace($sp,""), $_.LineNumber, $_.Line.Trim() }
+
+OUT
+C:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages\marker\processors\table.py:101: logger.info(f"Table processing stats: {dict(self.table_stats)}")
+C:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages\marker\processors\table.py:169: logger.warning(f"Table OCR failed for block {block.id}")
+C:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages\marker\renderers\markdown.py:182: f"Overflow in columns: {col_idx + c} >= {total_cols} or rows: {row_idx + r} >= {total_rows}"
+Now I have it — and it changes the picture. The two messages come from different pipeline stages:
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages\marker\renderers\markdown.py (lines 131-205)
+Now let me check whether the renderer stage is recursive, which would explain the crash location:
+
+PowerShell Check markdownify for recursive DOM walk
+IN
+$sp = "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages"
+Get-ChildItem -Path "$sp\markdownify" -Filter *.py -Recurse -ErrorAction SilentlyContinue |
+  Select-String -Pattern "def process_tag","def process_element","process_tag\(","def convert_soup" |
+  ForEach-Object { "{0}:{1}: {2}" -f $_.Filename, $_.LineNumber, $_.Line.Trim() }
+
+OUT
+__init__.py:225: def convert_soup(self, soup):
+__init__.py:226: return self.process_tag(soup, parent_tags=set())
+__init__.py:228: def process_element(self, node, parent_tags=None):
+__init__.py:232: return self.process_tag(node, parent_tags=parent_tags)
+__init__.py:234: def process_tag(self, node, parent_tags=None):
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages\markdownify\__init__.py (lines 235-284)
+Let me confirm the page-numbering convention, since you'd want to open that page:
+
+PowerShell Check marker page numbering base
+IN
+$sp = "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages"
+Get-ChildItem -Path "$sp\marker" -Filter *.py -Recurse -ErrorAction SilentlyContinue |
+  Select-String -Pattern "page_id=i|page_id=page_idx|enumerate\(.*pages","for page_idx" |
+  Select-Object -First 12 |
+  ForEach-Object { "{0}:{1}: {2}" -f $_.Filename, $_.LineNumber, $_.Line.Trim() }
+
+OUT
+layout.py:150: for i, page in enumerate(pages):
+PowerShell Find page_id origin in marker builders
+IN
+$sp = "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages"
+Get-ChildItem -Path "$sp\marker\builders","$sp\marker\providers" -Filter *.py -Recurse -ErrorAction SilentlyContinue |
+  Select-String -Pattern "page_id" |
+  Select-Object -First 15 |
+  ForEach-Object { "{0}:{1}: {2}" -f $_.Filename, $_.LineNumber, $_.Line.Trim() }
+
+OUT
+document.py:82: [page.page_id for page in needed], self.highres_image_dpi
+document.py:93: return lambda page_id: prov.get_images([page_id], self.highres_image_dpi)[0]
+document.py:99: page_id=p,
+layout.py:151: if provider.page_lines.get(page.page_id):
+layout.py:232: f"Layout inference failed for page {page.page_id}; leaving page empty."
+layout.py:245: f"Unknown layout label {bbox.label} on page {page.page_id}; skipping."
+line.py:215: page_lines = {page.page_id: [] for page in document.pages}
+line.py:217: page.page_id: score for page, score in zip(document.pages, scores)
+line.py:223: document_page.page_id, []
+line.py:242: page_lines[document_page.page_id] = provider_lines
+line.py:254: provider_lines = provider_page_lines.get(document_page.page_id, [])
+line.py:371: document_page.page_id
+line.py:400: page_text_blocks = {}  # page_id -> list of eligible blocks
+line.py:414: page_scores.get(page.page_id, 1.0)
+line.py:427: page_text_blocks[page.page_id] = blocks
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages\marker\builders\document.py (lines 89-102)
+Got it. Here's the straight answer — and it turns out the table Marker names is not the one that crashed it.
+
+The only table Marker actually names
+
+Table OCR failed for block /page/28/Table/6
+That's page 29 of the PDF (Marker counts pages from 0 — page_id comes straight off provider.page_range), and it's the 7th table found on that page.
+
+But this table did not crash the run. Marker recovered from it and carried on — you can tell because the very next line is the completed summary for the whole table stage:
+
+
+tables_ocr_failed: 1, tables_total: 56
+56 tables processed, 1 gave up on OCR. Table processing finished successfully. So page 29's table is a quality problem (that table will be empty or garbled in the output), not the crash.
+
+The line I originally blamed is from a different stage
+I need to correct something I told you earlier. I said the crash looked like Marker looping on a broken table during table processing. Having now found where that message actually lives, that was wrong:
+
+
+marker/renderers/markdown.py:182   <- "Overflow in columns: 0 >= 3 or rows: 1 >= 1"
+marker/processors/table.py:169     <- "Table OCR failed for block ..."
+Different files, different stages. The overflow happens in the Markdown renderer — the last step, converting the finished document to text — about 3.5 seconds after table processing was already done. That matches your timestamps (31,179 → 34,730).
+
+And that overflow message is harmless. Reading the code around it, it's an IndexError that Marker catches, logs, and skips past with continue. It never crashes anything.
+
+For the curious, it does describe the shape of one bad table: rows: 1 >= 1 is the part that's true (0 >= 3 is false), meaning a table with one row and three columns, containing a cell that claims to span down into a second row that doesn't exist. Malformed, but survivable. The log line doesn't record which page it was on.
+
+So where did it actually break?
+In the renderer — and probably not on a table at all. The Markdown renderer converts HTML by walking the tag tree with a function that calls itself:
+
+
+process_tag  ->  process_element  ->  process_tag  ->  ...
+One nesting level of HTML = more stack. So the likely culprit is a chunk of very deeply nested HTML, and the 1000-level ceiling got hit while unwrapping it. A table nested inside a table inside a table would do it, but so would other deep structures.
+
+Bottom line, in one line each
+Page 29's table — named, but only an OCR failure. Not the crash.
+The 1×3 table with a bad rowspan — named by shape, not by page. Caught and ignored. Not the crash.
+The actual crash — in the final Markdown-rendering step, on something deeply nested. Not yet identified.
+That last one is exactly what the run I started will pin down: the report I added prints the repeating function names and the depth, so when it fails we'll see whether it's stuck inside table rendering or somewhere else entirely.
+
+Two process notes: my first few searches returned "no matches" because .venv-marker/ is gitignored and ripgrep skips ignored files — those results were meaningless, and I re-ran everything with Select-String. And the background binary scan I kicked off is now redundant; you can ignore it when it reports.
+
+The redundant scan finished. Let me check it, and more importantly check on the actual Marker run:
+
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\tasks\b7hlyhdlh.output
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\tasks\bwjh3wlrs.output
+Two updates — one conclusive, one not.
+
+The binary scan closed the question about where those messages come from
+It searched everything, including compiled .dll/.pyd/.pyc files, and independently confirmed what Select-String found. Only two real sources exist:
+
+marker\processors\table.py → Table OCR failed for block {block.id} (followed by continue — visible right in the bytes on line 6, confirming Marker skips that table and keeps going)
+marker\renderers\markdown.py → Overflow in columns: ...
+Every other hit is an unrelated coincidence in a third-party library — OpenCV's video decoder, NumPy's datetime overflow messages, torch's sparse-tensor assertions, an sklearn comment. So the conclusion I gave you holds: the OCR failure and the overflow come from two different stages, and neither is the crash.
+
+The live run has NOT answered the recursion question yet
+Here's what it's printed so far:
+
+
+Table OCR failed for block /page/129/Table/1
+Table processing stats: {'tables_pdftext': 13, 'tables_ocr': 38, 'tables_ocr_failed': 1, 'tables_total': 52}
+Overflow in columns: 0 >= 3 or rows: 1 >= 1
+I can't yet tell you whether the recursion error happened. The reason is a wrinkle I should have anticipated: Marker's log lines go to stderr (unbuffered, so they appear live), but every print() in the script — Converting: ..., FAILED: ..., and my whole recursion report — goes to stdout, which Python buffers when redirected to a file. All of that is sitting in a buffer and won't appear until the process exits. So the absence of a failure message right now means nothing either way.
+
+One thing worth flagging, carefully
+Compare the stats to your original run:
+
+your run	this run
+OCR-failed table	/page/28/Table/6	/page/129/Table/1
+tables_total	56	52
+tables_pdftext	19	13
+overflow line	0 >= 3 or rows: 1 >= 1	identical
+Different table counts and a different failing table. I want to be careful here — because of the buffering I cannot currently prove which of the two PDFs this is, so the innocent explanation is that this is simply file 2 (which never got this far last time, having died during extraction). The less comfortable possibility is that this is file 1 and Marker's balanced mode — which runs a VLM for layout — isn't detecting the same set of tables run to run. That would matter a lot for your comparison-harness purposes. I'll be able to tell you which once the buffered output flushes.
+
+The identical overflow signature across both runs, meanwhile, suggests that particular 1-row×3-column malformed table is reproducible.
+
+I'll report the depth figure and cycle location as soon as it exits. Separately, worth adding flush=True to the prints (or running with -u) so future runs stay readable live — say the word and I'll do it after this run finishes rather than disturbing it.
+
+c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py
+Since the table didnt cause the crash and the rendering did it, 
+- can u tell me what was it rendering that caused the crash?
+- can u find any recovery for this?
+Let me check the run and dig into the renderer's actual recursion structure:
+
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\tasks\bwjh3wlrs.output
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages\marker\renderers\markdown.py (lines 2-61)
+Run is still going (last log 00:18:21, nothing since). Let me trace the actual recursion in the renderer:
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages\marker\renderers\html.py
+splice_content_refs is recursive, but only as deep as the block tree (Document→Page→Block→Line→Span ≈ 5 levels) — not the culprit. Let me see what the Markdown renderer actually calls:
+
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages\marker\renderers\markdown.py (lines 231-310)
+PowerShell Find markdownify parser and convert entry
+IN
+$sp = "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages"
+Select-String -Path "$sp\markdownify\__init__.py" -Pattern "def convert\b","BeautifulSoup\(","html\.parser","def convert_soup","lxml" |
+  ForEach-Object { "line {0}: {1}" -f $_.LineNumber, $_.Line.Trim() }
+
+OUT
+line 179: bs4_options = 'html.parser'
+line 221: def convert(self, html):
+line 222: soup = BeautifulSoup(html, **self.options['bs4_options'])
+line 225: def convert_soup(self, soup):
+Confirmed — markdownify parses with html.parser, and that's the key. Python's html.parser does not auto-close unclosed inline tags: each unclosed <i>/<b>/<span> swallows everything after it as a child, so nesting accumulates through the document. Let me prove the mechanism and measure how many stack frames each level costs:
+
+Write C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\depth_probe.py
+59 lines
+"""Does unclosed inline markup make html.parser nest, and how deep can markdownify go?"""
+import sys, threading, traceback
+from bs4 import BeautifulSoup
+from markdownify import MarkdownConverter
+
+
+def dom_depth(node, d=0):
+    kids = [c for c in getattr(node, "children", []) if getattr(c, "name", None)]
+    return d if not kids else max(dom_depth(k, d + 1) for k in kids)
+
+
+def probe(n):
+    """n unclosed <i> tags in a row -> how deep is the resulting DOM?"""
+    html = "<p>" + ("<i>word " * n) + "</p>"
+    soup = BeautifulSoup(html, "html.parser")
+    return html, dom_depth(soup)
+
+
+def frames_per_level():
+    """Empirically: how many Python frames does markdownify burn per DOM level?"""
+    sys.setrecursionlimit(1000)
+    for n in (50, 100, 200, 300, 400, 600):
+        html, depth = probe(n)
+        try:
+            MarkdownConverter().convert(html)
+            print(f"  {n:4d} unclosed <i> -> DOM depth {depth:4d} -> converted OK")
+        except RecursionError as e:
+            tb = traceback.extract_tb(e.__traceback__)
+            print(
+                f"  {n:4d} unclosed <i> -> DOM depth {depth:4d} -> RecursionError "
+                f"at {len(tb)} frames (~{len(tb)/max(depth,1):.1f} frames/level)"
+            )
+            return depth
+    return None
+
+
+def main():
+    print("1) Does html.parser nest unclosed tags?")
+    for n in (1, 5, 50, 200):
+        _, d = probe(n)
+        print(f"   {n:3d} unclosed <i> -> DOM depth {d}")
+
+    print("\n2) Where does markdownify break at the default limit of 1000?")
+    broke_at = frames_per_level()
+
+    if broke_at:
+        print("\n3) Does a raised limit fix it (i.e. is it deep-but-finite)?")
+        sys.setrecursionlimit(20000)
+        html, depth = probe(600)
+        out = MarkdownConverter().convert(html)
+        print(f"   DOM depth {depth} converted OK at limit 20000 "
+              f"({len(out)} chars out) -> BOUNDED, limit bump is a real fix")
+
+
+threading.stack_size(128 * 1024 * 1024)
+t = threading.Thread(target=main)
+t.start()
+t.join()
+PowerShell Probe html.parser nesting and markdownify depth limit
+IN
+& "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Scripts\python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\depth_probe.py"
+
+OUT
+<persisted-output>
+Output too large (295.1KB). Full output saved to: C:\Users\LOQ\.claude\projects\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\tool-results\b3vrmd8jo.txt
+
+Preview (first 2KB):
+Exception in thread Thread-1 (main):
+Traceback (most recent call last):
+  File "C:\Users\LOQ\AppData\Local\Python\pythoncore-3.12-64\Lib\threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "C:\Users\LOQ\AppData\Local\Python\pythoncore-3.12-64\Lib\threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\depth_probe.py", line 44, in main
+    broke_at = frames_per_level()
+               ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\depth_probe.py", line 23, in frames_per_level
+    html, depth = probe(n)
+                  ^^^^^^^^
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\depth_probe.py", line 16, in probe
+    return html, dom_depth(soup)
+                 ^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\depth_probe.py", line 9, in dom_depth
+    return d if not kids else max(dom_depth(k, d + 1) for k in kids)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\depth_probe.py", line 9, in <genexpr>
+    return d if not kids else max(dom_depth(k, d + 1) for k in kids)
+                                  ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\depth_probe.py", line 9, in dom_depth
+    return d if not kids else max(dom_depth(k, d + 1) for k in kids)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+</persisted-output>
+My own depth-measuring helper recursed too deep — let me read what section 1 actually reported before fixing it:
+
+PowerShell Extract probe results from saved output
+IN
+Get-Content "C:\Users\LOQ\.claude\projects\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\tool-results\b3vrmd8jo.txt" | Select-String -Pattern "unclosed|Does |Where |raised limit|BOUNDED|converted OK|RecursionError at"
+
+OUT
+1) Does html.parser nest unclosed tags?
+     1 unclosed <i> -> DOM depth 2
+     5 unclosed <i> -> DOM depth 6
+    50 unclosed <i> -> DOM depth 51
+   200 unclosed <i> -> DOM depth 201
+2) Where does markdownify break at the default limit of 1000?
+    50 unclosed <i> -> DOM depth   51 -> converted OK
+   100 unclosed <i> -> DOM depth  101 -> converted OK
+   200 unclosed <i> -> DOM depth  201 -> converted OK
+   300 unclosed <i> -> DOM depth  301 -> converted OK
+   400 unclosed <i> -> DOM depth  401 -> converted OK
+That's the mechanism proven cleanly: N unclosed <i> tags → DOM depth exactly N+1. One nesting level per unclosed tag, accumulating. Let me get the exact break point with an iterative measurer:
+
+Write C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\depth_probe2.py
+59 lines
+"""Exact depth at which markdownify breaks, and whether a raised limit fixes it."""
+import sys, threading, traceback
+from bs4 import BeautifulSoup
+from markdownify import MarkdownConverter
+
+
+def dom_depth(soup):
+    """Iterative, so measuring never itself hits the recursion limit."""
+    best, stack = 0, [(soup, 0)]
+    while stack:
+        node, d = stack.pop()
+        best = max(best, d)
+        for c in getattr(node, "children", []):
+            if getattr(c, "name", None):
+                stack.append((c, d + 1))
+    return best
+
+
+def html_for(n):
+    return "<p>" + ("<i>word " * n) + "</p>"
+
+
+def try_convert(n, limit):
+    sys.setrecursionlimit(limit)
+    html = html_for(n)
+    depth = dom_depth(BeautifulSoup(html, "html.parser"))
+    try:
+        MarkdownConverter().convert(html)
+        return depth, None
+    except RecursionError as e:
+        return depth, len(traceback.extract_tb(e.__traceback__))
+
+
+def main():
+    print("Break point at the DEFAULT limit of 1000:")
+    last_ok = None
+    for n in (400, 450, 480, 500, 550, 600, 800):
+        depth, frames = try_convert(n, 1000)
+        if frames is None:
+            last_ok = depth
+            print(f"   depth {depth:5d} -> OK")
+        else:
+            print(f"   depth {depth:5d} -> RecursionError ({frames} frames deep, "
+                  f"~{frames/depth:.2f} frames per nesting level)")
+            break
+    print(f"\n   => deepest DOM that survives the default limit: ~{last_ok}")
+
+    print("\nIs it bounded (does a raised limit actually fix it)?")
+    for n in (1000, 3000, 8000):
+        depth, frames = try_convert(n, 20000)
+        verdict = "OK" if frames is None else f"still failed at {frames} frames"
+        print(f"   depth {depth:5d} at limit 20000 -> {verdict}")
+
+
+threading.stack_size(128 * 1024 * 1024)
+t = threading.Thread(target=main)
+t.start()
+t.join()
+PowerShell Measure exact markdownify break depth
+IN
+& "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Scripts\python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\depth_probe2.py" 2>&1 | Select-Object -Last 20
+
+OUT
+Break point at the DEFAULT limit of 1000:
+   depth   401 -> OK
+   depth   451 -> OK
+   depth   481 -> OK
+   depth   501 -> RecursionError (996 frames deep, ~1.99 frames per nesting level)
+
+   => deepest DOM that survives the default limit: ~481
+
+Is it bounded (does a raised limit actually fix it)?
+   depth  1001 at limit 20000 -> OK
+   depth  3001 at limit 20000 -> OK
+   depth  8001 at limit 20000 -> OK
+Read C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\tasks\bwjh3wlrs.output
+PowerShell Check page_range config option exists
+IN
+$sp = "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Lib\site-packages"
+Select-String -Path "$sp\marker\providers\pdf.py","$sp\marker\providers\__init__.py","$sp\marker\converters\pdf.py" -Pattern "page_range" -ErrorAction SilentlyContinue |
+  Select-Object -First 8 | ForEach-Object { "{0}:{1}: {2}" -f $_.Filename, $_.LineNumber, $_.Line.Trim() }
+
+OUT
+pdf.py:34: page_range: Annotated[
+pdf.py:103: if self.page_range is None:
+pdf.py:104: self.page_range = range(len(doc))
+pdf.py:106: assert max(self.page_range) < len(doc) and min(self.page_range) >= 0, (
+pdf.py:107: f"Invalid page range, values must be between 0 and {len(doc) - 1}.  Min of provided page range is {min(self.page_range)} and max is {max(self.page_range)}."
+pdf.py:112: self.page_bboxes = {i: doc[i].get_bbox() for i in self.page_range}
+pdf.py:213: page_range=self.page_range,
+pdf.py:225: for i, page in zip(self.page_range, page_char_blocks)
+Both questions now have evidence-backed answers.
+
+1. What was it rendering?
+Not a table — the document's HTML tree as a whole, once its nesting passed ~480 levels.
+
+Here's the measured behaviour of the exact code path Marker uses (MarkdownRenderer.__call__ → md_cls.convert(full_html) → markdownify → html.parser):
+
+DOM nesting depth	at default limit 1000
+401	OK
+451	OK
+481	OK
+501	RecursionError — 996 frames, 1.99 frames per level
+So the rule is simply max survivable nesting ≈ recursion limit ÷ 2. The default 1000 buys you about 480 levels of nested HTML, and your document exceeded it.
+
+Where that much nesting comes from is the interesting part. markdownify parses with Python's html.parser, which does not auto-close unclosed inline tags — so each one swallows the rest of the document as its child. I measured this directly:
+
+
+  1 unclosed <i>  -> DOM depth 2
+  5 unclosed <i>  -> DOM depth 6
+ 50 unclosed <i>  -> DOM depth 51
+200 unclosed <i>  -> DOM depth 201
+Exactly one extra level per unclosed tag, accumulating. Across a 250-page document you only need ~2 unbalanced inline tags per page to reach the 480 ceiling — very easy when the tags come from OCR/VLM output.
+
+That explains why it's the big file that died and why it's not attributable to any single table: the depth builds up across the whole document, and the crash lands wherever the counter finally runs out.
+
+One honest caveat: I've proven the threshold and the mechanism, but not yet that unclosed <i> specifically is what's in your PDF — deeply nested tables or lists would produce the same effect. The pending run's report names the actual repeating tags, which will settle it.
+
+2. Recovery — yes, and the main one is already in place
+The limit bump is a genuine fix, not a band-aid. I verified the depth is bounded (it can't exceed the tag count), so raising the ceiling actually resolves it:
+
+
+depth 1001 at limit 20000 -> OK
+depth 3001 at limit 20000 -> OK
+depth 8001 at limit 20000 -> OK
+Your current setting of 20000 covers roughly 10000 nesting levels, ~20× what the document needed. That's the run in flight.
+
+Two further options worth knowing:
+
+Page-range batching — Marker supports page_range (marker/providers/pdf.py:34, 0-indexed, validated against the page count). Converting in slices of ~50 pages bounds the HTML depth structurally rather than relying on a raised ceiling, and it would also address file 2's dead-worker crash, since that one smells like memory exhaustion on a 250-page render. This is the one I'd recommend if you want both files converting reliably:
+
+
+config={"mode": "balanced", "page_range": list(range(0, 50))}
+html_tables_in_markdown=True — only relevant if the run reveals the nesting is table-driven; it emits tables as raw HTML and skips the grid-building code entirely. Hold off until we know.
+
+Status
+The background run still hasn't flushed — its last stderr line is 00:18:21, and because the print()s are buffered I can't tell whether file 1 has already passed or failed. I won't guess; I'll report the depth and the repeating tag names the moment it exits.
+
+Want me to wire up the page-range batching in the meantime, or wait for the verdict first?
+
+c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py
+Would it work if i do the following:
+
+- add: config={"mode": "balanced", "page_range": list(range(0, 50))}
+- reduce the document size from 250+250 pages to 154+154+192
+This is worth testing rather than reasoning about, because it hinges on whether nesting accumulates across blocks or resets at each closed block — and that decides whether splitting the file helps at all.
+
+Write C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\accum_probe.py
+41 lines
+"""Does HTML nesting accumulate across blocks, or reset at each closed tag?
+
+Decides whether splitting a PDF into smaller PDFs can fix the RecursionError.
+"""
+from bs4 import BeautifulSoup
+
+
+def dom_depth(soup):
+    best, stack = 0, [(soup, 0)]
+    while stack:
+        node, d = stack.pop()
+        best = max(best, d)
+        for c in getattr(node, "children", []):
+            if getattr(c, "name", None):
+                stack.append((c, d + 1))
+    return best
+
+
+def depth_of(html):
+    return dom_depth(BeautifulSoup(html, "html.parser"))
+
+
+print("A) 10 unclosed <i> inside ONE closed <p>, repeated N times")
+print("   (if depth grows with N, nesting accumulates across blocks)")
+for n in (1, 10, 50, 200):
+    html = ("<p>" + ("<i>word " * 10) + "</p>") * n
+    print(f"   {n:4d} blocks -> depth {depth_of(html)}")
+
+print("\nB) same, but the <p> is never closed")
+for n in (1, 10, 50, 200):
+    html = ("<p>" + ("<i>word " * 10)) * n
+    print(f"   {n:4d} blocks -> depth {depth_of(html)}")
+
+print("\nC) one pathological block alone (500 unclosed <i> in a single <p>)")
+print(f"   depth {depth_of('<p>' + '<i>x ' * 500 + '</p>')}")
+
+print("\nD) that same bad block surrounded by 1000 clean blocks")
+clean = "<p>clean text</p>" * 500
+bad = "<p>" + ("<i>x " * 500) + "</p>"
+print(f"   depth {depth_of(clean + bad + clean)}")
+PowerShell Test whether nesting accumulates across blocks
+IN
+& "c:\Users\LOQ\Desktop\Projects\Document-Loaders\.venv-marker\Scripts\python.exe" "C:\Users\LOQ\AppData\Local\Temp\claude\c--Users-LOQ-Desktop-Projects-Document-Loaders\0c649f42-ef8a-4c76-a196-52fdb73e0c23\accum_probe.py"
+
+OUT
+A) 10 unclosed <i> inside ONE closed <p>, repeated N times
+   (if depth grows with N, nesting accumulates across blocks)
+      1 blocks -> depth 11
+     10 blocks -> depth 11
+     50 blocks -> depth 11
+    200 blocks -> depth 11
+
+B) same, but the <p> is never closed
+      1 blocks -> depth 11
+     10 blocks -> depth 110
+     50 blocks -> depth 550
+    200 blocks -> depth 2200
+
+C) one pathological block alone (500 unclosed <i> in a single <p>)
+   depth 501
+
+D) that same bad block surrounded by 1000 clean blocks
+   depth 501
+Tested it, and the result overturns part of what I told you earlier — I need to correct that before answering.
+
+
+A) 10 unclosed <i> inside a CLOSED <p>, repeated N times:
+     1 blocks -> depth 11
+   200 blocks -> depth 11        <- does NOT grow
+
+B) same but <p> never closed:
+   200 blocks -> depth 2200      <- grows
+
+C) one bad block alone (500 unclosed <i>):        depth 501
+D) that same bad block + 1000 clean blocks:       depth 501   <- unchanged
+A closed block-level tag resets the nesting. So depth is set by the worst single block, not by document length. My earlier "~2 unbalanced tags per page across 250 pages" reasoning assumed accumulation across blocks (case B) — case A
+
+[Message truncated - exceeded 50,000 character limit]
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py
+Bash Check working tree diff stat
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Document-Loaders" && git diff --stat
+
+OUT
+warning: in the working copy of 'codes/marker_test.py', LF will be replaced by CRLF the next time Git touches it
+ codes/marker_test.py | 240 ++++++++++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 230 insertions(+), 10 deletions(-)
+Here's the retrospective on that session, reconstructed from the chat plus the current state of marker_test.py.
+
+What was wrong
+Two files in the corpus failed Marker conversion, for two unrelated reasons that were initially conflated:
+
+File 1 — RecursionError: maximum recursion depth exceeded. Bare message, no location.
+File 2 — "A worker process died while extracting", during PDF text extraction, never reaching the GPU stages.
+The starting task was narrow: bump sys.setrecursionlimit to find out whether file 1's recursion was genuinely infinite or merely deeper than Python's default 1000.
+
+Methods tried, and why each fell short
+Raising sys.setrecursionlimit alone. Would have made things worse, not better. The limit caps Python's frame counter; it doesn't grow the OS stack underneath. Windows gives the main thread 1 MB, which the default limit of 1000 is already sized around — so a raised limit on the main thread trades a catchable RecursionError for a silent process death with no traceback. Fix: run the conversion on a spawned thread with threading.stack_size() (run_with_deep_stack, marker_test.py:138).
+
+A 512 MB thread stack. Rejected by CPython outright — threading.stack_size() raises ValueError rather than clamping at anything ≥ 256 MB (THREAD_MAX_STACK_SIZE). Probing found 255 MB is the ceiling; settled on a 128 MB default with the override clamped.
+
+Classifying "infinite vs. deep" from the stack shape. This one was tested against known-shape stacks before spending a GPU run on it, and the test killed it. A deep-but-finite finite(5000) produces an identical 1-frame repeating cycle to genuinely infinite recursion — and that same call returns fine once the limit is raised. Frame shape cannot separate the two cases. The report was rewritten to state only where the recursion is, and to surface depth-at-failure vs. limit as the discriminating number across two runs.
+
+Blaming the table stage. The log had Table OCR failed for block /page/28/Table/6 right before the crash. Wrong lead: that message comes from marker/processors/table.py, which logs it and continues; the stats line for the whole table stage printed successfully afterward. The real crash was ~3.5 seconds later in marker/renderers/markdown.py. Both the OCR failure and the Overflow in columns warning are caught-and-ignored quality defects, not the crash.
+
+ripgrep searches returning "no matches". Every one of those results was meaningless — .venv-marker/ is gitignored and ripgrep skips ignored files by default. Redone with Select-String, which found the strings immediately.
+
+"Nesting accumulates across the document." The hypothesis was that ~2 unbalanced inline tags per page compound across 250 pages to blow the ceiling. A direct probe overturned it: a closed block-level tag resets the nesting. 200 blocks each containing 10 unclosed <i> tags → depth 11, not 2200. One pathological block surrounded by 1000 clean blocks → depth unchanged. Depth is set by the worst single block, not by document length — which meant splitting the PDF or using page_range could not fix the recursion at all.
+
+The final solution
+Three independent changes, each targeting a different failure:
+
+Recursion (file 1) — raised limit plus a real stack behind it. Measured markdownify burns ~1.99 frames per DOM nesting level, so the default 1000 buys ~480 levels of nested HTML; depth 501 broke, 481 survived. Verified the depth is bounded (it can't exceed the tag count): DOM depths of 1001, 3001 and 8001 all convert at limit 20000. So the limit bump is a genuine fix, not a band-aid. Mechanism: markdownify parses with Python's html.parser, which does not auto-close unclosed inline tags, so each one swallows the rest of its block as a child — exactly one extra level per unclosed tag.
+
+Dead worker (file 2) — pdftext_workers=1 (marker_test.py:223). pdftext sizes its pool as min(pdftext_workers, pages // 10) and only skips the ProcessPoolExecutor when that lands ≤ 1, so every document here (154/192/250 pages) was getting 4 spawned workers, and one dying took the whole conversion with it. Note this also retired the batching idea for this failure: a 50-page slice still yields min(4, 5) = 4 workers.
+
+Batching kept as a fallback only — convert_batched (marker_test.py:170) runs on the exception path, not by default, because slicing costs cross-page context (a table spanning a boundary gets split). Plus a resume-by-mtime skip so a retry after one bad file doesn't reconvert hours of successful work, and flush=True throughout — the first diagnostic run was unreadable live because Marker's logs go to stderr unbuffered while every print() sat in a buffered stdout.
+
+How we got there
+The through-line was refusing to accept any explanation that hadn't been measured, and each measurement overturned the step before it:
+
+Test the diagnostic before spending the GPU run on it → caught the illegal stack size and the overclaiming verdict.
+Grep for the actual log strings instead of trusting log adjacency → moved the crash from the table processor to the Markdown renderer.
+Sanity-check that the search tool is even reading the files → exposed the gitignore blind spot that had made several searches silently empty.
+Probe the mechanism synthetically rather than reasoning about it → gave the exact frames ÷ 2 = max depth rule, proved the depth is bounded, and then killed the accumulation theory that would have justified splitting the documents.
+That last probe is the one that mattered most: it turned "split the PDFs and use page_range" from a plausible fix into a demonstrably ineffective one, and pushed the real second-file fix onto pdftext_workers instead.
+
+Worth noting: this whole episode — the renderer recursion, the 480-level ceiling, pdftext_workers=1, and the two retracted hypotheses — warrants a docs/Bugs.md entry and possibly an ADR. I haven't written anything to docs/; say the word if you want me to.
+
+Today 11:47 AM
+Explain the following in simple terms. I was facing an error and asked a coding agent to help. It solved but when i asked it to explain it gave me a tough answer
+
+What was wrong
+Two files in the corpus failed Marker conversion, for two unrelated reasons that were initially conflated:
+
+File 1 — RecursionError: maximum recursion depth exceeded. Bare message, no location.
+File 2 — "A worker process died while extracting", during PDF text extraction, never reaching the GPU stages.
+The starting task was narrow: bump sys.setrecursionlimit to find out whether file 1's recursion was genuinely infinite or merely deeper than Python's default 1000.
+
+Methods tried, and why each fell short
+Raising sys.setrecursionlimit alone. Would have made things worse, not better. The limit caps Python's frame counter; it doesn't grow the OS stack underneath. Windows gives the main thread 1 MB, which the default limit of 1000 is already sized around — so a raised limit on the main thread trades a catchable RecursionError for a silent process death with no traceback. Fix: run the conversion on a spawned thread with threading.stack_size() (run_with_deep_stack, marker_test.py:138).
+
+A 512 MB thread stack. Rejected by CPython outright — threading.stack_size() raises ValueError rather than clamping at anything ≥ 256 MB (THREAD_MAX_STACK_SIZE). Probing found 255 MB is the ceiling; settled on a 128 MB default with the override clamped.
+
+Classifying "infinite vs. deep" from the stack shape. This one was tested against known-shape stacks before spending a GPU run on it, and the test killed it. A deep-but-finite finite(5000) produces an identical 1-frame repeating cycle to genuinely infinite recursion — and that same call returns fine once the limit is raised. Frame shape cannot separate the two cases. The report was rewritten to state only where the recursion is, and to surface depth-at-failure vs. limit as the discriminating number across two runs.
+
+Blaming the table stage. The log had Table OCR failed for block /page/28/Table/6 right before the crash. Wrong lead: that message comes from marker/processors/table.py, which logs it and continues; the stats line for the whole table stage printed successfully afterward. The real crash was ~3.5 seconds later in marker/renderers/markdown.py. Both the OCR failure and the Overflow in columns warning are caught-and-ignored quality defects, not the crash.
+
+ripgrep searches returning "no matches". Every one of those results was meaningless — .venv-marker/ is gitignored and ripgrep skips ignored files by default. Redone with Select-String, which found the strings immediately.
+
+"Nesting accumulates across the document." The hypothesis was that ~2 unbalanced inline tags per page compound across 250 pages to blow the ceiling. A direct probe overturned it: a closed block-level tag resets the nesting. 200 blocks each containing 10 unclosed <i> tags → depth 11, not 2200. One pathological block surrounded by 1000 clean blocks → depth unchanged. Depth is set by the worst single block, not by document length — which meant splitting the PDF or using page_range could not fix the recursion at all.
+
+The final solution
+Three independent changes, each targeting a different failure:
+
+Recursion (file 1) — raised limit plus a real stack behind it. Measured markdownify burns ~1.99 frames per DOM nesting level, so the default 1000 buys ~480 levels of nested HTML; depth 501 broke, 481 survived. Verified the depth is bounded (it can't exceed the tag count): DOM depths of 1001, 3001 and 8001 all convert at limit 20000. So the limit bump is a genuine fix, not a band-aid. Mechanism: markdownify parses with Python's html.parser, which does not auto-close unclosed inline tags, so each one swallows the rest of its block as a child — exactly one extra level per unclosed tag.
+
+Dead worker (file 2) — pdftext_workers=1 (marker_test.py:223). pdftext sizes its pool as min(pdftext_workers, pages // 10) and only skips the ProcessPoolExecutor when that lands ≤ 1, so every document here (154/192/250 pages) was getting 4 spawned workers, and one dying took the whole conversion with it. Note this also retired the batching idea for this failure: a 50-page slice still yields min(4, 5) = 4 workers.
+
+Batching kept as a fallback only — convert_batched (marker_test.py:170) runs on the exception path, not by default, because slicing costs cross-page context (a table spanning a boundary gets split). Plus a resume-by-mtime skip so a retry after one bad file doesn't reconvert hours of successful work, and flush=True throughout — the first diagnostic run was unreadable live because Marker's logs go to stderr unbuffered while every print() sat in a buffered stdout.
+
+How we got there
+The through-line was refusing to accept any explanation that hadn't been measured, and each measurement overturned the step before it:
+
+Test the diagnostic before spending the GPU run on it → caught the illegal stack size and the overclaiming verdict.
+Grep for the actual log strings instead of trusting log adjacency → moved the crash from the table processor to the Markdown renderer.
+Sanity-check that the search tool is even reading the files → exposed the gitignore blind spot that had made several searches silently empty.
+Probe the mechanism synthetically rather than reasoning about it → gave the exact frames ÷ 2 = max depth rule, proved the depth is bounded, and then killed the accumulation theory that would have justified splitting the documents.
+That last probe is the one that mattered most: it turned "split the PDFs and use page_range" from a plausible fix into a demonstrably ineffective one, and pushed the real second-file fix onto pdftext_workers instead.
+
+Worth noting: this whole episode — the renderer recursion, the 480-level ceiling, pdftext_workers=1, and the two retracted hypotheses — warrants a docs/Bugs.md entry and possibly an ADR. I haven't written anything to docs/; say the word if you want me to.
+
+
+The coding agent discovered that two different PDF files were failing for two completely different reasons. At first, the errors and warning messages were mixed together, which made the real causes harder to identify.
+
+The short version
+File 1 failed because its generated HTML was nested too deeply.
+File 2 failed because one of several PDF text-extraction processes crashed.
+Splitting PDFs into batches looked promising, but testing showed it would not fix either root cause reliably.
+File 1: The recursion error
+What does “maximum recursion depth exceeded” mean?
+
+Recursion happens when one function calls another function, which calls another, and so on. Python keeps track of these calls using a stack.
+
+Python normally allows approximately 1,000 nested function calls. If the program goes beyond this limit, Python stops it with:
+
+RecursionError: maximum recursion depth exceeded
+
+Marker was converting the document into Markdown. During this process, it used markdownify to process HTML.
+
+The PDF had HTML similar to this:
+
+<i>
+  <i>
+    <i>
+      <i>
+        Text
+
+Some inline tags such as <i> were not properly closed. Therefore, each new tag became a child of the previous one, creating a very deeply nested structure.
+
+Why not simply increase Python’s recursion limit?
+
+The original idea was:
+
+sys.setrecursionlimit(20000)
+
+However, there are two limits involved:
+
+Python’s recursion limit — the maximum number of calls Python permits.
+The operating system’s thread stack — the actual memory available for those calls.
+
+Raising only Python’s limit is dangerous. Python may allow additional calls, but Windows may not have enough stack memory to hold them. Instead of receiving a useful Python error, the entire program could suddenly terminate without a traceback.
+
+The actual fix
+
+The conversion now runs inside a separate thread with:
+
+A higher Python recursion limit.
+A larger amount of real stack memory.
+
+In simple terms, the solution did both:
+
+Allow more nested calls + provide enough memory for those calls
+
+The agent tested the behavior and found that Markdown conversion uses roughly two Python calls for each HTML nesting level.
+
+Therefore:
+
+A recursion limit of 1,000 supports approximately 480 nested HTML levels.
+A limit of 20,000 provides enough room for several thousand levels.
+
+Testing also showed that the nesting was extremely deep but finite, rather than truly infinite. This means increasing the limit and stack size is a legitimate fix.
+
+Why a 512 MB thread stack was not used
+
+The agent initially considered allocating a 512 MB stack to the thread.
+
+However, CPython does not allow a thread stack that large through threading.stack_size(). Instead of automatically lowering the value, Python raises a ValueError.
+
+Testing found:
+
+Approximately 255 MB was the maximum accepted value.
+128 MB was selected as a safer default.
+User-provided values are restricted so they cannot exceed the supported maximum.
+Why inspecting the repeated calls did not prove infinite recursion
+
+The agent initially tried to determine whether the recursion was:
+
+Truly infinite, or
+Very deep but eventually terminating.
+
+It attempted to determine this by examining the repeating functions in the error stack.
+
+That approach does not work reliably.
+
+For example, a function that recursively counts to 5,000 may show the same repeated function call as a function that never stops:
+
+def finite(n):
+    if n == 0:
+        return
+    finite(n - 1)
+
+The stack looks repetitive in both situations. Therefore, the shape of the stack cannot distinguish between deep and infinite recursion.
+
+The more useful test is:
+
+Run with one recursion limit.
+Record the depth where it fails.
+Increase the limit.
+See whether it completes or fails again near the new limit.
+
+In this case, it completed with a sufficiently high limit, proving that the recursion was bounded.
+
+The table warning was not the cause
+
+Immediately before the crash, the logs showed something like:
+
+Table OCR failed for block /page/28/Table/6
+
+That made it look as though table processing caused the crash.
+
+However, Marker is designed to catch that table error, log it, and continue. The table-processing stage later reported that it completed successfully.
+
+The actual recursion error happened about 3.5 seconds later in:
+
+marker/renderers/markdown.py
+
+Therefore:
+
+The table OCR failure may reduce the quality of one table.
+The column overflow warning may affect formatting.
+Neither warning crashed the conversion.
+The actual crash happened while generating Markdown.
+
+This is an important distinction: the message nearest to a crash is not necessarily its cause.
+
+The file-search problem
+
+The agent searched Marker's installed files using ripgrep, but it returned no matches.
+
+The searches were misleading because Marker's files were inside:
+
+.venv-marker/
+
+That folder was ignored by Git. By default, ripgrep also skips files and directories ignored by Git.
+
+So “no matches” did not mean the text was absent. It meant the tool had not searched those files.
+
+The agent repeated the search using PowerShell’s Select-String, which does not follow the same Git-ignore behavior, and found the relevant code immediately.
+
+Why PDF length was not causing the recursion
+
+One theory was that malformed HTML accumulated across the entire document.
+
+For example:
+
+Page 1 adds two unclosed tags
+Page 2 adds two more
+Page 3 adds two more
+...
+250 pages eventually create excessive nesting
+
+Testing proved this theory wrong.
+
+A completed block-level element resets the nesting. This means malformed tags in one block generally do not accumulate into later blocks.
+
+The actual rule is:
+
+Recursion depth depends on the single worst block,
+not on the total number of pages.
+
+For example:
+
+200 blocks containing 10 unclosed tags each only reached a depth of approximately 11.
+One block containing hundreds of unclosed tags produced very deep nesting.
+Adding 1,000 normal blocks before or after that bad block did not change its nesting depth.
+
+Therefore, splitting the PDF into smaller page ranges would not fix File 1. The problematic block would remain deeply nested regardless of which batch contained it.
+
+File 2: The worker process died
+
+File 2 failed earlier, while text was being extracted from the PDF. It never reached the GPU-based processing stages.
+
+Marker’s pdftext component was creating multiple independent worker processes. For these large documents, it created four workers.
+
+Conceptually:
+
+Main conversion
+├── Text worker 1
+├── Text worker 2
+├── Text worker 3
+└── Text worker 4
+
+If any one worker suddenly died, the entire text-extraction job failed with:
+
+A worker process died while extracting
+
+The fix was:
+
+pdftext_workers = 1
+
+With only one worker, pdftext avoids creating the multi-process worker pool. This removes the unstable multi-process behavior.
+
+The trade-off is that text extraction may be slower, but it is more reliable.
+
+Why batching did not fix the worker problem
+
+The agent considered processing the PDF in 50-page batches.
+
+However, pdftext calculates its worker count using approximately:
+
+min(pdftext_workers, pages // 10)
+
+For a 50-page batch with a configured maximum of four workers:
+
+min(4, 50 // 10)
+min(4, 5)
+= 4 workers
+
+Therefore, each batch would still use four worker processes. A worker could still die, producing the same failure.
+
+Setting pdftext_workers=1 directly targets the real problem.
+
+Why batching is still available as a fallback
+
+Batching was retained, but it is only attempted if normal conversion fails.
+
+It is not used by default because splitting a PDF can damage cross-page context. For example, if a table begins on page 49 and continues onto page 50, splitting there may cause Marker to treat it as two unrelated tables.
+
+So the chosen order is:
+
+Try converting the whole PDF normally.
+Apply the recursion and worker fixes.
+Use batching only as a fallback after an exception.
+Two additional reliability improvements
+Skip completed files
+
+The program now uses file modification times to identify files that were already converted successfully.
+
+This means that if one file fails after several hours, rerunning the script will skip completed files instead of converting everything again.
+
+Immediately print logs
+
+Python’s print() normally buffers some output. Marker’s own logs were appearing immediately on stderr, while custom messages remained waiting in buffered stdout.
+
+This made the live output appear out of order.
+
+Using:
+
+print(..., flush=True)
+
+forces messages to appear immediately, making debugging easier.
+
+Final fixes at a glance
+Problem	Actual cause	Fix
+File 1 recursion error	One HTML block had extremely deep nesting caused by unclosed inline tags	Higher recursion limit plus a larger thread stack
+File 2 dead worker	One of several PDF text-extraction processes crashed	Set pdftext_workers=1
+Reprocessing completed files	Script restarted every conversion	Skip outputs that are already up to date
+Confusing live logs	Standard output was buffered	Use flush=True
+Possible fallback failures	Some files may still fail normally	Retry using batches only after failure
+
+The central lesson is that the agent stopped relying on guesses based on nearby log messages and tested each theory directly. Those tests showed that the table warning and document length were distractions: the real problems were deeply nested HTML in File 1 and unstable parallel text extraction in File 2.
+
+
+
+
+c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py
+I want u to revert the code. Make it based on the older version of marker that we had used.
+Read c:\Users\LOQ\Desktop\Projects\Document-Loaders\codes\marker_test.py
+PowerShell Show commit history for marker_test.py
+IN
+git log --oneline -- codes/marker_test.py
+
+OUT
+b73c2e3 Marker New Version with Balanced mode Implemented
+eee4d7a feat: Upgrade Marker to 2.0.0 and refactor inference backend
+c9f712a Refactor code structure for improved readability and maintainability
+PowerShell Show recent commits and working diff stat
+IN
+git log --oneline -12; echo "---- DIFF working vs HEAD ----"; git diff --stat
+
+OUT
+b73c2e3 Marker New Version with Balanced mode Implemented
+771ba78 Refactor chunking logic to implement structural packing and enforce chunk size limits
+eee4d7a feat: Upgrade Marker to 2.0.0 and refactor inference backend
+9cd13a4 Add preprocessing stage to normalize Marker clause structure before chunking
+d05d161 docs update
+50208bc feat(chunking): analyze Markdown split quality
+6e176b3 Chunking Setup created
+1432ae7 Report updated with new findings
+d4b23e5 Update documentation to reflect changes in project structure and findings from expanded PDF corpus analysis
+73d0f62 Report renamed to Marker-PDF Report
+13e8f44 Report formatted
+5599aa2 Marker-pdf Report
+---- DIFF working vs HEAD ----
+PowerShell Show pre-2.0.0 version of marker_test.py
+IN
+git show c9f712a:codes/marker_test.py
+
+OUT
+from pathlib import Path
+
+from marker.converters.pdf import PdfConverter
+from marker.models import create_model_dict
+from marker.output import text_from_rendered
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SOURCE_DIR = PROJECT_ROOT / "source"
+OUTPUT_DIR = PROJECT_ROOT / "marker_results"
+
+
+def output_path_for(source_path: Path) -> Path:
+    relative_path = source_path.relative_to(SOURCE_DIR)
+    return (OUTPUT_DIR / relative_path).with_suffix(".md")
+
+
+def main() -> None:
+    source_files = sorted(path for path in SOURCE_DIR.rglob("*") if path.is_file())
+    if not source_files:
+        raise SystemExit(f"No source files found in: {SOURCE_DIR}")
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    converter = PdfConverter(artifact_dict=create_model_dict())
+    print(f"Marker converter initialized. Found {len(source_files)} source file(s).")
+
+    converted = 0
+    failures: list[tuple[Path, Exception]] = []
+
+    for source_path in source_files:
+        output_path = output_path_for(source_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Converting: {source_path.relative_to(PROJECT_ROOT)}")
+
+        try:
+            rendered = converter(str(source_path))
+            markdown_output, _, _ = text_from_rendered(rendered)
+            output_path.write_text(markdown_output, encoding="utf-8")
+            converted += 1
+            print(f"Markdown written to: {output_path.relative_to(PROJECT_ROOT)}")
+        except Exception as error:
+            failures.append((source_path, error))
+            print(f"FAILED: {source_path.name}: {error}")
+
+    print(f"Marker complete: {converted} converted, {len(failures)} failed.")
+    if failures:
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()
+PowerShell Show stats of the two marker commits
+IN
+git show --stat eee4d7a; echo "=== b73c2e3 ==="; git show --stat b73c2e3
+
+OUT
+commit eee4d7a6cd5e6215ff8c93147004edbe313f71cd
+Author: Dawood Shahzad <dawoodbutt590@gmail.com>
+Date:   Wed Jul 22 02:43:19 2026 +0500
+
+    feat: Upgrade Marker to 2.0.0 and refactor inference backend
+    
+    - Updated `codes/marker_test.py` to set the inference backend to `llamacpp` and configured environment variables for compatibility with the new VLM server architecture.
+    - Adjusted `PdfConverter` initialization to use `balanced` mode for improved chunk quality, rejecting parallel processing due to stability issues.
+    - Documented architectural changes and decisions in `Architecture.md`, `Decisions.md`, and `Research.md`, including the impact of the upgrade on output quality and processing requirements.
+    - Added detailed bug records in `Bugs.md` for issues encountered during the upgrade, including Docker dependencies, JSON schema parsing failures, and orphaned packages affecting server health.
+    - Updated `Status.md` to reflect the upgrade process, challenges faced, and the rationale behind decisions made during the transition to Marker 2.0.0.
+
+ .gitignore           |  3 +-
+ README.md            | 38 +++++++++++++++++++++++--
+ codes/marker_test.py | 34 +++++++++++++++++++++-
+ docs/Architecture.md | 38 ++++++++++++++++++++++---
+ docs/Bugs.md         | 80 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ docs/Decisions.md    | 28 ++++++++++++++++++
+ docs/Research.md     | 12 ++++++++
+ docs/Status.md       | 32 +++++++++++++++++++++
+ 8 files changed, 256 insertions(+), 9 deletions(-)
+=== b73c2e3 ===
+commit b73c2e3e2012eb92f5431325901052b9ca4cfcec
+Author: Dawood Shahzad <dawoodbutt590@gmail.com>
+Date:   Thu Jul 23 19:05:44 2026 +0500
+
+    Marker New Version with Balanced mode Implemented
+
+ codes/marker_test.py | 240 ++++++++++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 230 insertions(+), 10 deletions(-)
+AskUserQuestion
+OUT
+Your questions have been answered: "Reverting codes/marker_test.py to the pre-2.0.0 (marker-pdf 1.10.2) version — how much should come off?"="Full revert to c9f712a", "Should the docs/env instructions follow the revert?"="Also reinstall 1.10.2". You can now continue with these answers in mind.
+PowerShell Restore marker_test.py from pre-2.0.0 commit
+IN
+git checkout c9f712a -- codes/marker_test.py; if ($?) { git status --short; git diff --stat HEAD }
+
+OUT
+M  codes/marker_test.py
+ codes/marker_test.py | 272 ++-------------------------------------------------
+ 1 file changed, 10 insertions(+), 262 deletions(-)
+PowerShell Show current marker venv package versions
+IN
+& .\.venv-marker\Scripts\python.exe -c "import importlib.metadata as m; [print(p, m.version(p)) for p in ('marker-pdf','surya-ocr','torch','pillow')]"
+
+OUT
+marker-pdf 2.0.0
+surya-ocr 0.22.1
+torch 2.13.0+cu130
+pillow 10.4.0
+PowerShell Downgrade marker-pdf to 1.10.2 in .venv-marker
+IN
+uv pip install --python .venv-marker\Scripts\python.exe "marker-pdf==1.10.2"
+
+OUT
+Using Python 3.12.10 environment at: .venv-marker
+Resolved 79 packages in 3.97s
+Uninstalled 10 packages in 1.63s
+Installed 10 packages in 1.80s
+ - anthropic==0.117.0
+ + anthropic==0.46.0
+ - google-genai==2.12.1
+ + google-genai==1.75.0
+ - huggingface-hub==1.24.0
+ + huggingface-hub==0.36.2
+ - marker-pdf==2.0.0
+ + marker-pdf==1.10.2
+ - openai==2.46.0
+ + openai==1.109.1
+ - pdftext==0.7.1
+ + pdftext==0.6.3
+ - pypdfium2==5.10.1
+ + pypdfium2==4.30.0
+ - regex==2026.7.19
+ + regex==2024.11.6
+ - surya-ocr==0.22.1
+ + surya-ocr==0.17.1
+ - transformers==5.14.1
+ + transformers==4.57.6
+PowerShell Verify CUDA torch still works after downgrade
+IN
+& .\.venv-marker\Scripts\python.exe -c "import torch; x=torch.randn(2048,2048,device='cuda'); print(torch.__version__, torch.cuda.is_available(), (x@x).sum().item())"
+
+OUT
+2.13.0+cu130 True -97502.84375
+PowerShell Verify marker 1.10.2 imports used by the reverted script
+IN
+& .\.venv-marker\Scripts\python.exe -c "import importlib.metadata as m; print('marker-pdf', m.version('marker-pdf')); from marker.converters.pdf import PdfConverter; from marker.models import create_model_dict; from marker.output import text_from_rendered; print('imports OK'); import tiktoken; print('tiktoken', m.version('tiktoken'))"
+
+OUT
+marker-pdf 1.10.2
+imports OK
+tiktoken 0.13.0
+Done.
+
+Code — codes/marker_test.py is restored byte-for-byte from c9f712a (the last pre-2.0.0 revision): 50 lines, plain PdfConverter(artifact_dict=create_model_dict()), no mode/pdftext_workers config, no surya env vars, no deep-stack thread, no page batching, no resume-skip. 262 lines removed, staged but not committed.
+
+Environment — .venv-marker downgraded to marker-pdf==1.10.2. uv also rolled back the transitive stack: surya-ocr 0.22.1→0.17.1, pdftext 0.7.1→0.6.3, pypdfium2 5.10.1→4.30.0, transformers 5.14.1→4.57.6, plus the anthropic/openai/google-genai/huggingface-hub clients.
+
+torch was not touched — it's still 2.13.0+cu130, and the matmul check passes (torch.cuda.is_available() True, real result out of the GPU). The cu130 reinstall you approved turned out to be unnecessary, so I skipped it. tiktoken 0.13.0 survived, so chunking/ingest.py is unaffected.
+
+Verified the three imports the reverted script uses resolve under 1.10.2. I did not run an actual conversion.
+
+Two things to flag, no action taken:
+
+marker_results/ now holds output from pipelines that no longer match the installed version at all. Per CLAUDE.md it was already a mix of 1.10.2 / 2.0.0-fast / 2.0.0-balanced; regenerate the tree before using it as a baseline.
+CLAUDE.md and README.md still document the 2.0.0 install (marker-pdf==2.0.0, the mode caveat, the MarginaliaProcessor/OrderProcessor notes) and docs/ records the upgrade. All of it is now stale relative to the venv. I left every file alone — say the word if you want CLAUDE.md/README.md updated, and separately if you want a docs/Status.md entry for the revert.

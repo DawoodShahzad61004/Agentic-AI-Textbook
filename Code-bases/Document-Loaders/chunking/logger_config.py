@@ -81,6 +81,20 @@ def write_chunk_run(
         f"- Average chunk tokens: {average_tokens:.2f}",
     ]
 
+    if prepared_chunks:
+        # Chunk numbers below are 1-based, matching the "## Chunk N" headings.
+        largest_index, (_, largest_content, largest_tokens) = max(
+            enumerate(prepared_chunks, start=1),
+            key=lambda item: item[1][2],
+        )
+        sections.extend(
+            [
+                f"- Largest chunk (tokens): Chunk {largest_index}",
+                f"- Largest chunk tokens: {largest_tokens}",
+                f"- Largest chunk characters: {len(largest_content)}",
+            ]
+        )
+
     for index, (chunk, content, token_count) in enumerate(prepared_chunks, start=1):
         source = chunk.metadata.get("source", "unknown")
         sequence = chunk.metadata.get("chunk_seq", index - 1)

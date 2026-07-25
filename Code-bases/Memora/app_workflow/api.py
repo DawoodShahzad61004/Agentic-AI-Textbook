@@ -111,6 +111,16 @@ class QueryRequest(BaseModel):
     switches: Optional[WorkflowSwitches] = None
 
 
+class IngestRequest(BaseModel):
+    """Optional per-request overrides for the ingestion-flow toggles.
+
+    A field left as None keeps the config.py default for that switch.
+    """
+
+    ENABLE_MARKER_LOADER: Optional[bool] = None
+    ENABLE_CUSTOM_SPLITTER: Optional[bool] = None
+
+
 class FeedbackRequest(BaseModel):
     feedback: str = ""
 
@@ -222,6 +232,27 @@ async def learn():
     learn_config = {"callbacks": [langfuse_handler]} if langfuse_handler else None
     added = await asyncio.to_thread(_ctx["self_learner"].run_distillation, config=learn_config)
     return {"added_qa_pairs": added}
+
+
+@app.post("/ingest")
+async def ingest(req: Optional[IngestRequest] = None):
+    """Run the document-ingestion pipeline.
+
+    The optional body's ENABLE_MARKER_LOADER / ENABLE_CUSTOM_SPLITTER booleans,
+    when provided, override the config.py defaults for this run and select the
+    loader (Marker vs. Unstructured) and splitter (custom vs. recursive).
+    """
+    from app_workflow.ingestion.ingestion_requests import run_ingestion
+
+    enable_marker = req.ENABLE_MARKER_LOADER if req else None
+    enable_custom = req.ENABLE_CUSTOM_SPLITTER if req else None
+
+    summary = await asyncio.to_thread(
+        run_ingestion,
+        enable_marker_loader=enable_marker,
+        enable_custom_splitter=enable_custom,
+    )
+    return summary
 
 
 @app.post("/quit")

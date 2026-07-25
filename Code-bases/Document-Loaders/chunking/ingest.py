@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 if __package__:
@@ -22,6 +22,7 @@ MIN_CHUNK_CHARS = 50
 logger = logging.getLogger(__name__)
 
 HEADING_RE = re.compile(r"^(#{1,6})[ \t]+\S")
+HTML_TAG_RE = re.compile(r"<[^>]*>")
 LIST_ITEM_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?:[-*+]|\d+[.)])[ \t]+\S", re.MULTILINE
 )
@@ -309,20 +310,44 @@ def _apply_plain_branch(
     return start, cursor, "".join(pieces)
 
 
+def _enclosing_heading_level(headings: list[tuple[int, int]], position: int) -> int | None:
+    """ATX level of the nearest heading preceding ``position``."""
+    preceding = [level for start, level in headings if start < position]
+    return preceding[-1] if preceding else None
+
+
 def _apply_heading_branch(
-    text: str, blocks: list[dict], seq: list[int], *, bold: bool
+    text: str,
+    blocks: list[dict],
+    seq: list[int],
+    *,
+    bold: bool,
+    headings: list[tuple[int, int]],
 ) -> tuple[int, int, str]:
     """Promote every marker in the sequence to a heading, merging its body.
 
     Content between two markers that no body absorbs (e.g. a sub-list under
     one clause) is copied through verbatim rather than dropped.
+
+    The promoted level may never be *shallower* than the section heading the
+    clauses live under, or the sequence reads as a sibling of its own parent
+    and every consumer that groups by ATX level nests the document wrongly.
+    Marker emits exactly that inversion — a "#### 5. INSTRUCTIONS TO BIDDERS"
+    section whose clauses it already wrote as "### 5.6" — so a heading prefix
+    found in the sequence is a floor, not the answer. Level-with-the-parent
+    rather than one below it is what `dataset/expected-output.md` specifies;
+    it is enough to make the section tree well-formed, because a section
+    heading left owning nothing still travels with the clause that follows it.
     """
     level = 5
     for i in seq:
         if blocks[i]["is_heading_prefix"]:
             level = len(blocks[i]["prefix"].strip())
             break
-    hashes = "#" * level
+    enclosing = _enclosing_heading_level(headings, blocks[seq[0]]["start"])
+    if enclosing is not None:
+        level = max(level, enclosing)
+    hashes = "#" * min(level, 6)
     n = len(blocks)
 
     start = blocks[seq[0]]["start"]
@@ -368,13 +393,18 @@ def _normalize_marker_sequences(text: str) -> str:
     """Apply rule 1: normalize numbered-clause sequences (see preprocessing)."""
     blocks = _split_blocks(text)
     sequences = _marker_sequences(blocks)
+    headings = _heading_matches(text)
 
     edits: list[tuple[int, int, str]] = []
     for seq in sequences:
         has_bold = any(blocks[i]["bold_label"] for i in seq)
         has_heading_prefix = any(blocks[i]["is_heading_prefix"] for i in seq)
         if has_bold or has_heading_prefix:
-            edits.append(_apply_heading_branch(text, blocks, seq, bold=has_bold))
+            edits.append(
+                _apply_heading_branch(
+                    text, blocks, seq, bold=has_bold, headings=headings
+                )
+            )
         else:
             edit = _apply_plain_branch(text, blocks, seq)
             if edit is not None:
@@ -475,293 +505,678 @@ def split_documents(documents: list[Document]) -> list[Document]:
     return chunks
 
 
-def temp_split(text: str) -> list[str]:
-    """Split Markdown from top to bottom without cutting structural blocks.
+@dataclass
+class _Node:
+    """One structural unit of the document: a section, table, list or paragraph.
 
-    ``CHUNK_SIZE`` is a hard limit for ordinary prose.  Markdown tables are the
-    deliberate exception: a table that starts a chunk is emitted whole so that
-    its header and rows never become separate retrieval units.
+    ``start``/``end`` are character offsets into the whole document. A node's
+    span always covers every heading line enclosing it that no earlier sibling
+    already carries, so emitting ``text[node.start:node.end]`` never loses a
+    heading. ``content_start`` records where the unit's own content began
+    before any such heading was attached, which is what a table needs in order
+    to tell its headings apart from its first row.
+    """
+
+    start: int
+    end: int
+    kind: str
+    children: list["_Node"]
+    content_start: int | None = None
+
+
+def temp_split(text: str) -> list[str]:
+    """Split Markdown into chunks that are as full as ``CHUNK_SIZE`` allows.
+
+    The document is parsed into a tree of structural units — sections nested
+    by ATX heading level, and within each section the tables, lists and
+    paragraphs of its own body — and those units are then packed greedily:
+    a chunk takes whole sibling units until the next one would not fit, and
+    that next unit moves to the following chunk intact. A unit is only ever
+    opened up when it does not fit in an empty chunk by itself, and then only
+    one level at a time, so a heading is never separated from its content and
+    a section is never torn in half while a coarser boundary was available.
+
+    ``CHUNK_SIZE`` bounds every chunk, tables included. A table that does not
+    fit is re-serialized into several chunks, each repeating the headers that
+    apply to the cells it carries, so that a piece still reads as a table
+    rather than as loose rows — see `_split_table`.
     """
     text = text.strip()
     if not text:
         return []
 
-    table_spans = _table_spans(text)
-    list_spans = _list_spans(text)
-    headings = _heading_matches(text)
     chunks: list[str] = []
-    cursor = 0
-
-    while cursor < len(text):
-        cursor = _skip_blank_lines(text, cursor)
-        if cursor >= len(text):
-            break
-
-        # A consecutive heading group directly before a table belongs to the
-        # table.  This also prevents a heading-only chunk before an oversized
-        # table.
-        heading_table = _table_section_after_heading(
-            text,
-            cursor,
-            headings=headings,
-            table_spans=table_spans,
-        )
-        if heading_table is not None:
-            _append_chunk(chunks, text[cursor:heading_table[1]])
-            cursor = heading_table[1]
-            continue
-
-        # Rule 6: once a table reaches the front, keep all of it together.
-        table = _span_starting_at(table_spans, cursor)
-        if table is not None:
-            _append_chunk(chunks, text[cursor : table[1]])
-            cursor = table[1]
-            continue
-
-        # When a list was moved forward, retain its immediately preceding
-        # lead-in paragraph (for example, "To be submitted in accordance
-        # with:") in the same chunk as the list. Nesting doesn't matter here:
-        # if the whole thing fits it stays together regardless of depth.
-        paragraph_list = _list_section_after_paragraph(
-            text,
-            cursor,
-            list_spans=list_spans,
-        )
-        if paragraph_list is not None:
-            list_start, list_end = paragraph_list
-            if list_end - cursor <= CHUNK_SIZE:
-                _append_chunk(chunks, text[cursor:list_end])
-            else:
-                # Oversized: split on top-level pointers only, so a nested
-                # sub-item never gets separated from its parent pointer.
-                boundaries = _top_level_item_boundaries(text, list_start, list_end)
-                first_end = boundaries[1]
-                _append_limited(chunks, text[cursor:first_end])
-                for item_start, item_end in zip(
-                    boundaries[1:], boundaries[2:]
-                ):
-                    _append_limited(chunks, text[item_start:item_end])
-            cursor = list_end
-            continue
-
-        # A section containing one heading followed only by a list stays
-        # together when it fits, regardless of nesting. If it is oversized,
-        # each top-level pointer (with any nested children) remains an
-        # indivisible unit and the heading is attached to the first pointer.
-        heading_list = _list_section_after_heading(
-            text,
-            cursor,
-            headings=headings,
-            list_spans=list_spans,
-        )
-        if heading_list is not None:
-            list_start, list_end, section_end = heading_list
-            if list_end - cursor <= CHUNK_SIZE:
-                _append_chunk(chunks, text[cursor:section_end])
-            else:
-                boundaries = _top_level_item_boundaries(text, list_start, list_end)
-                first_end = boundaries[1]
-                _append_limited(chunks, text[cursor:first_end])
-                for start, end in zip(boundaries[1:], boundaries[2:]):
-                    _append_limited(chunks, text[start:end])
-            cursor = section_end
-            continue
-
-        # A list that was moved to the next chunk is split one top-level
-        # pointer at a time, each carrying any nested children with it.
-        # Continuation lines stay attached to their pointer.
-        list_block = _list_block_starting_at(text, list_spans, cursor)
-        if list_block is not None:
-            items = _list_items(text, cursor, list_block[1])
-            if items:
-                boundaries = _top_level_item_boundaries(text, cursor, list_block[1])
-                for start, end in zip(boundaries, boundaries[1:]):
-                    _append_limited(chunks, text[start:end])
-                cursor = list_block[1]
-                continue
-
-        limit = min(cursor + CHUNK_SIZE, len(text))
-        if limit == len(text):
-            _append_chunk(chunks, text[cursor:])
-            break
-
-        cut = _structural_cut(
-            text,
-            cursor,
-            limit,
-            headings=headings,
-            table_spans=table_spans,
-            list_spans=list_spans,
-        )
-        trailing_heading = _trailing_heading_start(
-            text,
-            cursor,
-            cut,
-            headings,
-        )
-        if trailing_heading is not None:
-            cut = trailing_heading
-        if cut <= cursor or _contains_only_headings(text, cursor, cut):
-            cut = _cut_with_heading_content(text, cursor, limit)
-
-        # The heading-aware fallback can itself land immediately after a later
-        # heading.  Run the rollover check once more on the final candidate so
-        # no completed chunk ends with a heading before body content.
-        trailing_heading = _trailing_heading_start(
-            text,
-            cursor,
-            cut,
-            headings,
-        )
-        if trailing_heading is not None:
-            cut = trailing_heading
-
-        _append_chunk(chunks, text[cursor:cut])
-        cursor = cut
-
+    _pack(text, _build_tree(text), chunks)
     return chunks
 
 
-def _structural_cut(
+def _build_tree(text: str) -> list[_Node]:
+    """Parse the whole document into top-level structural units."""
+    return _sections(
+        text,
+        0,
+        len(text),
+        headings=_heading_matches(text),
+        table_spans=_table_spans(text),
+        list_spans=_list_spans(text),
+    )
+
+
+def _sections(
     text: str,
     start: int,
-    limit: int,
+    end: int,
     *,
     headings: list[tuple[int, int]],
     table_spans: list[tuple[int, int]],
     list_spans: list[tuple[int, int]],
-) -> int:
-    """Choose the boundary for one size-limited candidate chunk."""
-    candidate_headings = [
-        heading for heading in headings if start <= heading[0] < limit
-    ]
+) -> list[_Node]:
+    """Group ``[start, end)`` into sections at its shallowest heading level.
 
-    # Rules 4 and 5: move a partial table, plus the appropriate heading when
-    # the chunk began in unheaded prose, into the following chunk.
-    partial_table = next(
-        (span for span in table_spans if span[0] < limit < span[1]), None
-    )
-    if partial_table is not None:
-        table_start = partial_table[0]
-        starts_with_heading = bool(
-            candidate_headings and candidate_headings[0][0] == start
-        )
-        if starts_with_heading:
-            headings_between = [
-                position
-                for position, _ in candidate_headings
-                if start < position < table_start
-            ]
-            if not headings_between:
-                return table_start
-            return _heading_group_start_before_table(
+    Levels are read from the document as written rather than assumed to be
+    well-formed: the shallowest level *present in this range* opens the
+    sections, so a document that starts at ``###`` or skips a level still
+    nests sensibly.
+    """
+    inner = [(position, level) for position, level in headings if start <= position < end]
+    if not inner:
+        return _content_units(text, start, end, table_spans, list_spans)
+
+    top_level = min(level for _, level in inner)
+    starts = [position for position, level in inner if level == top_level]
+
+    nodes: list[_Node] = []
+    if starts[0] > start:
+        nodes.extend(_content_units(text, start, starts[0], table_spans, list_spans))
+    for index, position in enumerate(starts):
+        section_end = starts[index + 1] if index + 1 < len(starts) else end
+        nodes.append(
+            _section_node(
                 text,
-                headings_between,
-                table_start,
+                position,
+                section_end,
+                headings=headings,
+                table_spans=table_spans,
+                list_spans=list_spans,
             )
-
-        headings_before_table = [
-            position
-            for position, _ in candidate_headings
-            if position < table_start
-        ]
-        if headings_before_table:
-            return headings_before_table[-1]
-        return table_start
-
-    # Rule 2 applies when the candidate contains a heading hierarchy rather
-    # than a lone heading.  The numerically largest ATX level is the smallest
-    # (deepest) level in that hierarchy.
-    if len(candidate_headings) > 1:
-        deepest_level = max(level for _, level in candidate_headings)
-        deepest = [
-            position
-            for position, level in candidate_headings
-            if level == deepest_level
-        ]
-        last_deepest = deepest[-1]
-        # A sibling subsection closes the run; so does the next heading at a
-        # shallower level, since that marks the end of the *parent* section
-        # even when this document never repeats the deepest level elsewhere
-        # (e.g. one-off "#####" subsections used only inside a single "####"
-        # clause) — without the shallower case, a hierarchy with no further
-        # same-level siblings anywhere in the document looks like it never
-        # closes, and Rule 2 drops subsections that actually already fit.
-        next_peer = next(
-            (
-                position
-                for position, level in headings
-                if position > last_deepest and level <= deepest_level
-            ),
-            len(text),
         )
-        if text[limit:next_peer].strip():
-            # Drop every deepest-level subsection in the candidate.  If that
-            # would make an empty chunk, retain completed peer sections and
-            # move only the final incomplete peer.
-            cut = deepest[0] if deepest[0] > start else deepest[-1]
+    return nodes
 
-            # When the whole run gets dropped (cut landed on its first
-            # subsection), don't strand that subsection's own parent heading
-            # alone at the end of this chunk with nothing but a short
-            # lead-in — pull the parent in too so the entire section starts
-            # fresh in the next chunk instead of splitting across both.
-            if cut == deepest[0]:
-                enclosing = _enclosing_heading_start(headings, cut, deepest_level)
-                if enclosing is not None and enclosing > start:
-                    cut = enclosing
 
-            return cut
+def _section_node(
+    text: str,
+    start: int,
+    end: int,
+    *,
+    headings: list[tuple[int, int]],
+    table_spans: list[tuple[int, int]],
+    list_spans: list[tuple[int, int]],
+) -> _Node:
+    """Build one section: its heading line plus everything it owns."""
+    line_end = text.find("\n", start, end)
+    body_start = end if line_end < 0 else line_end + 1
 
-        # Otherwise the whole hierarchy (and whatever peer section follows
-        # it) already resolves before `limit` — there's no subsection left
-        # to protect, so fall through to the ordinary boundary rules below
-        # instead of returning the raw, unsnapped `limit` itself. Content
-        # between `next_peer` and `limit` is unrelated trailing prose (e.g.
-        # a later sibling clause's own body) that still deserves a safe
-        # paragraph/word boundary, not a mid-word cut.
-
-    # Rule 3(i): a heading immediately after this candidate is already a safe
-    # boundary, so the candidate can be kept as recorded.
-    if re.match(r"[\r\n\t ]*#{1,6}[ \t]+\S", text[limit:]):
-        return limit
-
-    # Rule 3(ii), lists: if the limit lands in a list, move its deepest pointer
-    # level.  A flat list is moved in full and split per pointer on the next
-    # loop iteration.
-    list_block = next(
-        (span for span in list_spans if span[0] < limit < span[1]), None
+    children = _sections(
+        text,
+        body_start,
+        end,
+        headings=headings,
+        table_spans=table_spans,
+        list_spans=list_spans,
     )
-    if list_block is not None:
-        effective_start = max(start, list_block[0])
-        block_items = _list_items(text, effective_start, list_block[1])
-        if block_items and len({indent for _, indent in block_items}) == 1:
-            paragraph_start = _paragraph_before_list(
-                text,
-                start,
-                effective_start,
-            )
-            return (
-                paragraph_start
-                if paragraph_start is not None
-                else effective_start
-            )
+    if children:
+        _extend_start(children[0], start)
+    return _Node(start, end, "section", children)
 
-        items = _list_items(text, effective_start, limit)
-        if items:
-            deepest_indent = max(indent for _, indent in items)
-            deepest_items = [
-                position for position, indent in items if indent == deepest_indent
-            ]
-            return deepest_items[0]
 
-    # Rule 3(ii), prose: move the last paragraph into the next chunk.  When a
-    # single paragraph is itself oversized, fall back to a hard word boundary
-    # so the loop always advances and the size limit remains meaningful.
-    paragraph_starts = _paragraph_starts(text, start, limit)
-    if paragraph_starts and paragraph_starts[-1] > start:
-        return paragraph_starts[-1]
-    return _hard_cut(text, start, limit)
+def _extend_start(node: _Node, start: int) -> None:
+    """Attach a heading line to the first unit that follows it, recursively.
+
+    The heading has to travel with whichever chunk its content lands in, at
+    every depth — otherwise splitting a section strands its heading and
+    splitting that section's first subsection strands the heading again.
+    """
+    node.start = start
+    if node.children:
+        _extend_start(node.children[0], start)
+
+
+def _content_units(
+    text: str,
+    start: int,
+    end: int,
+    table_spans: list[tuple[int, int]],
+    list_spans: list[tuple[int, int]],
+) -> list[_Node]:
+    """Split a heading-free region into blocks, keeping tables and lists whole."""
+    units: list[_Node] = []
+    cursor = _skip_blank_lines(text, start)
+
+    while cursor < end:
+        separator = BLOCK_SPLIT_RE.search(text, cursor, end)
+        block_end = separator.start() if separator else end
+        if block_end <= cursor:
+            break
+
+        table = next((span for span in table_spans if cursor <= span[0] < block_end), None)
+        listing = next((span for span in list_spans if cursor <= span[0] < block_end), None)
+        if table is not None and listing is not None:
+            kind, span = (
+                ("table", table) if table[0] <= listing[0] else ("list", listing)
+            )
+        elif table is not None:
+            kind, span = "table", table
+        elif listing is not None:
+            kind, span = "list", listing
+        else:
+            units.append(_Node(cursor, block_end, "paragraph", []))
+            cursor = _skip_blank_lines(text, block_end)
+            continue
+
+        if span[0] > cursor:
+            units.append(_Node(cursor, span[0], "paragraph", []))
+        unit_end = min(span[1], block_end)
+        if unit_end <= span[0]:
+            unit_end = block_end
+        units.append(_Node(span[0], unit_end, kind, [], content_start=span[0]))
+        cursor = _skip_blank_lines(text, unit_end)
+
+    return _group_list_lead_ins(units)
+
+
+def _group_list_lead_ins(units: list[_Node]) -> list[_Node]:
+    """Absorb a list's lead-in paragraph ("To be submitted ... with:") into it."""
+    grouped: list[_Node] = []
+    for unit in units:
+        if unit.kind == "list" and grouped and grouped[-1].kind == "paragraph":
+            lead_in = grouped.pop()
+            grouped.append(_Node(lead_in.start, unit.end, "list", []))
+        else:
+            grouped.append(unit)
+    return grouped
+
+
+def _pack(
+    text: str, nodes: list[_Node], chunks: list[str], *, tail_open: bool = False
+) -> int | None:
+    """Emit chunks for ``nodes``, filling each one as far as ``CHUNK_SIZE`` allows.
+
+    ``tail_open`` says whether the caller still has text after these nodes. If
+    it does, and packing ends on a heading run with nothing under it, that run
+    is returned rather than emitted so the caller can put it in front of what
+    it introduces. Returns ``None`` whenever there is nothing to hand back.
+    """
+    buffer_start: int | None = None
+    buffer_end = 0
+
+    for index, node in enumerate(nodes):
+        more_follows = tail_open or index + 1 < len(nodes)
+        start = node.start
+        if buffer_start is not None:
+            if _fits(text, buffer_start, node.end):
+                buffer_end = node.end
+                continue
+            # The pending chunk is closed here — unless it should instead be
+            # handed to this node as a lead-in. Two reasons to hand it over: a
+            # buffer holding nothing but heading lines would otherwise be
+            # published as a body-less chunk, and a buffer well short of
+            # ``CHUNK_SIZE`` sitting in front of a node that is about to be
+            # opened up anyway can keep filling from that node's first piece
+            # rather than closing early.
+            carry = _contains_only_headings(text, buffer_start, buffer_end)
+            if not carry and not _fits(text, node.start, node.end):
+                carry = _lead_in_fits(text, node, buffer_start)
+            if carry:
+                start = buffer_start
+            else:
+                # A chunk must not end on a heading while text it introduces
+                # is still to come: a trailing heading describes what follows
+                # it, so publishing it here labels the wrong content and
+                # leaves the real content unlabelled. Hand the trailing run
+                # forward and close the chunk on the last body line instead.
+                trailing = _trailing_heading_start(text, buffer_start, buffer_end)
+                _append_chunk(chunks, text[buffer_start : trailing or buffer_end])
+                if trailing is not None:
+                    start = trailing
+            buffer_start = None
+
+        if _fits(text, start, node.end):
+            buffer_start, buffer_end = start, node.end
+        else:
+            leftover = _split_node(
+                text, node, start, chunks, tail_open=more_follows
+            )
+            if leftover is not None:
+                # Headings this node ended on: hold them as the pending chunk
+                # so the next node picks them up the same way it would any
+                # heading-only buffer.
+                buffer_start, buffer_end = leftover, node.end
+
+    if buffer_start is None:
+        return None
+
+    if tail_open:
+        if _contains_only_headings(text, buffer_start, buffer_end):
+            return buffer_start
+        trailing = _trailing_heading_start(text, buffer_start, buffer_end)
+        if trailing is not None:
+            _append_chunk(chunks, text[buffer_start:trailing])
+            return trailing
+
+    _append_chunk(chunks, text[buffer_start:buffer_end])
+    return None
+
+
+def _open_node(text: str, node: _Node, start: int) -> list[_Node] | None:
+    """Return the sub-units a too-large node splits into, or ``None`` if atomic.
+
+    ``start`` may sit before ``node.start`` when the caller handed over a
+    lead-in; the sub-unit that opens the node takes it over, so no text is
+    lost and no heading is stranded.
+    """
+    if node.kind == "table":
+        # A table has no sub-units expressible as source spans: every piece
+        # has to be re-serialized with its own copy of the headers, so
+        # `_split_table` emits it directly instead.
+        return None
+
+    if node.kind == "list":
+        # Split on top-level pointers only, so a nested sub-item never gets
+        # separated from its parent pointer. Anything the span picked up
+        # ahead of the first pointer — a heading, a lead-in paragraph — rides
+        # along with it.
+        if not _list_items(text, start, node.end):
+            return None
+        boundaries = _top_level_item_boundaries(text, start, node.end)
+        items = [
+            _Node(item_start, item_end, "list-item", [])
+            for item_start, item_end in zip(boundaries, boundaries[1:])
+        ]
+        return items if len(items) > 1 else None
+
+    if not node.children:
+        return None
+
+    children = list(node.children)
+    if start < children[0].start:
+        children[0] = replace(children[0], start=start)
+    return children
+
+
+def _split_node(
+    text: str,
+    node: _Node,
+    start: int,
+    chunks: list[str],
+    *,
+    tail_open: bool = False,
+) -> int | None:
+    """Emit chunks for one unit that cannot fit in a chunk of its own.
+
+    Returns any trailing heading run the caller should carry forward; see
+    `_pack`. Tables and leaves never end on a heading, so only the recursive
+    case can hand anything back.
+    """
+    children = _open_node(text, node, start)
+    if children is not None:
+        return _pack(text, children, chunks, tail_open=tail_open)
+    if node.kind == "table":
+        _split_table(text, node, start, chunks)
+    else:
+        _append_limited(chunks, text[start:node.end])
+    return None
+
+
+def _lead_in_fits(text: str, node: _Node, lead_start: int) -> bool:
+    """Whether ``lead_start`` can be handed to the first piece ``node`` splits into."""
+    children = _open_node(text, node, lead_start)
+    return children is not None and _fits(text, lead_start, children[0].end)
+
+
+def _fits(text: str, start: int, end: int) -> bool:
+    """Whether ``text[start:end]`` fits a chunk once trimmed as one would be."""
+    return len(text[start:end].strip()) <= CHUNK_SIZE
+
+
+# --- table splitting ---------------------------------------------------------
+#
+# A table too large for one chunk is re-serialized rather than sliced out of the
+# source, because each piece has to carry its own copy of the headers. Cell
+# padding and the alignment row are normalized on the way out: neither is
+# semantic in Markdown, Marker pads columns to the width of the widest cell
+# (alignment rows of 800+ characters occur in this corpus), and the size limit
+# is defined on the emitted chunk rather than on the source it came from.
+#
+# The only content this can lose is at a boundary chosen *inside* a cell, which
+# happens solely when one cell plus its headers exceeds CHUNK_SIZE on its own.
+
+
+ALIGNMENT_CELL_RE = re.compile(r"^(?P<left>:?)-+(?P<right>:?)$")
+CELL_PARAGRAPH_RE = re.compile(r"(?:<br\s*/?>[ \t]*){2,}|\n[ \t]*\n[ \t\n]*")
+CELL_LIST_ITEM_RE = re.compile(r"(?:<br\s*/?>|\n)(?=[ \t]*(?:[-*+•➢]|\d+[.)])[ \t])")
+CELL_SENTENCE_RE = re.compile(r"(?<=[.!?])(?:[ \t]|<br\s*/?>|\n)+")
+CELL_WORD_RE = re.compile(r"(?:[ \t]|<br\s*/?>|\n)+")
+
+
+@dataclass
+class _Table:
+    """A parsed pipe table: its header stack, alignment row, and data rows."""
+
+    header_rows: list[list[str]]
+    alignment: list[str]
+    body_rows: list[list[str]]
+    width: int
+
+
+def _parse_table(block: str) -> _Table | None:
+    """Parse one pipe table. Rows after the first alignment row are all data."""
+    lines = [line for line in block.splitlines() if line.strip()]
+    rows = [(line, _table_cells(line)) for line in lines]
+    if any(cells is None for _, cells in rows):
+        return None
+
+    alignment_index = next(
+        (index for index, (line, _) in enumerate(rows) if _is_table_separator(line)),
+        None,
+    )
+    if alignment_index is None:
+        return None
+
+    header_rows = [cells for _, cells in rows[:alignment_index]]
+    alignment = rows[alignment_index][1]
+    # Any further alignment row is a converter artefact rather than a second
+    # header stack — keep it as data so nothing is silently dropped.
+    body_rows = [cells for _, cells in rows[alignment_index + 1 :]]
+
+    width = max((len(cells) for cells in [*header_rows, alignment, *body_rows]), default=0)
+    if width == 0:
+        return None
+    return _Table(header_rows, alignment, body_rows, width)
+
+
+def _cell(row: list[str], column: int) -> str:
+    """Read one cell, tolerating the ragged rows Marker's OCR produces."""
+    return row[column] if column < len(row) else ""
+
+
+def _render_row(cells: list[str]) -> str:
+    return "| " + " | ".join(cells) + " |"
+
+
+def _alignment_cell(spec: str) -> str:
+    match = ALIGNMENT_CELL_RE.fullmatch(spec.replace(" ", ""))
+    if match is None:
+        return "---"
+    return f"{match.group('left')}---{match.group('right')}"
+
+
+def _row_line(row: list[str], columns: list[int]) -> str:
+    return _render_row([_cell(row, column) for column in columns])
+
+
+def _render_table(
+    prefix: str, table: _Table, rows: list[list[str]], columns: list[int]
+) -> str:
+    """Serialize a header stack plus ``rows``, restricted to ``columns``."""
+    lines = [_row_line(header, columns) for header in table.header_rows]
+    lines.append(
+        _render_row([_alignment_cell(_cell(table.alignment, c)) for c in columns])
+    )
+    lines.extend(_row_line(row, columns) for row in rows)
+    body = "\n".join(lines)
+    return f"{prefix}\n\n{body}" if prefix else body
+
+
+def _has_column_headers(table: _Table) -> bool:
+    """Whether the row above the alignment row carries any label."""
+    return any(cell.strip() for header in table.header_rows for cell in header)
+
+
+def _has_row_headers(table: _Table) -> bool:
+    """Whether the first column labels its rows, rather than holding data.
+
+    Markdown has no row-header syntax, so this is a heuristic: the column has
+    to be populated on nearly every row and be substantially shorter than the
+    data beside it. It only decides two things — whether an unheaded table is
+    split by column instead of by row, and whether a label is repeated onto
+    the pieces of an oversized row — so a wrong guess degrades a chunk rather
+    than corrupting one.
+    """
+    if table.width < 2 or not table.body_rows:
+        return False
+
+    labels = [_cell(row, 0).strip() for row in table.body_rows]
+    if sum(1 for label in labels if label) < 0.6 * len(labels):
+        return False
+
+    label_size = sum(len(label) for label in labels)
+    data_size = sum(
+        len(_cell(row, column))
+        for row in table.body_rows
+        for column in range(1, table.width)
+    )
+    return data_size > 0 and label_size * 2 <= data_size
+
+
+def _split_table(text: str, node: _Node, start: int, chunks: list[str]) -> None:
+    """Emit one table as chunks, repeating its headers onto every piece.
+
+    ``start`` may sit before the table so that the headings introducing it
+    ride along; those repeat on every piece too, since each piece is meant to
+    stand on its own as a retrieval unit.
+    """
+    table_start = node.content_start if node.content_start is not None else node.start
+    prefix = text[start:table_start].strip()
+    table = _parse_table(text[table_start : node.end])
+    if table is None:
+        _append_limited(chunks, text[start : node.end])
+        return
+
+    # Rule 1: normalizing the padding away can bring a table that overran the
+    # limit in its source form back under it, and then it stays one chunk.
+    whole = _render_table(prefix, table, table.body_rows, list(range(table.width)))
+    if len(whole) <= CHUNK_SIZE:
+        _append_chunk(chunks, whole)
+        return
+
+    if not table.body_rows:
+        _split_across_columns(prefix, table, [], [], chunks)
+    elif _has_row_headers(table) and not _has_column_headers(table):
+        # Rule 4: row headers only — the table reads across, so split by column
+        # and repeat the row labels.
+        _split_by_columns(prefix, table, chunks)
+    else:
+        # Rules 3, 5 and 6: with column headers, with both, or with neither,
+        # the split is by row.
+        _split_by_rows(prefix, table, chunks)
+
+
+def _split_by_rows(prefix: str, table: _Table, chunks: list[str]) -> None:
+    """Rules 3, 5, 6 — repeat the column headers, then fill with whole rows."""
+    columns = list(range(table.width))
+    label_columns = [0] if _has_row_headers(table) else []
+    base = len(_render_table(prefix, table, [], columns))
+
+    group: list[list[str]] = []
+    size = base
+    for row in table.body_rows:
+        cost = 1 + len(_row_line(row, columns))
+        if group and size + cost > CHUNK_SIZE:
+            _append_chunk(chunks, _render_table(prefix, table, group, columns))
+            group, size = [], base
+        if not group and base + cost > CHUNK_SIZE:
+            # Rule 7: this row does not fit even alone, so break it up by
+            # column instead of emitting it oversized.
+            _split_across_columns(prefix, table, [row], label_columns, chunks)
+            continue
+        group.append(row)
+        size += cost
+
+    if group:
+        _append_chunk(chunks, _render_table(prefix, table, group, columns))
+
+
+def _split_by_columns(prefix: str, table: _Table, chunks: list[str]) -> None:
+    """Rule 4 — repeat the row headers, then fill with whole columns."""
+    label_columns = [0]
+    rows = table.body_rows
+
+    group: list[int] = []
+    for column in range(1, table.width):
+        if group and len(
+            _render_table(prefix, table, rows, [*label_columns, *group, column])
+        ) > CHUNK_SIZE:
+            _append_chunk(
+                chunks, _render_table(prefix, table, rows, [*label_columns, *group])
+            )
+            group = []
+        if not group and len(
+            _render_table(prefix, table, rows, [*label_columns, column])
+        ) > CHUNK_SIZE:
+            # Rule 8: this column does not fit even alone, so break it up by row.
+            _split_across_rows(prefix, table, column, label_columns, chunks)
+            continue
+        group.append(column)
+
+    if group:
+        _append_chunk(
+            chunks, _render_table(prefix, table, rows, [*label_columns, *group])
+        )
+
+
+def _split_across_columns(
+    prefix: str,
+    table: _Table,
+    rows: list[list[str]],
+    label_columns: list[int],
+    chunks: list[str],
+) -> None:
+    """Rule 7 — place as many whole cells of one row per chunk as will fit."""
+    data_columns = [c for c in range(table.width) if c not in label_columns]
+
+    group: list[int] = []
+    for column in data_columns:
+        if group and len(
+            _render_table(prefix, table, rows, [*label_columns, *group, column])
+        ) > CHUNK_SIZE:
+            _append_chunk(
+                chunks, _render_table(prefix, table, rows, [*label_columns, *group])
+            )
+            group = []
+        if not group and len(
+            _render_table(prefix, table, rows, [*label_columns, column])
+        ) > CHUNK_SIZE:
+            if rows:
+                _split_cell(prefix, table, rows[0], column, label_columns, chunks)
+                continue
+            # A header stack with no data behind it that still overruns: there
+            # is no finer boundary left to take, so let it overrun.
+            _append_chunk(
+                chunks, _render_table(prefix, table, rows, [*label_columns, column])
+            )
+            continue
+        group.append(column)
+
+    if group:
+        _append_chunk(
+            chunks, _render_table(prefix, table, rows, [*label_columns, *group])
+        )
+
+
+def _split_across_rows(
+    prefix: str,
+    table: _Table,
+    column: int,
+    label_columns: list[int],
+    chunks: list[str],
+) -> None:
+    """Rule 8 — place as many whole cells of one column per chunk as will fit."""
+    columns = [*label_columns, column]
+
+    group: list[list[str]] = []
+    for row in table.body_rows:
+        if group and len(_render_table(prefix, table, [*group, row], columns)) > CHUNK_SIZE:
+            _append_chunk(chunks, _render_table(prefix, table, group, columns))
+            group = []
+        if not group and len(_render_table(prefix, table, [row], columns)) > CHUNK_SIZE:
+            _split_cell(prefix, table, row, column, label_columns, chunks)
+            continue
+        group.append(row)
+
+    if group:
+        _append_chunk(chunks, _render_table(prefix, table, group, columns))
+
+
+def _split_cell(
+    prefix: str,
+    table: _Table,
+    row: list[str],
+    column: int,
+    label_columns: list[int],
+    chunks: list[str],
+) -> None:
+    """Rule 9 — split one cell's own content, repeating its headers on each piece."""
+    columns = [*label_columns, column]
+    blank = list(row) + [""] * max(0, table.width - len(row))
+    blank[column] = ""
+    overhead = len(_render_table(prefix, table, [blank], columns))
+
+    for piece in _cell_pieces(_cell(row, column), CHUNK_SIZE - overhead):
+        fragment = list(blank)
+        fragment[column] = piece
+        _append_chunk(chunks, _render_table(prefix, table, [fragment], columns))
+
+
+def _cell_pieces(value: str, budget: int) -> list[str]:
+    """Break cell content at the coarsest boundary whose pieces all fit.
+
+    Paragraphs first, then list items, then sentences, then words — and if a
+    single word still overruns, fixed-width slices, because at that point
+    there is no boundary in the text left to respect.
+    """
+    if budget <= 0 or len(value) <= budget:
+        return [value]
+
+    for pattern in (
+        CELL_PARAGRAPH_RE,
+        CELL_LIST_ITEM_RE,
+        CELL_SENTENCE_RE,
+        CELL_WORD_RE,
+    ):
+        groups = _merge_segments(_segments(value, pattern), budget)
+        if all(len(group) <= budget for group in groups):
+            return [group.strip() for group in groups if group.strip()]
+
+    return [value[index : index + budget] for index in range(0, len(value), budget)]
+
+
+def _segments(value: str, pattern: re.Pattern[str]) -> list[str]:
+    """Cut ``value`` at each match, keeping the separator on the piece before it."""
+    pieces: list[str] = []
+    cursor = 0
+    for match in pattern.finditer(value):
+        if match.end() <= cursor:
+            continue
+        pieces.append(value[cursor : match.end()])
+        cursor = match.end()
+    if cursor < len(value):
+        pieces.append(value[cursor:])
+    return pieces
+
+
+def _merge_segments(segments: list[str], budget: int) -> list[str]:
+    """Greedily concatenate consecutive segments up to ``budget``."""
+    groups: list[str] = []
+    current = ""
+    for segment in segments:
+        if current and len(current) + len(segment) > budget:
+            groups.append(current)
+            current = segment
+        else:
+            current += segment
+    if current:
+        groups.append(current)
+    return groups
 
 
 def _heading_matches(text: str) -> list[tuple[int, int]]:
@@ -804,6 +1219,7 @@ def _table_spans(text: str) -> list[tuple[int, int]]:
 
     fences = _fenced_code_spans(text)
     spans: list[tuple[int, int]] = []
+    consumed = 0
     index = 0
     while index + 1 < len(lines):
         if (
@@ -811,7 +1227,20 @@ def _table_spans(text: str) -> list[tuple[int, int]]:
             and _is_table_row(lines[index].rstrip("\r\n"))
             and _is_table_separator(lines[index + 1].rstrip("\r\n"))
         ):
-            start = offsets[index]
+            # A GitHub table declares one header row, but a converter
+            # reconstructing a multi-level header emits the upper levels as
+            # further rows above it. Walk back over them so the whole header
+            # stack belongs to the table and can be repeated on every piece
+            # when the table is split.
+            first = index
+            while (
+                first > consumed
+                and _is_table_row(lines[first - 1].rstrip("\r\n"))
+                and not _is_table_separator(lines[first - 1].rstrip("\r\n"))
+                and not _inside_spans(offsets[first - 1], fences)
+            ):
+                first -= 1
+            start = offsets[first]
             index += 2
             while index < len(lines) and _is_table_row(
                 lines[index].rstrip("\r\n")
@@ -819,16 +1248,44 @@ def _table_spans(text: str) -> list[tuple[int, int]]:
                 index += 1
             end = offsets[index] if index < len(lines) else len(text)
             spans.append((start, end))
+            consumed = index
         else:
             index += 1
     return spans
 
 
 def _table_cells(line: str) -> list[str] | None:
+    """Split a pipe row into stripped cells, or ``None`` if it is not a row.
+
+    Pipes that are backslash-escaped or inside an inline code span are cell
+    content, not delimiters — splitting on them naively miscounts the row's
+    width, which matters now that cells are addressed by index when a table
+    is split by column.
+    """
     stripped = line.strip()
     if not stripped.startswith("|") or not stripped.endswith("|"):
         return None
-    return [cell.strip() for cell in stripped[1:-1].split("|")]
+
+    cells: list[str] = []
+    cell: list[str] = []
+    escaped = False
+    code_span = False
+
+    for character in stripped[1:-1]:
+        if escaped:
+            escaped = False
+        elif character == "\\":
+            escaped = True
+        elif character == "`":
+            code_span = not code_span
+        elif character == "|" and not code_span:
+            cells.append("".join(cell).strip())
+            cell = []
+            continue
+        cell.append(character)
+
+    cells.append("".join(cell).strip())
+    return cells
 
 
 def _is_table_row(line: str) -> bool:
@@ -896,231 +1353,67 @@ def _top_level_item_boundaries(text: str, start: int, end: int) -> list[int]:
     return boundaries + [end]
 
 
-def _list_block_starting_at(
-    text: str, spans: list[tuple[int, int]], cursor: int
-) -> tuple[int, int] | None:
-    if not LIST_ITEM_RE.match(text, cursor):
-        return None
-    return next(
-        (span for span in spans if span[0] <= cursor < span[1]),
-        None,
-    )
+def _is_markup_line(line: str) -> bool:
+    """Whether a line renders to nothing — only tags, no text of its own.
 
-
-def _list_section_after_heading(
-    text: str,
-    cursor: int,
-    *,
-    headings: list[tuple[int, int]],
-    list_spans: list[tuple[int, int]],
-) -> tuple[int, int, int] | None:
-    """Return a section made only of one heading and one list (any nesting)."""
-    current_heading = next(
-        (heading for heading in headings if heading[0] == cursor),
-        None,
-    )
-    if current_heading is None:
-        return None
-
-    next_heading = next(
-        (position for position, _ in headings if position > cursor),
-        len(text),
-    )
-    heading_line_end = text.find("\n", cursor, next_heading)
-    if heading_line_end < 0:
-        return None
-
-    list_block = next(
-        (
-            span
-            for span in list_spans
-            if heading_line_end <= span[0] < span[1] <= next_heading
-        ),
-        None,
-    )
-    if list_block is None:
-        return None
-
-    list_start, list_end = list_block
-    if text[heading_line_end:list_start].strip():
-        return None
-    if text[list_end:next_heading].strip():
-        return None
-
-    items = _list_items(text, list_start, list_end)
-    if not items:
-        return None
-    return list_start, list_end, next_heading
-
-
-def _list_section_after_paragraph(
-    text: str,
-    cursor: int,
-    *,
-    list_spans: list[tuple[int, int]],
-) -> tuple[int, int] | None:
-    """Return one lead-in paragraph followed immediately by one list (any nesting)."""
-    list_block = next(
-        (span for span in list_spans if span[0] > cursor),
-        None,
-    )
-    if list_block is None:
-        return None
-
-    list_start, list_end = list_block
-    lead_in = text[cursor:list_start].rstrip()
-    if not lead_in or re.search(r"\n[ \t]*\n", lead_in):
-        return None
-    if HEADING_RE.match(lead_in):
-        return None
-
-    items = _list_items(text, list_start, list_end)
-    if not items:
-        return None
-    return list_start, list_end
-
-
-def _paragraph_before_list(text: str, start: int, list_start: int) -> int | None:
-    """Find the paragraph immediately before a list being moved forward."""
-    paragraph_starts = _paragraph_starts(text, start, list_start)
-    if not paragraph_starts:
-        return None
-
-    paragraph_start = paragraph_starts[-1]
-    if paragraph_start >= list_start:
-        return None
-    return paragraph_start if text[paragraph_start:list_start].strip() else None
-
-
-def _trailing_heading_start(
-    text: str,
-    start: int,
-    end: int,
-    headings: list[tuple[int, int]],
-) -> int | None:
-    """Move a heading that is the candidate's final nonblank line forward."""
-    trailing = [position for position, _ in headings if start < position < end]
-    if not trailing:
-        return None
-
-    position = trailing[-1]
-    line_end = text.find("\n", position, end)
-    if line_end < 0:
-        line_end = end
-    return position if not text[line_end:end].strip() else None
-
-
-def _enclosing_heading_start(
-    headings: list[tuple[int, int]], cut: int, deepest_level: int
-) -> int | None:
-    """Find the heading directly enclosing a dropped deepest-level run.
-
-    Returns the position of the heading immediately preceding ``cut`` (in
-    document order, not just within the candidate window) if it is
-    shallower than ``deepest_level`` — i.e. it owns the dropped subsection
-    with no sibling section of its own in between and should move forward
-    together with it rather than being left stranded.
+    Marker emits `<span id="…"></span>` cross-reference anchors, which
+    `_extract_leading_spans` moves onto their own line. Such a line is not
+    content, but it is not a reason to move a chunk boundary either: it is
+    only ever relocated when it trails a heading that is moving anyway.
     """
-    preceding = [
-        (position, level) for position, level in headings if position < cut
-    ]
-    if not preceding:
+    stripped = line.strip()
+    return bool(stripped) and "<" in stripped and not HTML_TAG_RE.sub("", stripped).strip()
+
+
+def _has_body(text: str, start: int, end: int) -> bool:
+    """Whether the region holds anything that is not a heading or bare markup."""
+    return any(
+        line.strip() and not HEADING_RE.match(line) and not _is_markup_line(line)
+        for line in text[start:end].splitlines()
+    )
+
+
+def _trailing_heading_start(text: str, start: int, end: int) -> int | None:
+    """Offset where a heading that introduces nothing closes the region.
+
+    The run being measured is a heading plus any markup-only lines it carries
+    — an anchor sitting *after* a trailing heading annotates what comes next
+    and travels with it. An anchor *before* the heading belongs to the body
+    already recorded, so it stays; a tail of markup with no heading in it is
+    not a trailing heading at all and is left alone.
+
+    Returns ``None`` when the region ends in body content, and also when
+    moving the run would leave no body behind — that case is a body-less
+    chunk, which `_contains_only_headings` handles by moving the whole buffer
+    rather than part of it.
+    """
+    offsets: list[tuple[int, str]] = []
+    cursor = start
+    for line in text[start:end].splitlines(keepends=True):
+        offsets.append((cursor, line))
+        cursor += len(line)
+
+    boundary: int | None = None
+    for offset, line in reversed(offsets):
+        if not line.strip():
+            continue
+        if HEADING_RE.match(line):
+            boundary = offset
+            continue
+        if _is_markup_line(line):
+            continue
+        break
+
+    if boundary is None or not _has_body(text, start, boundary):
         return None
-    position, level = preceding[-1]
-    return position if level < deepest_level else None
-
-
-def _heading_group_start_before_table(
-    text: str,
-    headings: list[int],
-    table_start: int,
-) -> int:
-    """Return the first consecutive heading immediately before a table."""
-    group_start = headings[-1]
-    following_start = table_start
-
-    for position in reversed(headings):
-        line_end = text.find("\n", position, following_start)
-        if line_end < 0:
-            line_end = following_start
-        if text[line_end:following_start].strip():
-            break
-        group_start = position
-        following_start = position
-
-    return group_start
-
-
-def _table_section_after_heading(
-    text: str,
-    cursor: int,
-    *,
-    headings: list[tuple[int, int]],
-    table_spans: list[tuple[int, int]],
-) -> tuple[int, int] | None:
-    """Return a heading group followed only by whitespace and a table."""
-    if not any(position == cursor for position, _ in headings):
-        return None
-
-    table = next((span for span in table_spans if span[0] > cursor), None)
-    if table is None:
-        return None
-
-    prefix = text[cursor : table[0]]
-    if not all(not line.strip() or HEADING_RE.match(line) for line in prefix.splitlines()):
-        return None
-    return table
+    return boundary
 
 
 def _contains_only_headings(text: str, start: int, end: int) -> bool:
     """Return whether a nonempty candidate has headings but no body content."""
     lines = text[start:end].splitlines()
     has_heading = any(HEADING_RE.match(line) for line in lines)
-    return has_heading and all(
-        not line.strip() or HEADING_RE.match(line) for line in lines
-    )
-
-
-def _cut_with_heading_content(text: str, start: int, limit: int) -> int:
-    """Cut only after including content that follows an initial heading group."""
-    body_start: int | None = None
-    position = start
-    for line in text[start:].splitlines(keepends=True):
-        stripped = line.strip()
-        if stripped and not HEADING_RE.match(line.rstrip("\r\n")):
-            body_start = position
-            break
-        position += len(line)
-
-    if body_start is None:
-        return min(limit, len(text))
-    if body_start >= limit:
-        return min(max(limit, body_start + 1), len(text))
-
-    newline = text.rfind("\n", body_start + 1, limit + 1)
-    if newline > body_start:
-        return newline
-    space = max(
-        text.rfind(" ", body_start + 1, limit + 1),
-        text.rfind("\t", body_start + 1, limit + 1),
-    )
-    return space if space > body_start else limit
-
-
-def _paragraph_starts(text: str, start: int, limit: int) -> list[int]:
-    starts = [start]
-    starts.extend(
-        match.end()
-        for match in re.compile(r"\n[ \t]*\n+").finditer(text, start, limit)
-        if match.end() < limit
-    )
-    return starts
-
-
-def _span_starting_at(
-    spans: list[tuple[int, int]], cursor: int
-) -> tuple[int, int] | None:
-    return next((span for span in spans if span[0] == cursor), None)
+    return has_heading and not _has_body(text, start, end)
 
 
 def _skip_blank_lines(text: str, cursor: int) -> int:

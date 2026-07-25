@@ -2,7 +2,7 @@
 
 A locally-running, self-improving Retrieval-Augmented Generation system with an agentic query loop, LLM-as-judge context compression, and a thumbdown-driven feedback mechanism that gets better with use.
 
-Two independent agent implementations share one ingestion pipeline and one vector store — see [Two Implementations, One Knowledge Base](#two-implementations-one-knowledge-base) below.
+Two independent agent implementations share one vector store — and can each ingest into it — see [Two Implementations, One Knowledge Base](#two-implementations-one-knowledge-base) below.
 
 ---
 
@@ -16,7 +16,10 @@ The system was built and stress-tested on a domain-specific corpus (ASD clinical
 
 ## Two Implementations, One Knowledge Base
 
-**Ingestion is a single, shared pipeline** (`app/ingest.py`) — it discovers documents, chunks them, embeds them, and writes them into one ChromaDB store at `data/vector_store/` (two collections: `documents` and `learned_qa`). You run it once, regardless of which agent you use afterward.
+**Both agents read and write one shared ChromaDB store** at `data/vector_store/` (two collections: `documents` and `learned_qa`). Ingestion has two entry points that populate that same store, so you run whichever fits and a document ingested once is visible to both agents:
+
+- `app/ingest.py` — the original LangChain ingestion (discover → chunk → embed → store); the simplest one-shot path.
+- `app_workflow/`'s **switchable** ingestion pipeline (`app_workflow/ingestion/`, exposed as `POST /ingest`) — adds a selectable loader (Unstructured **or** the isolated GPU **Marker** PDF→Markdown microservice) and splitter (recursive **or** Marker-Markdown-aware custom), all in-memory, chosen via the `ENABLE_MARKER_LOADER` / `ENABLE_CUSTOM_SPLITTER` switches (both default off). See [Marker PDF Service](#marker-pdf-service).
 
 Two separate agent implementations are built **on top of** that same store:
 
@@ -38,6 +41,7 @@ They are functionally independent (separate `config.py`, `llm_setup.py`, `feedba
 - **Two-track retrieval** — source `documents` and self-learned `learned_qa` are retrieved, validated, deduplicated, and compressed as independent channels, combined only at the LLM context boundary with an explicit learned-QA-takes-precedence rule
 - **Three-stage context compression** — Neighbor-Aware Compression → Deduplication Compression → LLM-Based Compression, each with an LLM-as-judge validator
 - **Self-learning** — after every N successful interactions, verified Q&A pairs are distilled back into the `learned_qa` ChromaDB collection and used in future retrievals
+- **Switchable ingestion with an optional GPU Marker service (`app_workflow/`)** — `app_workflow/` adds its own ingestion pipeline (`POST /ingest`) that selects between the Unstructured loader and an isolated GPU **Marker** PDF→Markdown microservice, and between recursive and Marker-Markdown-aware custom splitting, via the `ENABLE_MARKER_LOADER` / `ENABLE_CUSTOM_SPLITTER` switches (both default off). Marker runs out-of-process because its `transformers`/CUDA stack is incompatible with the app's Python 3.14 embedding environment. See [Marker PDF Service](#marker-pdf-service).
 - **Multi-tier LLM output repair** — a 5-stage pipeline (`fix_llm_output.py`) recovers structured JSON from malformed LLM output (markdown fences, truncation, wrong types, code instead of JSON, etc.) before it reaches Pydantic validation
 - **Thumbdown persistence** — bad answers are logged with full query variants and user feedback; subsequent identical queries block the entire prior failing search trajectory
 - **Single custom LLM endpoint (`app_workflow/`)** — all four roles (`llm`, `llm_tool`, `judge_llm`, `json_fix_llm`) are routed to one self-hosted, OpenAI-compatible endpoint (`CUSTOM_API_BASE`). Groq and the Hugging Face Inference Providers router were both evaluated for `judge_llm`/`json_fix_llm` and retired after a head-to-head latency/reliability benchmark showed the HF router degrading validator quality under quota pressure (see `Status.md` 2026-07-08). Query-variant generation no longer uses tool-calling — it asks the LLM for a plain JSON array, parsed via `fix_llm_output`. `app/` uses Groq (`llama-3.1-8b-instant`) exclusively for all roles.
@@ -62,9 +66,10 @@ They are functionally independent (separate `config.py`, `llm_setup.py`, `feedba
 | JSON repair | `json_repair` + Pydantic — multi-tier recovery for malformed LLM output |
 | HTTP API | FastAPI + uvicorn |
 | Orchestration (`app_workflow/`) | LangGraph `StateGraph` |
-| Document loading | Unstructured + JSONLoader (PDF, TXT, DOCX, HTML, CSV, JSON) |
-| Chunking | `RecursiveCharacterTextSplitter` (1000 chars, 200 overlap) |
-| Runtime | Python 3.14 |
+| Document loading | Unstructured + JSONLoader (PDF, TXT, DOCX, HTML, CSV, JSON); `app_workflow/` optionally routes PDFs through the isolated Marker GPU microservice (`marker-pdf 1.10.2`, port 8002) |
+| Chunking | `RecursiveCharacterTextSplitter` (1000 chars, 200 overlap); `app_workflow/` optionally uses a Marker-Markdown-aware custom splitter |
+| PDF→Markdown service (`app_workflow/`, optional) | Dockerised GPU sidecar (`marker_service/`) — FastAPI + `marker-pdf 1.10.2` / `surya-ocr 0.17.1` on CUDA-13.0 torch |
+| Runtime | Python 3.14 (`app/`, `app_workflow/`); Python 3.12 in the Marker container |
 
 ---
 
@@ -105,6 +110,12 @@ app_workflow/                  # LangGraph implementation
 ├── nodes/                     # One file per graph node (retrieve, nac, dc, lbc,
 │                               #   validate_retrieval, dedup_merge, generate_draft,
 │                               #   check_answer_quality, generate_answer, ...)
+├── ingestion/                 # Switchable ingestion pipeline (POST /ingest)
+│   ├── ingestion_requests.py   #   discover_files() + run_ingestion() coordinator
+│   ├── marker_loader.py        #   HTTP client → Marker microservice (PDF-only)
+│   ├── unstructure_loader.py    #   default loader (Unstructured + in-memory tabular→JSON)
+│   ├── recursive_splitter.py    #   default RecursiveCharacterTextSplitter
+│   └── custom_splitter.py       #   Marker-Markdown-aware splitter
 └── services/                  # Same roles as app/'s flat modules, packaged
     ├── services.py             # Instance registry (embedding manager, retriever, LLMs, ...)
     ├── llm_setup.py             # llm, llm_tool, judge_llm, json_fix_llm — all on one custom OpenAI-compatible endpoint
@@ -117,10 +128,18 @@ app_workflow/                  # LangGraph implementation
     ├── trace_events.py            # Retrieve LangSmith trace log events by run ID
     ├── db.py, feedback_store.py, learned_qa_store.py, self_learner.py, ...
 
+marker_service/                # Isolated GPU PDF→Markdown microservice (optional, app_workflow/)
+├── server.py                   # FastAPI — POST /convert, GET /health (port 8002)
+├── Dockerfile                  # python:3.12-slim, CUDA-13.0 torch, marker-pdf 1.10.2
+├── docker-compose.yml          # GPU passthrough + persistent model-cache volume
+└── requirements.txt            # Frozen Marker/surya/torch pin set
+
 data/
 ├── vector_store/               # ChromaDB: chroma.sqlite3 + UUID HNSW folder (keep together)
 │                                #   — shared by app/ and app_workflow/
 └── <source documents>          # Raw PDFs / text / CSV / etc. consumed by app/ingest.py
+
+data_files/                     # Recursive ingestion root for app_workflow/'s POST /ingest
 
 useful_but_not_valuable_Files/  # Diagnostic/analysis scripts, not part of either pipeline
 ```
@@ -251,6 +270,58 @@ After startup, run one query and confirm a new trace appears in the selected bac
 
 ---
 
+## Marker PDF Service
+
+An **optional** isolated GPU container that converts PDFs to Markdown with **marker-pdf 1.10.2** (surya-ocr 0.17.1, `torch 2.13.0+cu130`), used only by `app_workflow/`'s ingestion pipeline when `ENABLE_MARKER_LOADER` is enabled. It exists because that stack is incompatible with `app_workflow/`'s Python 3.14 environment — installing it there would force `transformers` down to 4.x and break `sentence-transformers`. Running it out-of-process keeps both environments intact; `app_workflow/` calls the service over HTTP (see `docs/Decisions.md` ADR-073).
+
+The pinned versions in `marker_service/requirements.txt` are frozen from the validated `document-loaders/.venv-marker`. Only that version set is reused — none of the document-loaders code runs here; the entry point is `server.py`.
+
+### API
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `GET`  | `/health`  | – | `{status, ready, cuda}` — `ready` is false until models finish loading |
+| `POST` | `/convert` | multipart `file=<pdf>` | `{markdown, source, chars}` |
+
+### Build & run
+
+```powershell
+# from marker_service/
+docker compose up --build -d          # build image + start with GPU + model volume
+docker compose logs -f marker         # watch model download on first boot
+```
+
+Or without compose:
+
+```powershell
+docker build -t marker-service:1.10.2 .
+docker run --gpus all -p 8002:8002 -v marker-models:/models marker-service:1.10.2
+```
+
+First boot downloads ~2 GB of surya/layout models into the `marker-models` volume; `/health` reports `"loading"` until that finishes, then `"ok"`. The volume persists them across restarts and rebuilds.
+
+### Verify GPU + conversion
+
+```powershell
+curl http://localhost:8002/health                 # expect {"status":"ok","ready":true,"cuda":true}
+curl -F "file=@..\data_files\pdfs\some.pdf" http://localhost:8002/convert
+```
+
+If `cuda` is `false`, GPU passthrough isn't reaching the container — confirm `docker run --gpus all nvidia/cuda:13.0.0-base-ubuntu24.04 nvidia-smi` works.
+
+### How app_workflow talks to it
+
+`app_workflow/ingestion/marker_loader.py` POSTs each discovered PDF to `MARKER_SERVICE_URL` (default `http://localhost:8002`, set in `app_workflow/config.py`). No other part of the pipeline changes: `load_documents(file_paths) -> list[Document]` keeps its signature. Set `MARKER_SERVICE_URL` / `MARKER_SERVICE_TIMEOUT` in the app's environment if the service runs on another host or port.
+
+### Notes
+
+- **`pdftext_workers=1`** is pinned in `server.py` to avoid the multi-worker extraction abort on documents over ~40 pages (`docs/Bugs.md` BUG-077).
+- **VRAM:** an 8 GB GPU is shared with the app's sentence-transformer during ingestion. Marker's models fit, but conversions are serialized (one at a time).
+- **Marker is PDF-only:** with `ENABLE_MARKER_LOADER=True`, only PDFs are ingested — CSV/HTML/Word/JSON are silently skipped. Use the Unstructured loader (`ENABLE_MARKER_LOADER=False`) for mixed corpora, or run the two loaders in separate passes.
+- **Fully offline:** to bake the models into the image instead of downloading at runtime, add `RUN python -c "from marker.models import create_model_dict; create_model_dict()"` to the Dockerfile after the pip installs (adds ~2 GB to the image).
+
+---
+
 ## Running the HTTP APIs
 
 Both pipelines expose the same five endpoints on different ports:
@@ -272,6 +343,8 @@ uvicorn api:app --host 0.0.0.0 --port 8001
 | `GET /stats` | Interaction counts and self-learning status |
 | `POST /learn` | Trigger distillation on-demand |
 | `POST /quit` | Clean shutdown |
+
+`app_workflow/` additionally exposes **`POST /ingest`** — runs its switchable ingestion pipeline over `data_files/`, with an optional JSON body (`ENABLE_MARKER_LOADER`, `ENABLE_CUSTOM_SPLITTER`) overriding the `config.py` defaults for that run; returns a summary (`files_discovered`, `documents_loaded`, `chunks_created`, `documents_in_store`). When `ENABLE_MARKER_LOADER` is true, the [Marker PDF Service](#marker-pdf-service) must be running.
 
 ---
 

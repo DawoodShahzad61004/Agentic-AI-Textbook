@@ -47,6 +47,17 @@ ENABLE_GLOBAL_LLM_OUTPUT_FIX = True
 ENABLE_PHOENIX_TRACING = False
 ENABLE_LANGFUSE_TRACING = True
 
+# 11. Ingestion and processing flow toggles
+ENABLE_MARKER_LOADER = False
+ENABLE_CUSTOM_SPLITTER = False
+
+# Marker runs in an isolated GPU container (see marker_service/); the loader
+# POSTs PDFs to it instead of importing marker-pdf in-process. Override the URL
+# with MARKER_SERVICE_URL when the service runs elsewhere. The timeout is per
+# PDF and generous because large documents take minutes to convert on the GPU.
+MARKER_SERVICE_URL = os.getenv("MARKER_SERVICE_URL", "http://localhost:8002")
+MARKER_SERVICE_TIMEOUT = int(os.getenv("MARKER_SERVICE_TIMEOUT", "1800"))
+
 _EXCLUDED_ARGUMENTS = {"self", "cls", "config", "callbacks", "client", "handler"}
 _MAX_TEXT_CHARS = 2_000
 _MAX_COLLECTION_ITEMS = 20
@@ -56,16 +67,22 @@ _MAX_COLLECTION_ITEMS = 20
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 VECTOR_STORE_PATH = str(_PROJECT_ROOT / "data" / "vector_store")
-# SEARCH_ROOTS = [
-#     _PROJECT_ROOT / "data" / "pdfs",
-#     _PROJECT_ROOT / "data" / "textfiles",
-#     _PROJECT_ROOT / "data" / "csv",
-#     _PROJECT_ROOT / "data" / "word",
-#     _PROJECT_ROOT / "data" / "html",
-#     _PROJECT_ROOT / "data" / "json",
-#     _PROJECT_ROOT / "data",
-# ]
+# Root that discover_files() walks recursively for both the Marker and the
+# Unstructured loaders. Its subfolders (and their subfolders) are all searched.
+DATA_FILES_DIR = _PROJECT_ROOT / "data_files"
+SEARCH_ROOTS = [
+    _PROJECT_ROOT / "data_files/" / "pdfs",
+    _PROJECT_ROOT / "data_files/" / "textfiles",
+    _PROJECT_ROOT / "data_files/" / "csv",
+    _PROJECT_ROOT / "data_files/" / "word",
+    _PROJECT_ROOT / "data_files/" / "html",
+    _PROJECT_ROOT / "data_files/" / "json",
+    _PROJECT_ROOT / "data_files/",
+]
 JSON_DIR = _PROJECT_ROOT / "data" / "json"
+# Directory the optional chunk-run writer (services.logger_config.write_chunk_run)
+# drops its human-readable per-run chunk dumps into.
+CHUNK_RUNS_DIR = _PROJECT_ROOT / "chunk-runs"
 COLLECTION_NAME = "documents"
 LEARNED_COLLECTION = "learned_qa"
 MAX_TOTAL_RETRIEVALS = 5
@@ -95,13 +112,19 @@ MIN_COOLDOWN_TIME = 0.0
 MAX_COOLDOWN_TIME = 30.0
 MIN_FEEDBACK_LEN = 10
 _JSON_REPAIR_TRIES = 2
-# UNSTRUCTURED_EXT = {".pdf", ".txt", ".doc", ".docx", ".html", ".htm"}
-# TABULAR_EXT     = {".csv", ".xls", ".xlsx"}
-# SUPPORTED_EXT   = UNSTRUCTURED_EXT | TABULAR_EXT | {".json"}
-# CHUNK_SIZE = 1000
-# CHUNK_OVERLAP = 200
-# BATCH_SIZE = 512
-# MIN_CHUNK_CHARS = 150
+UNSTRUCTURED_EXT = {".pdf", ".txt", ".doc", ".docx", ".html", ".htm"}
+TABULAR_EXT     = {".csv", ".xls", ".xlsx"}
+SUPPORTED_EXT   = UNSTRUCTURED_EXT | TABULAR_EXT | {".json"}
+CHUNK_SIZE = 1000
+CHUNK_OVERLAP = 200
+BATCH_SIZE = 512
+MIN_CHUNK_CHARS = 150
+# Custom (Marker-Markdown-aware) splitter. It packs structural units up to a
+# larger budget than the recursive splitter and keeps smaller stubs.
+CUSTOM_SPLITTER_CHUNK_SIZE = 1600
+CUSTOM_SPLITTER_MIN_CHUNK_CHARS = 50
+# tiktoken encoding used when reporting per-chunk token counts.
+TOKEN_ENCODING = "cl100k_base"
 MIN_SIMILARITY = 0.5
 DOCUMENTS_MIN_SIMILARITY = 0.53
 LEARNED_QA_MIN_SIMILARITY = 0.57

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import sys
+from html import escape
+from math import hypot
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -468,6 +470,107 @@ def add_figure(doc: Document, image_path: Path, caption: str, height=None) -> No
     r = p.add_run(caption)
     set_run_font(r, "Times New Roman", 10, italic=True, color=GRAY)
     p.paragraph_format.space_after = Pt(8)
+
+
+def svg_centered_text(
+    x: float,
+    center_y: float,
+    lines: list[str],
+    *,
+    size: int = 20,
+    fill: str = "#000000",
+    gap: int = 26,
+    bold_first: bool = False,
+) -> str:
+    """Return independently centered SVG text lines.
+
+    Each line receives the same explicit x coordinate, text-anchor, and
+    dominant baseline. This avoids the subtle left/right drift that can occur
+    when multi-line labels inherit tspan positions or approximate text widths.
+    """
+    if not lines:
+        return ""
+    start_y = center_y - ((len(lines) - 1) * gap / 2)
+    elements = []
+    for index, line in enumerate(lines):
+        weight = ' font-weight="bold"' if bold_first and index == 0 else ""
+        elements.append(
+            f'<text x="{x:.1f}" y="{start_y + index * gap:.1f}" '
+            f'text-anchor="middle" dominant-baseline="middle" '
+            f'font-family="Times New Roman" font-size="{size}" '
+            f'fill="{fill}"{weight}>{escape(line)}</text>'
+        )
+    return "".join(elements)
+
+
+def svg_labeled_box(
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    title: str,
+    body: list[str],
+    *,
+    fill: str = "#F2F2F2",
+    text_fill: str = "#000000",
+    stroke_width: int = 3,
+    rounded: bool = True,
+    dashed: bool = False,
+) -> str:
+    """Return a box whose title and body are geometrically centered."""
+    radius = 20 if rounded else 0
+    dash = ' stroke-dasharray="12 8"' if dashed else ""
+    center_x = x + width / 2
+    title_y = y + 36
+    body_center_y = y + 78 + max(0, len(body) - 1) * 3
+    return (
+        f'<rect x="{x}" y="{y}" width="{width}" height="{height}" rx="{radius}" '
+        f'fill="{fill}" stroke="#000000" stroke-width="{stroke_width}"{dash}/>'
+        + svg_centered_text(
+            center_x,
+            title_y,
+            [title],
+            size=22,
+            fill=text_fill,
+            bold_first=True,
+        )
+        + svg_centered_text(
+            center_x,
+            body_center_y,
+            body,
+            size=17,
+            fill=text_fill,
+            gap=23,
+        )
+    )
+
+
+def svg_arrow(
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    *,
+    dashed: bool = False,
+) -> str:
+    dx = x2 - x1
+    dy = y2 - y1
+    length = hypot(dx, dy) or 1.0
+    ux = dx / length
+    uy = dy / length
+    base_x = x2 - ux * 17
+    base_y = y2 - uy * 17
+    normal_x = -uy * 7
+    normal_y = ux * 7
+    dash = ' stroke-dasharray="10 8"' if dashed else ""
+    return (
+        f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
+        f'stroke="#000000" stroke-width="4"{dash}/>'
+        f'<polygon points="{x2:.1f},{y2:.1f} '
+        f'{base_x + normal_x:.1f},{base_y + normal_y:.1f} '
+        f'{base_x - normal_x:.1f},{base_y - normal_y:.1f}" '
+        f'fill="#000000"/>'
+    )
 
 
 def diagram_compare_15() -> Path:
@@ -1287,11 +1390,1077 @@ def safe_path(root: Path, user_name: str) -> Path:
     return path
 
 
-BUILDERS = {15: build_chapter_15, 16: build_chapter_16, 17: build_chapter_17, 28: build_chapter_28, 40: build_chapter_40}
+def diagram_loader_harness_5b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720">'
+        '<defs><marker id="arrow" markerWidth="10" markerHeight="10" '
+        'refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" '
+        'fill="#000000"/></marker></defs><rect width="1200" height="720" fill="#FFFFFF"/>'
+        + svg_centered_text(
+            600,
+            42,
+            ["One corpus, three isolated conversion lanes"],
+            size=30,
+            bold_first=True,
+        )
+        + svg_labeled_box(
+            440,
+            85,
+            320,
+            100,
+            "Shared source tree",
+            ["source/**/*", "same files and relative paths"],
+            fill="#FFFFFF",
+            stroke_width=4,
+        )
+        + svg_arrow(520, 185, 220, 238)
+        + svg_arrow(600, 185, 600, 238)
+        + svg_arrow(680, 185, 980, 238)
+        + svg_labeled_box(
+            60,
+            250,
+            320,
+            190,
+            "Docling lane",
+            ["DocumentConverter", "structured document model", "export_to_markdown()"],
+            fill="#F2F2F2",
+        )
+        + svg_labeled_box(
+            440,
+            250,
+            320,
+            190,
+            "Unstructured lane",
+            ["partition()", "typed elements", "local Markdown adapter"],
+            fill="#D9D9D9",
+        )
+        + svg_labeled_box(
+            820,
+            250,
+            320,
+            190,
+            "Marker-PDF lane",
+            ["PdfConverter", "model dictionary", "text_from_rendered()"],
+            fill="#808080",
+            text_fill="#FFFFFF",
+        )
+        + svg_arrow(220, 440, 380, 520)
+        + svg_arrow(600, 440, 600, 520)
+        + svg_arrow(980, 440, 820, 520)
+        + svg_labeled_box(
+            250,
+            535,
+            700,
+            125,
+            "Mirrored result trees",
+            [
+                "docling_results | unstructured_results | marker_results",
+                "inspect equivalent files side by side",
+            ],
+            fill="#2C3E6B",
+            text_fill="#FFFFFF",
+            stroke_width=4,
+        )
+        + "</svg>"
+    )
+    return svg_to_png("chapter5b_loader_harness", svg)
+
+
+def diagram_acceptance_gate_5b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="780">'
+        '<defs><marker id="arrow" markerWidth="10" markerHeight="10" '
+        'refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" '
+        'fill="#000000"/></marker></defs><rect width="1200" height="780" fill="#FFFFFF"/>'
+        + svg_centered_text(
+            600,
+            42,
+            ["A conversion is accepted only after structural checks"],
+            size=29,
+            bold_first=True,
+        )
+        + '<ellipse cx="600" cy="105" rx="125" ry="44" fill="#FFFFFF" '
+        'stroke="#000000" stroke-width="3"/>'
+        + svg_centered_text(600, 105, ["Converted Markdown"], size=20, bold_first=True)
+        + svg_arrow(600, 149, 600, 178)
+        + svg_labeled_box(
+            410,
+            190,
+            380,
+            105,
+            "Content check",
+            ["expected pages and key passages", "word counts are evidence, not proof"],
+            fill="#F2F2F2",
+        )
+        + svg_arrow(600, 295, 600, 323)
+        + svg_labeled_box(
+            360,
+            335,
+            480,
+            135,
+            "Structure and packaging check",
+            [
+                "headings | reading order | tables | lists",
+                "assets and links | UTF-8 | page-boundary anomalies",
+            ],
+            fill="#D9D9D9",
+        )
+        + svg_arrow(600, 470, 600, 488)
+        + '<polygon points="600,500 760,585 600,670 440,585" fill="#808080" '
+        'stroke="#000000" stroke-width="4"/>'
+        + svg_centered_text(
+            600,
+            585,
+            ["All required", "checks pass?"],
+            size=20,
+            fill="#FFFFFF",
+            gap=25,
+            bold_first=True,
+        )
+        + svg_arrow(440, 585, 370, 680)
+        + svg_arrow(760, 585, 830, 680)
+        + svg_centered_text(350, 620, ["NO"], size=17, bold_first=True)
+        + svg_centered_text(850, 620, ["YES"], size=17, bold_first=True)
+        + '<ellipse cx="210" cy="712" rx="145" ry="45" fill="#F2F2F2" '
+        'stroke="#000000" stroke-width="3" stroke-dasharray="12 8"/>'
+        + svg_centered_text(
+            210,
+            712,
+            ["Quarantine and review"],
+            size=19,
+            bold_first=True,
+        )
+        + '<ellipse cx="990" cy="712" rx="145" ry="45" fill="#2C3E6B" '
+        'stroke="#000000" stroke-width="4"/>'
+        + svg_centered_text(
+            990,
+            712,
+            ["Accept for downstream use"],
+            size=18,
+            fill="#FFFFFF",
+            bold_first=True,
+        )
+        + "</svg>"
+    )
+    return svg_to_png("chapter5b_acceptance_gate", svg)
+
+
+def build_chapter_5b() -> Path:
+    chapter = "5B"
+    title = "Evaluating Document-Conversion Engines: Docling, Unstructured, and Marker-PDF"
+    doc = configure_document(title)
+    add_cover(
+        doc,
+        chapter,
+        title,
+        "PART II — BUILDING THE INGESTION PIPELINE",
+        "The words can survive a conversion while the document's meaning does not.",
+    )
+    add_chapter_heading(doc, chapter, title)
+    add_body(
+        doc,
+        "Chapter 5 introduced loaders as the entry point from files into a RAG system. That treatment is sufficient when a loader returns faithful text in a dependable order. It is not sufficient for contracts, requests for tender, engineering drawings, forms, or book pages whose meaning depends on headings, merged cells, repeated page furniture, and visual grouping. For those documents, loading is an evaluation problem before it becomes an ingestion step.",
+    )
+    add_body(
+        doc,
+        "This chapter reconstructs a real comparison of Docling 2.113.0, Unstructured 0.24.1, and Marker-PDF 1.10.2. The project used three small batch scripts, three isolated Python environments, mirrored result trees, and a 251-page Marker assessment rather than trusting package descriptions. By the end, you will be able to build a comparable conversion harness, interpret each engine's output model, detect silent structural failure, and decide whether generated Markdown is authoritative data or merely an evaluation artifact.",
+    )
+
+    add_heading(doc, "5B.1 Why revisit loading — when text is not enough")
+    add_callout(
+        doc,
+        "Definition",
+        "Conversion fidelity",
+        "The degree to which a converted representation preserves the source document's content, reading order, hierarchy, relationships, and required assets. Text fidelity is only one component of conversion fidelity.",
+    )
+    add_body(
+        doc,
+        "A plain prose PDF can survive conversion even when styling disappears because its meaning is carried mostly by sentence order. A procurement form is different. If a converter places one organization's address in another organization's row, the words are present but the record is false. If an engineering title block becomes an ordinary paragraph, revision identity and approval status disappear. If a repeated page banner becomes an H1 heading on every page, a structure-aware splitter sees dozens of invented sections.",
+    )
+    add_body(
+        doc,
+        "The original `UnstructuredLoader` path was therefore revisited for layout-dependent documents. The question was not, \"Which library extracts the most words?\" It was, \"Which representation preserves enough meaning for the next operation?\" The answer depends on downstream use. Search may tolerate flattened formatting; clause retrieval cannot tolerate corrupted hierarchy; compliance review cannot tolerate swapped table rows; and publication cannot tolerate missing figures.",
+    )
+    add_callout(
+        doc,
+        "Analogy",
+        "A photocopy of a transit map",
+        "A photocopy can preserve every station name while losing the colored lines and intersections that show how stations connect. A conversion engine can likewise retain nearly every word while destroying the relationships that make the document usable.",
+    )
+
+    add_heading(doc, "5B.2 The comparison harness")
+    add_body(
+        doc,
+        "A fair comparison holds the source corpus and output organization constant while allowing each library to expose its native API. The harness recursively discovers every file under `source/`, converts it with one engine, and mirrors its relative path beneath that engine's result directory. Thus `source/legal/terms.pdf` becomes `docling_results/legal/terms.md`, `unstructured_results/legal/terms.md`, and `marker_results/legal/terms.md`. Equivalent outputs remain easy to locate without hiding library-specific behavior behind one abstraction.",
+    )
+    add_code(
+        doc,
+        '''PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SOURCE_DIR = PROJECT_ROOT / "source"
+OUTPUT_DIR = PROJECT_ROOT / "loader_results"
+
+def output_path_for(source_path: Path) -> Path:
+    relative = source_path.relative_to(SOURCE_DIR)
+    return (OUTPUT_DIR / relative).with_suffix(".md")
+
+for source_path in sorted(SOURCE_DIR.rglob("*")):
+    if not source_path.is_file():
+        continue
+    output_path = output_path_for(source_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    convert_one(source_path, output_path)''',
+    )
+    add_figure(
+        doc,
+        diagram_loader_harness_5b(),
+        "Figure 5B.1 — One shared corpus feeds three isolated but comparable conversion lanes.",
+    )
+    add_body(
+        doc,
+        "Figure 5B.1 shows the essential experimental control: source identity is shared, while execution and outputs remain separate. Each batch continues after an individual file failure, reports converted and failed counts, and exits nonzero after partial failure. That design preserves successful evidence without letting a red summary line disappear.",
+    )
+    add_body(
+        doc,
+        "A reproducible run also records the engine version, Python version, hardware path, source hash, output hash, start time, duration, and whether model assets were already cached. Cold-start time includes downloads and initialization; warm conversion time does not. Comparing one cold Docling run with one warm Marker run would measure setup state more than engine performance. Quality review should likewise use the same source pages and the same rubric for all engines.",
+    )
+    add_body(
+        doc,
+        "The most useful review unit is not the whole result file but a set of deliberately difficult page types: one prose page, one simple table, one merged or cross-page table, one nested list, one form, one image-heavy page, and one page with repeated furniture. Reviewers record whether text survived, whether associations remained correct, and whether the representation is usable for the intended downstream task. This turns \"looks better\" into an inspectable decision.",
+    )
+    add_table(
+        doc,
+        ["Dimension", "Why it must stay comparable", "Harness control"],
+        [
+            ["Source selection", "Different files invalidate quality comparisons", "One recursive `source/**/*` tree"],
+            ["Path identity", "Equivalent outputs must be findable", "Mirrored relative paths"],
+            ["Failure handling", "One bad file must not erase the batch", "Per-file exception plus final nonzero exit"],
+            ["Output ownership", "Engine behavior must remain visible", "One result tree per loader"],
+            ["Inspection", "File size alone cannot show structural quality", "Side-by-side Markdown and source review"],
+        ],
+        [1.45, 2.55, 2.30],
+    )
+
+    add_heading(doc, "5B.3 Docling")
+    add_callout(
+        doc,
+        "Definition",
+        "Structured document model",
+        "An intermediate representation that stores recognized document elements and their relationships before serializing them to a format such as Markdown.",
+    )
+    add_body(
+        doc,
+        "The Docling lane creates one `DocumentConverter`, converts each source, and calls `result.document.export_to_markdown()`. Its defining feature is the intermediate document model: layout analysis, OCR, table recognition, and reading-order decisions occur before Markdown export. The experiment explicitly selected the `PyPdfiumDocumentBackend` for PDF input while keeping the surrounding script small enough to read.",
+    )
+    add_code(
+        doc,
+        '''converter = DocumentConverter(
+    format_options={
+        InputFormat.PDF: PdfFormatOption(
+            backend=PyPdfiumDocumentBackend
+        )
+    }
+)
+
+result = converter.convert(source_path)
+markdown = result.document.export_to_markdown()''',
+    )
+    add_body(
+        doc,
+        "First execution may download or initialize layout and OCR assets, so cold-start time is not representative of steady conversion time. More importantly, a returned document is not proof of page completeness. In the observed run, native preprocessing reported `std::bad_alloc` for individual pages while the batch still wrote Markdown and announced six converted, zero failed. The script's exception boundary saw a document-level success even though page-level work had failed.",
+    )
+    add_callout(
+        doc,
+        "Common pitfall",
+        "Treating batch success as page completeness",
+        "BUG-009 showed Docling returning a partial document after page preprocessing failures. Validate expected pages or page-level artifacts; do not equate a returned object with a complete conversion.",
+    )
+
+    add_heading(doc, "5B.4 Unstructured")
+    add_body(
+        doc,
+        "The Unstructured lane calls `partition(filename=...)`, receiving typed elements rather than final Markdown. A deliberately lightweight adapter maps `Title` to H1, `Header` to H2, `ListItem` to a Markdown bullet, and every other element to a plain paragraph. This makes the serialization policy visible: any metadata or layout feature not handled by the adapter is discarded even if Unstructured detected it.",
+    )
+    add_code(
+        doc,
+        '''def elements_to_markdown(elements) -> str:
+    lines = []
+    for element in elements:
+        text = str(element)
+        if element.category == "Title":
+            lines.append(f"# {text}")
+        elif element.category == "Header":
+            lines.append(f"## {text}")
+        elif element.category == "ListItem":
+            lines.append(f"- {text}")
+        else:
+            lines.append(text)
+    return "\\n\\n".join(lines)''',
+    )
+    add_body(
+        doc,
+        "This distinction prevents an unfair conclusion. A weak Markdown file may reflect the local adapter rather than the partitioner's full capability. The experiment evaluates the delivered end-to-end path, not an abstract library maximum. It also records that the expanded six-PDF corpus was not run through Unstructured; only the retained RAG-chapter output supports direct comparison. That limitation belongs in the conclusion rather than being hidden.",
+    )
+    add_callout(
+        doc,
+        "Analogy",
+        "A customs declaration",
+        "The partitioner may inspect a suitcase in detail, but the adapter is the declaration form. If the form has only four categories, everything else is collapsed into \"other\" even though the inspector saw more.",
+    )
+
+    add_heading(doc, "5B.5 Marker-PDF")
+    add_body(
+        doc,
+        "The Marker lane is PDF-oriented. It constructs a reusable `PdfConverter` with `create_model_dict()`, invokes the converter for each source, and extracts Markdown through `text_from_rendered()`. Unsupported file formats are reported as per-file failures. Model initialization is comparatively heavy, which is why the converter is created once per batch rather than once per document.",
+    )
+    add_code(
+        doc,
+        '''converter = PdfConverter(artifact_dict=create_model_dict())
+
+rendered = converter(str(source_path))
+markdown, metadata, images = text_from_rendered(rendered)
+output_path.write_text(markdown, encoding="utf-8")''',
+    )
+    add_body(
+        doc,
+        "The final line in the real script writes only the Markdown string. The returned image collection is ignored. That small integration choice becomes a major quality finding later: the Markdown can reference detected images without delivering their files. Marker also exposes model, PDF text, and rendering behavior through a large dependency stack, so a compact application script does not imply a simple runtime.",
+    )
+    add_table(
+        doc,
+        ["Engine", "Native output used", "Strength of this lane", "Evaluation caution"],
+        [
+            ["Docling", "Structured document model", "Rich layout/OCR pipeline before export", "Page-stage failure can hide below batch success"],
+            ["Unstructured", "Typed partition elements", "Transparent element categories", "Local adapter discards unhandled structure"],
+            ["Marker-PDF", "Rendered document to Markdown", "Strong prose recovery and PDF focus", "Assets and structure require separate validation"],
+        ],
+        [1.25, 1.55, 1.80, 1.70],
+    )
+
+    add_heading(doc, "5B.6 Dependency isolation")
+    add_body(
+        doc,
+        "The three engines could not share one reliable environment at the selected versions. Unstructured's `pi-heif` dependency required Pillow 11.1 or newer, while Marker-PDF 1.10.2 required Pillow below 11. An unpinned combined installation also selected a Numba release incompatible with Python 3.12, accumulated incomplete Torch metadata, and briefly installed the unrelated distribution named `marker`, which shadowed Datalab's `marker-pdf` namespace.",
+    )
+    add_code(
+        doc,
+        '''uv venv .venv-docling --python 3.12
+uv pip install --python .venv-docling\\Scripts\\python.exe "docling==2.113.0"
+
+uv venv .venv-unstructured --python 3.12
+uv pip install --python .venv-unstructured\\Scripts\\python.exe \
+    "unstructured[pdf]==0.24.1"
+
+uv venv .venv-marker --python 3.12
+uv pip install --python .venv-marker\\Scripts\\python.exe \
+    "marker-pdf==1.10.2"''',
+    )
+    add_body(
+        doc,
+        "Isolation adds three setup commands but removes ambiguity. Each result is tied to a known package set, rebuilding one lane cannot damage another, and native ML packages no longer negotiate one impossible resolver solution. Python 3.12 was standardized because the newer Python 3.14 environment lacked compatible Windows wheels for parts of the OCR stack. PowerShell became the verified shell after Git Bash produced misleading native-process failures.",
+    )
+    add_callout(
+        doc,
+        "Common pitfall",
+        "Installing `marker` instead of `marker-pdf`",
+        "BUG-008 produced an import from an unrelated package with the same top-level namespace. Install `marker-pdf` in its own environment and verify the expected `PdfConverter` import.",
+    )
+    add_callout(
+        doc,
+        "Analogy",
+        "Three laboratories sharing one reagent cabinet",
+        "If three experiments require mutually incompatible chemical grades, one shared cabinet creates contamination and mislabeled results. Separate environments are sealed benches: slightly more setup, far stronger provenance.",
+    )
+
+    add_heading(doc, "5B.7 Reading the Marker-PDF quality report")
+    add_body(
+        doc,
+        "The main assessment compared six PDFs totaling 251 pages: procurement forms, legal agreements, engineering scopes and specifications, and a conventionally designed RAG chapter. It separated content extraction from structural and visual reconstruction. Marker recovered ordinary prose impressively. The 91-page legal document yielded about 44,443 Markdown words from roughly 45,450 extractable PDF words; the RAG chapter yielded about 4,032 from roughly 4,023. Bold, italics, footnotes, colored text, and many simple tables survived.",
+    )
+    add_body(
+        doc,
+        "The failure pattern appeared wherever two-dimensional relationships carried meaning. Merged headers, changing column counts, narrow cells, borderless groups, forms, engineering title blocks, and cross-page tables flattened badly. Heading levels were inconsistent: running banners, definitions, subordinate labels, and ordinary sentences became H1-H4. Repeated headers and footers entered the reading stream, page breaks disappeared, and nested list depth weakened. On engineering documents, dozens of genuine diagrams and page images were represented only by broken links.",
+    )
+    add_table(
+        doc,
+        ["Source pattern", "Observed result", "Downstream consequence"],
+        [
+            ["Linear prose", "Most words and emphasis retained", "Useful for search after cleanup"],
+            ["Simple fixed-column table", "Often usable as a pipe table", "Still validate row associations"],
+            ["Merged or cross-page table", "Rows, columns, or sequence corrupted", "Unsafe for clause/compliance extraction"],
+            ["Form or signature layout", "Spacing and grouping flattened", "Fields lose operational meaning"],
+            ["Engineering page frame", "Title blocks and graphics lost", "Revision and visual evidence unavailable"],
+            ["Repeated page furniture", "Mixed into headings and lists", "False boundaries and noisy chunks"],
+        ],
+        [1.65, 2.25, 2.40],
+    )
+    add_body(
+        doc,
+        "The key lesson is conditional adoption. Marker is a strong content-oriented extractor for conventional prose, not a faithful page reconstruction engine. One variable-column table succeeded while another failed, so a simplistic rule such as \"reject every complex-looking table\" is not enough. Quality gates must inspect the delivered structure, especially table and page boundaries, rather than infer reliability from file type alone.",
+    )
+    add_heading(doc, "Worked example — the contact table", level=2)
+    add_body(
+        doc,
+        "On page 5 of the first long RFT volume, the source contact table associated an organization, department, and contact details within one row. Marker expanded one principal row into several Markdown rows, split `Contracts Department` across rows, and merged `ADNOC LNG` into the preceding row. A bag-of-words comparison would score the page highly because almost every token remained. A row-association check would fail it immediately because the output now asserts relationships the source did not.",
+    )
+    add_body(
+        doc,
+        "For retrieval, that distinction is decisive. A query for the organization's contact can retrieve a chunk containing all expected words yet return the wrong pairing. The acceptance test should therefore sample table keys and verify that each key remains attached to its value, check consistent column counts, and flag suspicious row expansion. Where merged cells or spatial grouping carry meaning, the system should preserve HTML or structured cell coordinates rather than force the page into a pipe table.",
+    )
+
+    add_heading(doc, "5B.8 The two silent-failure modes")
+    add_callout(
+        doc,
+        "Definition",
+        "Silent failure",
+        "A conversion defect that does not surface as a failed process or exception, allowing incomplete or corrupted output to be treated as successful.",
+    )
+    add_body(
+        doc,
+        "The first silent failure is high word retention masking structural corruption. In the long RFT continuation, a dense table around pages 61-62 was reordered, section `2.1.2` appeared twice, and later content began disappearing. Another contact table preserved most words while merging organizations into the wrong rows. Aggregate counts looked healthy because they measure lexical volume, not correct associations, sequence, or completeness.",
+    )
+    add_body(
+        doc,
+        "The second is packaging failure. The six-file Marker run produced 131 image references and zero corresponding image assets. The RAG chapter also contained at least 26 mojibake sequences despite UTF-8 file writes. The core model may have detected image regions and text correctly, but the evaluated end-to-end workflow delivered broken Markdown. Users consume the result tree, not the converter's internal intention.",
+    )
+    add_body(
+        doc,
+        "Both modes are detectable with inexpensive automation. Compare expected page identifiers or known anchors against output; parse every Markdown image destination and confirm that it resolves beneath an approved asset directory; scan for replacement characters and common mojibake byte patterns; count headings per page and table widths per row; and retain a short list of source passages whose relative order must remain stable. These checks do not prove fidelity, but they turn several previously silent defects into explicit rejection reasons.",
+    )
+    add_figure(
+        doc,
+        diagram_acceptance_gate_5b(),
+        "Figure 5B.2 — An acceptance gate checks content, structure, assets, and encoding before downstream use.",
+    )
+    add_body(
+        doc,
+        "Figure 5B.2 turns that lesson into a release rule. Expected words and pages are useful signals, but acceptance also requires heading, list, table, reading-order, link, asset, and encoding checks. A failed check should quarantine the document for targeted review rather than allow clean-looking Markdown to enter retrieval silently.",
+    )
+    add_callout(
+        doc,
+        "Common pitfall",
+        "Using file size or word count as a quality score",
+        "BUG-011 retained most words while corrupting row relationships and sequence. Count metrics can detect gross loss, but only source-to-output structural checks can validate meaning.",
+    )
+
+    add_heading(doc, "5B.9 The adoption decision")
+    add_callout(
+        doc,
+        "Definition",
+        "Authoritative representation",
+        "The version of a document that downstream systems are permitted to treat as the reliable source for meaning, relationships, and decisions.",
+    )
+    add_body(
+        doc,
+        "The project kept raw converter Markdown as an evaluation utility rather than declaring it authoritative. This is not a rejection of the engines. It is recognition that the current runners omit acceptance machinery. A production route would preserve page and block metadata, export assets to stable relative paths, validate every link, normalize encoding, remove or tag page furniture, repair heading hierarchy, test tables for implausible geometry, and send structurally complex pages to manual review or quarantine.",
+    )
+    add_bullets(
+        doc,
+        [
+            "Validate source and output page coverage, not only process exit status.",
+            "Preserve page, section, bounding-box, and source-path metadata beside Markdown.",
+            "Export every referenced asset and fail acceptance on unresolved links.",
+            "Scan for mojibake, implausible heading counts, one-letter cells, and inconsistent table widths.",
+            "Compare high-risk forms and cross-page tables against source pages.",
+            "Route low-confidence documents to a richer representation or human review.",
+        ],
+    )
+    add_body(
+        doc,
+        "The comparison harness remains valuable precisely because it does not conceal these differences. It can be extended into routed ingestion: inspect format and layout, choose an appropriate parser, normalize into `Document` objects, and quarantine uncertain results. That direction was researched but not implemented, so the chapter distinguishes recommendation from current architecture.",
+    )
+    add_code(
+        doc,
+        '''def assess_conversion(source, markdown, result_root):
+    findings = []
+    findings += check_expected_pages(source, markdown)
+    findings += check_heading_distribution(markdown)
+    findings += check_table_shapes(markdown)
+    findings += check_asset_links(markdown, result_root)
+    findings += check_encoding(markdown)
+
+    if any(item.severity == "high" for item in findings):
+        return {"status": "quarantine", "findings": findings}
+    return {"status": "accepted", "findings": findings}''',
+    )
+    add_body(
+        doc,
+        "The skeleton deliberately returns findings rather than a single opaque score. A document can be excellent for full-text search and unacceptable for form reconstruction at the same time. The caller should decide acceptance against a declared use profile, while the findings preserve why the decision was made.",
+    )
+
+    add_heading(doc, "5B.10 What this leaves for later")
+    add_body(
+        doc,
+        "Conversion produces Markdown, not retrieval units. The next operation still has to divide long files into chunks. Chapter 7's structure-aware splitters assume headings and lists are trustworthy, but the evidence here shows Marker emitting inconsistent heading levels, flattened list depth, and page furniture as content. Chapter 7B therefore begins with a harder question: how can we repair enough structure for reliable boundaries without pretending that chunking can reconstruct information the converter already destroyed?",
+    )
+
+    path = OUT_DIR / "Chapter_5B_Evaluating_Document_Conversion_Engines.docx"
+    doc.core_properties.title = f"Chapter {chapter} — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_in_memory_repair_7b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720">'
+        '<defs><marker id="arrow" markerWidth="10" markerHeight="10" '
+        'refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" '
+        'fill="#000000"/></marker></defs><rect width="1200" height="720" fill="#FFFFFF"/>'
+        + svg_centered_text(
+            600,
+            42,
+            ["Repair the working copy, preserve the evidence"],
+            size=30,
+            bold_first=True,
+        )
+        + svg_labeled_box(
+            55,
+            170,
+            280,
+            165,
+            "Authoritative output",
+            ["marker_results/**/*.md", "unchanged on disk", "conversion audit trail"],
+            fill="#FFFFFF",
+            stroke_width=4,
+        )
+        + svg_arrow(335, 252, 420, 252)
+        + svg_labeled_box(
+            435,
+            150,
+            330,
+            205,
+            "In-memory preprocessing",
+            ["normalize marker sequences", "promote italic sublabels", "extract leading spans"],
+            fill="#D9D9D9",
+        )
+        + svg_arrow(765, 252, 850, 252)
+        + svg_labeled_box(
+            865,
+            170,
+            280,
+            165,
+            "Structure-aware split",
+            ["temp_split()", "bounded chunks", "no source rewrite"],
+            fill="#808080",
+            text_fill="#FFFFFF",
+        )
+        + svg_arrow(1005, 335, 1005, 438)
+        + svg_labeled_box(
+            825,
+            450,
+            360,
+            145,
+            "Traceable chunks",
+            ["source = relative path", "chunk_seq = per-source order"],
+            fill="#2C3E6B",
+            text_fill="#FFFFFF",
+            stroke_width=4,
+        )
+        + svg_arrow(825, 522, 665, 522, dashed=True)
+        + svg_labeled_box(
+            360,
+            450,
+            290,
+            145,
+            "Diagnostic report",
+            ["chunk-runs/timestamp.md", "ignored derived artifact"],
+            fill="#F2F2F2",
+            dashed=True,
+        )
+        + svg_arrow(195, 335, 195, 505, dashed=True)
+        + svg_centered_text(
+            195,
+            555,
+            ["No write-back", "to converter output"],
+            size=18,
+            bold_first=True,
+            gap=24,
+        )
+        + "</svg>"
+    )
+    return svg_to_png("chapter7b_in_memory_repair", svg)
+
+
+def diagram_ground_truth_loop_7b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760">'
+        '<defs><marker id="arrow" markerWidth="10" markerHeight="10" '
+        'refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" '
+        'fill="#000000"/></marker></defs><rect width="1200" height="760" fill="#FFFFFF"/>'
+        + svg_centered_text(
+            600,
+            42,
+            ["Validate against the whole document, not toy fragments"],
+            size=29,
+            bold_first=True,
+        )
+        + svg_labeled_box(
+            75,
+            120,
+            300,
+            135,
+            "Ground-truth pair",
+            ["dataset/input.md", "dataset/expected-output.md"],
+            fill="#FFFFFF",
+            stroke_width=4,
+        )
+        + svg_labeled_box(
+            825,
+            120,
+            300,
+            135,
+            "Real Marker corpus",
+            ["long RFT and contract files", "full-document boundaries"],
+            fill="#F2F2F2",
+        )
+        + svg_arrow(375, 188, 420, 290)
+        + svg_arrow(825, 188, 780, 290)
+        + svg_labeled_box(
+            430,
+            300,
+            340,
+            145,
+            "Run preprocessing + split",
+            ["compare normalized structure", "reconstruct and check survival"],
+            fill="#D9D9D9",
+        )
+        + svg_arrow(600, 445, 600, 473)
+        + '<polygon points="600,485 770,575 600,665 430,575" fill="#808080" '
+        'stroke="#000000" stroke-width="4"/>'
+        + svg_centered_text(
+            600,
+            575,
+            ["All invariants", "hold?"],
+            size=21,
+            fill="#FFFFFF",
+            bold_first=True,
+            gap=26,
+        )
+        + svg_arrow(430, 575, 370, 680)
+        + svg_arrow(770, 575, 830, 680)
+        + svg_centered_text(345, 617, ["NO"], size=17, bold_first=True)
+        + svg_centered_text(855, 617, ["YES"], size=17, bold_first=True)
+        + '<ellipse cx="205" cy="710" rx="155" ry="43" fill="#F2F2F2" '
+        'stroke="#000000" stroke-width="3" stroke-dasharray="12 8"/>'
+        + svg_centered_text(205, 710, ["Locate boundary bug"], size=19, bold_first=True)
+        + '<ellipse cx="995" cy="710" rx="155" ry="43" fill="#2C3E6B" '
+        'stroke="#000000" stroke-width="4"/>'
+        + svg_centered_text(
+            995,
+            710,
+            ["Keep the revision"],
+            size=19,
+            fill="#FFFFFF",
+            bold_first=True,
+        )
+        + '<path d="M205 667 C100 520 180 370 410 370" fill="none" '
+        'stroke="#000000" stroke-width="3" stroke-dasharray="10 8"/>'
+        + '<polygon points="425,370 408,363 408,377" fill="#000000"/>'
+        + svg_centered_text(150, 480, ["revise one rule"], size=17, bold_first=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter7b_ground_truth_loop", svg)
+
+
+def build_chapter_7b() -> Path:
+    chapter = "7B"
+    title = "Chunking Converted Documents: Repairing Structure Before Splitting"
+    doc = configure_document(title)
+    add_cover(
+        doc,
+        chapter,
+        title,
+        "PART II — BUILDING THE INGESTION PIPELINE",
+        "A splitter can respect structure only after someone makes that structure trustworthy.",
+    )
+    add_chapter_heading(doc, chapter, title)
+    add_body(
+        doc,
+        "Chapter 7 taught chunking as a controlled trade-off between semantic coherence and size. Chapter 5B now complicates that picture: a converter may emit Markdown whose headings, numbered clauses, list depth, page anchors, and repeated furniture are inconsistent. A structure-aware splitter cannot distinguish an intentional hierarchy from a conversion accident merely because both use `#` and `-` characters.",
+    )
+    add_body(
+        doc,
+        "This chapter follows the real Marker-Markdown experiment from a recursive baseline through an in-memory normalization pass and full-document boundary validation. The goal is deliberately limited. We will repair enough observable structure to make splitting safer while preserving the converter output as evidence and acknowledging information that is already unrecoverable. By the end, you will be able to scope a chunking experiment, attach traceable metadata, choose where normalization belongs, test for silent loss, and know when to stop.",
+    )
+
+    add_heading(doc, "7B.1 The problem this chapter inherits")
+    add_callout(
+        doc,
+        "Definition",
+        "Structure-aware splitting",
+        "Chunking that chooses boundaries from document signals such as headings, lists, tables, and section containment rather than from character count alone.",
+    )
+    add_body(
+        doc,
+        "Structure-aware splitting assumes that a heading introduces the text below it, list indentation expresses parent-child relationships, and table rows preserve their columns. Marker violated those assumptions in observed contracts and RFTs. One numbered clause appeared as a paragraph, the next as a bullet, and another as a heading. Running page banners became headings. Nested pointers flattened to one indentation level. Leading HTML anchors glued themselves to headings and prevented ordinary pattern matching.",
+    )
+    add_body(
+        doc,
+        "A size-only splitter avoids trusting those signals, but it can separate a heading from its section, divide a legal clause mid-thought, or strand a list lead-in. A structure-aware splitter can do better only if the structure it reads is at least internally consistent. The experiment therefore places a small, auditable repair stage between conversion and splitting.",
+    )
+    add_callout(
+        doc,
+        "Analogy",
+        "Cutting a damaged film reel",
+        "A film editor uses scene markers to choose cuts. If the markers slipped during scanning, blindly cutting at each marker damages the story. The editor first realigns the markers that can be verified, then cuts, while preserving the original reel for comparison.",
+    )
+
+    add_heading(doc, "7B.2 Scoping the experiment")
+    add_body(
+        doc,
+        "The experiment reads only `.md` and `.markdown` files below `marker_results/`. Mixing Docling, Unstructured, and Marker outputs would confound two questions: whether a splitter is good and whether each converter expresses structure differently. A fixed input family makes successive chunk reports comparable and keeps every observed defect tied to one conversion convention.",
+    )
+    add_code(
+        doc,
+        '''MARKER_RESULTS_DIR = PROJECT_ROOT / "marker_results"
+
+def discover_files() -> list[Path]:
+    return sorted(
+        path
+        for path in MARKER_RESULTS_DIR.rglob("*")
+        if path.is_file()
+        and path.suffix.lower() in {".md", ".markdown"}
+    )''',
+    )
+    add_body(
+        doc,
+        "This scope is an experimental control, not a claim that Marker is the universal production parser. The expanded corpus contained legal, tender, and engineering documents whose malformed structures motivated the repair rules. A rule learned from those files must not be advertised as a general Markdown normalizer.",
+    )
+
+    add_heading(doc, "7B.3 Preserving traceability")
+    add_callout(
+        doc,
+        "Definition",
+        "Chunk provenance",
+        "Metadata that identifies the source document and the chunk's position or derivation so downstream systems can reconstruct where retrieved text came from.",
+    )
+    add_body(
+        doc,
+        "Each loaded Markdown file becomes a `Document` carrying its source-relative path. After splitting, every derived chunk receives a zero-based `chunk_seq` scoped to that source. Two files may both have chunk zero; the pair `(source, chunk_seq)` is the meaningful identity. This is enough for inspection now and later supports neighbor-aware compression, where a retrieved chunk can request adjacent chunks from the same document.",
+    )
+    add_code(
+        doc,
+        '''sequence_by_source: dict[str, int] = defaultdict(int)
+
+for chunk in chunks:
+    source = str(chunk.metadata["source"])
+    chunk.metadata["chunk_seq"] = sequence_by_source[source]
+    sequence_by_source[source] += 1''',
+    )
+    add_body(
+        doc,
+        "Suppose retrieval returns chunk 17 from `marker_results/contract.md`. The sequence metadata lets the application request chunks 16 and 18 without searching globally or assuming report order. It can inspect whether a definition began in the previous chunk or a list continues in the next. The same operation would be unsafe with a global sequence number because adjacent numbers might belong to different source files.",
+    )
+    add_body(
+        doc,
+        "A production identity may add a stable source hash, converter version, preprocessing version, and chunker version. Those fields distinguish \"the same path\" after its contents or algorithms change. The experiment keeps the minimum pair because its immediate purpose is human inspection, but the design points naturally toward reproducible retrieval provenance.",
+    )
+    add_table(
+        doc,
+        ["Metadata", "Scope", "Why it matters"],
+        [
+            ["`source`", "Relative file path", "Links a chunk to the authoritative conversion output"],
+            ["`chunk_seq`", "Zero-based within one source", "Preserves local order and enables neighbor lookup"],
+            ["Character count", "Per chunk", "Checks the configured size bound"],
+            ["Token count", "Per chunk and run", "Estimates downstream context cost"],
+            ["Run timestamp", "One experiment execution", "Separates reports produced by different revisions"],
+        ],
+        [1.45, 2.05, 2.80],
+    )
+
+    add_heading(doc, "7B.4 Keeping derived artifacts out of version control")
+    add_body(
+        doc,
+        "Every run writes `chunk-runs/chunks_<timestamp>.md`. The report records total chunks, average tokens, the largest chunk, and for each chunk its source, sequence, character count, token count, and full content. These files are intentionally ignored by Git because repeated experiments can produce multi-megabyte diagnostics. The code and decisions belong in history; disposable renderings of the current experiment do not.",
+    )
+    add_body(
+        doc,
+        "Ignoring a report does not make it unimportant. It makes its role explicit: local evidence used to inspect boundaries, compare revisions, and locate regressions. A result promoted into a durable decision should be summarized in `Decisions.md`, `Bugs.md`, or `Research.md`, where its context survives after the large report is deleted.",
+    )
+    add_callout(
+        doc,
+        "Analogy",
+        "Laboratory notebooks and instrument dumps",
+        "The ledger is the signed notebook containing conclusions and measurements. Timestamped chunk reports are instrument dumps: essential during analysis, too bulky and repetitive to treat as the permanent scientific record.",
+    )
+
+    add_heading(doc, "7B.5 The principle — chunking is not a repair mechanism")
+    add_body(
+        doc,
+        "The project adopted a necessary warning: chunking is not a repair mechanism for source-conversion defects. If Marker omitted content, swapped table rows, flattened a page frame, or discarded list nesting, a splitter cannot recover facts that no longer exist in the Markdown. Pretending otherwise turns heuristics into fabricated structure.",
+    )
+    add_body(
+        doc,
+        "The warning needed qualification. Some defects do not erase information; they express the same observable structure inconsistently. A sequence such as `5.1`, `5.2`, and `5.3` may survive completely while appearing as a mixture of paragraphs, bullets, and headings. Normalizing those surviving markers for boundary detection is different from inventing a missing table relationship. The repair is bounded, evidence-based, and applied only to the working copy.",
+    )
+    add_callout(
+        doc,
+        "Common pitfall",
+        "Confusing normalization with reconstruction",
+        "A regex can make surviving clause markers consistent. It cannot infer an original nested-list depth that Marker discarded or prove which organization belonged to a corrupted table row.",
+    )
+
+    add_heading(doc, "7B.6 Three ways to handle malformed structure")
+    add_body(
+        doc,
+        "Three implementation locations were considered. Boundary-only detection leaves text untouched and teaches the splitter additional whole-line patterns. It is the least invasive option, but it cannot rejoin a clause body fragmented by page breaks or provide consistent list syntax. Rewriting `marker_results/*.md` on disk makes every downstream consumer simpler, but silently mutates the very output under evaluation and destroys a clean comparison with the converter.",
+    )
+    add_body(
+        doc,
+        "The chosen middle path normalizes text in memory immediately before splitting. It can repair observed clause and heading patterns while the on-disk Markdown remains authoritative evidence. The trade-off is that every downstream consumer that needs the repair must invoke the same preprocessing stage, and the heuristic must be versioned and tested like code rather than treated as cleanup magic.",
+    )
+    add_table(
+        doc,
+        ["Location", "Advantage", "Limitation", "Decision"],
+        [
+            ["Inside boundary detection", "Original text remains untouched", "Cannot rejoin or normalize structure fully", "Rejected as too weak"],
+            ["In-memory before splitting", "Repairs working structure; preserves disk evidence", "Consumer must invoke the stage", "Chosen"],
+            ["Rewrite Markdown on disk", "Simplest downstream representation", "Destroys converter audit trail", "Rejected"],
+        ],
+        [1.55, 2.05, 1.85, 0.85],
+    )
+    add_figure(
+        doc,
+        diagram_in_memory_repair_7b(),
+        "Figure 7B.1 — In-memory preprocessing repairs the working copy while preserving converter output on disk.",
+    )
+    add_body(
+        doc,
+        "Figure 7B.1 shows the separation of responsibilities. `marker_results/` remains the evidence. `preprocessing()` creates a temporary normalized string, `temp_split()` derives chunks, and the timestamped report records what happened. There is no arrow that writes normalized content back to the converter output.",
+    )
+
+    add_heading(doc, "7B.7 The `preprocessing()` pass")
+    add_body(
+        doc,
+        "The pass applies three transforms in a fixed order. `_normalize_marker_sequences()` detects consecutive numeric, alphabetic, or roman marker families, makes their syntax consistent, and reattaches page-fragmented body text under guarded conditions. `_promote_italic_sublabels()` turns a full-line italic label below a heading into the next bounded heading level. `_extract_leading_spans()` moves glued `<span id=\"...\">` anchors onto separate lines so heading and list detectors can see the annotated line normally.",
+    )
+    add_code(
+        doc,
+        '''def preprocessing(text: str) -> str:
+    text = _normalize_marker_sequences(text)
+    text = _promote_italic_sublabels(text)
+    text = _extract_leading_spans(text)
+    return text
+
+def split_documents(documents):
+    chunks = []
+    for document in documents:
+        working_text = preprocessing(document.page_content)
+        for text in temp_split(working_text):
+            chunks.append(
+                Document(text, metadata=document.metadata.copy())
+            )
+    return assign_sequences(chunks)''',
+    )
+    add_heading(doc, "Worked transformation — one logical clause, three surface forms", level=2)
+    add_code(
+        doc,
+        '''# Marker output before preprocessing
+5.1 **Eligibility** The bidder shall...
+
+- 5.2 **Submission**
+
+The complete bid shall arrive before the deadline.
+
+### 5.3 **Validity** The bid remains valid...
+
+# Normalized working text
+##### 5.1 **Eligibility**
+
+The bidder shall...
+
+##### 5.2 **Submission**
+
+The complete bid shall arrive before the deadline.
+
+##### 5.3 **Validity**
+
+The bid remains valid...''',
+    )
+    add_body(
+        doc,
+        "The transform does not invent clause numbers or titles; all three are visible in the input. It makes their syntax consistent and rejoins a body fragment only because the preceding clause text appears unfinished. If terminal punctuation already closes the clause, the forward merge stops. This narrow rule is why preprocessing can improve boundaries without claiming to reconstruct the original page layout.",
+    )
+    add_body(
+        doc,
+        "The normalized heading level is also contextual. It may not become shallower than the nearest enclosing heading, even if one Marker fragment already carried a shallower prefix. Otherwise a child clause can parse as the sibling or parent of the section that contains it. This invariant was added only after the full document exposed the inversion.",
+    )
+    add_body(
+        doc,
+        "Order matters. Marker-sequence normalization may introduce consistent headings; italic promotion then derives sublabels from the nearest preceding level; span extraction finally removes anchor prefixes that would hide the structural line. Each helper is a best-effort rule scoped to observed RFT and contract patterns. It should return the original text unchanged when no supported pattern is present.",
+    )
+    add_callout(
+        doc,
+        "Analogy",
+        "A transparent overlay",
+        "The normalized text is a transparent annotation sheet placed over the original document. The splitter reads the clearer overlay, but investigators can lift it away and inspect the untouched conversion underneath.",
+    )
+
+    add_heading(doc, "7B.8 Why headings cannot be recovered by \"promote bold\"")
+    add_body(
+        doc,
+        "The PDF carried font size, weight, position, and spacing signals. Marker Markdown no longer contains most of that evidence. Bold is also overloaded: it marks headings, defined legal terms, labels inside clauses, warnings, and ordinary emphasis. Promoting every bold line would create a new false hierarchy and make section splitting worse.",
+    )
+    add_body(
+        doc,
+        "The implemented rules therefore require stronger context: a consecutive marker sequence, a full-line italic sublabel under an existing heading, or a known leading-anchor shape. Even then, heading levels must respect their enclosing section. BUG-021 later showed why: Marker had emitted `### 5.6` beneath a `####` parent, and blindly inheriting that level made clauses siblings above their own section. The safest rule uses document context and remains conservative when evidence is ambiguous.",
+    )
+    add_callout(
+        doc,
+        "Common pitfall",
+        "Promoting visual emphasis after visual evidence is gone",
+        "Once font size and page position have been discarded, bold alone is not a heading classifier. Use numbering, whole-line shape, neighboring structure, and conservative scope.",
+    )
+
+    add_heading(doc, "7B.9 Validating chunks against full-document ground truth")
+    add_callout(
+        doc,
+        "Definition",
+        "Ground-truth pair",
+        "A representative input and manually verified expected output used to determine whether a transformation preserves intended structure and content.",
+    )
+    add_body(
+        doc,
+        "Two toy fragments initially made the preprocessing logic look correct. A roughly 2,700-line real input/expected-output pair exposed failures those examples could not contain: unrelated marker families reused hundreds of lines apart, nested edits, glossary definitions, page anchors, and long list boundaries. Validation then expanded to the full local corpus and checked that the normalized/split output could account for every source line in rendered form.",
+    )
+    add_body(
+        doc,
+        "Three invariants guide the run: no chunk exceeds `CHUNK_SIZE`; every source line survives in some chunk after the documented normalization; and no non-final chunk ends on a heading whose content begins later. The exact round-trip comparison must allow deliberate serialization changes, such as normalized table padding or repeated headers, but it must never excuse missing semantic content.",
+    )
+    add_body(
+        doc,
+        "Validation proceeds from coarse to fine. First, compare total nonblank source lines with normalized lines that appear in the emitted chunks. Next, reconstruct each source's chunks in `chunk_seq` order and locate the first unmatched span. Finally, inspect the structural context around that offset: heading run, table, list, anchor, or paragraph. This workflow turns a million-character report into one local counterexample that can become a regression case.",
+    )
+    add_body(
+        doc,
+        "A boundary is accepted for semantic reasons, not merely because the limit is satisfied. The chunk should carry the heading that labels its content, keep a list lead-in with at least its first item, and avoid cutting a table row unless the table-specific policy can repeat the applicable headers. Size is a hard constraint; coherence decides among the boundaries that remain.",
+    )
+    add_figure(
+        doc,
+        diagram_ground_truth_loop_7b(),
+        "Figure 7B.2 — Full-document ground truth turns boundary defects into reproducible regression cases.",
+    )
+    add_body(
+        doc,
+        "Figure 7B.2 emphasizes the loop that produced useful evidence: run the complete document, test invariants, locate the first failing boundary, revise one rule, and repeat. A passing toy example is only a unit test; a full-document comparison reveals interactions among otherwise plausible rules.",
+    )
+    add_code(
+        doc,
+        '''def assert_chunk_run(source_text: str, chunks: list[str]) -> None:
+    assert all(len(chunk) <= CHUNK_SIZE for chunk in chunks)
+    assert all(
+        has_body_or_is_final(chunk, index, chunks)
+        for index, chunk in enumerate(chunks)
+    )
+    assert every_normalized_source_line_survives(
+        source_text, chunks
+    )''',
+    )
+
+    add_heading(doc, "7B.10 The boundary bugs")
+    add_body(
+        doc,
+        "The full-document method exposed three severe failures. BUG-013 keyed alphabetic and roman sequences globally, so an `(i)` list in one section could continue a completely unrelated `(ii)` elsewhere. The fix flushes unscoped families at headings and numeric-marker boundaries and prevents overlapping nested edits from being applied twice.",
+    )
+    add_body(
+        doc,
+        "BUG-014 merged every plain block after a clause until the next marker. Separate glossary definitions collapsed onto one line because the algorithm had no evidence that the clause body continued. The fix permits forward merge only while accumulated text does not appear to end a sentence. This is still heuristic, but it adds a defensible stopping signal.",
+    )
+    add_body(
+        doc,
+        "BUG-015 appeared in splitting rather than preprocessing. A helper seeking top-level list boundaries omitted the current cursor when that cursor began inside a nested run. Text before the next top-level item vanished from all chunks. Inserting the actual start position restored zero nonblank gaps across the tested documents.",
+    )
+    add_body(
+        doc,
+        "These bugs share a pattern: each local rule looked reasonable when considered alone. The damage appeared only when scope, stopping conditions, and cursor ownership interacted across a long document. That is why logging the final chunks is necessary but insufficient. The validator must also account for input coverage and structural ownership, otherwise a cleanly formatted report can conceal missing text.",
+    )
+    add_table(
+        doc,
+        ["Bug", "Silent symptom", "Root mistake", "Guard"],
+        [
+            ["BUG-013", "Unrelated enumerations chained", "Marker family scoped globally", "Flush at structural boundaries"],
+            ["BUG-014", "Glossary blocks concatenated", "Forward merge had no stop signal", "Require unfinished sentence evidence"],
+            ["BUG-015", "Nested-list content disappeared", "Start cursor omitted from boundaries", "Always include actual split start"],
+        ],
+        [1.00, 1.85, 1.90, 1.55],
+    )
+    add_callout(
+        doc,
+        "Common pitfall",
+        "Testing transformations only on examples that inspired them",
+        "The original examples could not reveal document-wide marker reuse, overlapping edits, or a cursor entering mid-list. Test the rules against material large enough to contain unrelated structures.",
+    )
+
+    add_heading(doc, "7B.11 Bounded by the converter")
+    add_body(
+        doc,
+        "Some defects remain outside the repair boundary. Marker flattened parent pointers and roman-numeral subpoints into identical top-level `-` items. Once indentation and geometry are gone, a splitter cannot prove which child belonged to which parent. Similar limits apply to reordered table cells, omitted text after a cross-page transition, and page furniture that is indistinguishable from genuine body text.",
+    )
+    add_body(
+        doc,
+        "The correct response is not a more aggressive regex. Preserve the limitation in metadata or quality status, quarantine high-risk documents, and improve the conversion stage. A chunker should prefer an honest flat list over a confident but invented hierarchy. Knowing where to stop is part of the algorithm.",
+    )
+    add_callout(
+        doc,
+        "Analogy",
+        "Restoring a torn label, not a missing page",
+        "If a label is torn but every letter remains, careful alignment can restore it. If a page is missing, rearranging the remaining pages cannot recreate its contents. Preprocessing repairs surviving signals; it does not manufacture absent evidence.",
+    )
+
+    add_heading(doc, "7B.12 Baseline vs custom splitter")
+    add_body(
+        doc,
+        "At the decision point captured by ADR-006, the committed recursive splitter remained the baseline. It was simple, bounded at 1,600 characters with overlap, and easy to compare. A custom heading/table/list prototype attempted to preserve more structure, but repeated report inspection showed behavior that was difficult to reason about and not yet demonstrably safer. It was rejected as the replacement while its diagnostics and failure cases were retained.",
+    )
+    add_body(
+        doc,
+        "That conclusion is a version boundary, not a claim that experimentation stopped. The repository later committed the prototype, replaced it with hand-authored rules, and then evolved again toward parse-then-pack in ADR-010 and bounded table serialization in ADR-011. Those later changes reinforce the lesson of this chapter: a custom splitter earns adoption only through explicit invariants, full-corpus validation, and traceable decisions. Chronology matters because each design responded to defects the previous one made visible.",
+    )
+    add_body(
+        doc,
+        "Before replacing a baseline, require a fixed corpus, a frozen configuration, a reviewable report, zero unexplained content loss, no over-limit chunks, and targeted checks for headings, lists, and tables. Compare not only average tokens and chunk count but also the worst boundary. A lower chunk count can mean better packing, or it can mean unrelated sections were merged. Metrics become evidence only when paired with inspected examples.",
+    )
+    add_table(
+        doc,
+        ["Criterion", "Recursive baseline", "Custom prototype at this stage"],
+        [
+            ["Complexity", "Small and explainable", "Many interacting structural cases"],
+            ["Structure preservation", "Limited", "Promising but inconsistent"],
+            ["Failure visibility", "Predictable size cuts", "Silent boundary interactions observed"],
+            ["Evidence burden", "Established comparison baseline", "Required broader ground truth"],
+            ["Decision", "Retain for comparison", "Reject as immediate replacement"],
+        ],
+        [1.55, 2.25, 2.50],
+    )
+    add_body(
+        doc,
+        "Chapter 8 now receives chunks whose provenance and limitations are explicit. It moves from textual boundaries to embeddings: how each chunk becomes a vector, why model choice and dimensionality matter, and how similarity search inherits every quality decision made during conversion and splitting.",
+    )
+
+    path = OUT_DIR / "Chapter_7B_Chunking_Converted_Documents.docx"
+    doc.core_properties.title = f"Chapter {chapter} — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+BUILDERS = {
+    15: build_chapter_15,
+    16: build_chapter_16,
+    17: build_chapter_17,
+    28: build_chapter_28,
+    40: build_chapter_40,
+    "5B": build_chapter_5b,
+    "7B": build_chapter_7b,
+}
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or int(sys.argv[1]) not in BUILDERS:
+    key = sys.argv[1] if len(sys.argv) == 2 else None
+    if key is not None and key.isdigit():
+        key = int(key)
+    if len(sys.argv) != 2 or key not in BUILDERS:
         raise SystemExit(f"Usage: {Path(sys.argv[0]).name} <{'|'.join(map(str, BUILDERS))}>")
-    output = BUILDERS[int(sys.argv[1])]()
+    output = BUILDERS[key]()
     print(output)

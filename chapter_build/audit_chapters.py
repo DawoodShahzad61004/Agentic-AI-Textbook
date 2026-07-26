@@ -12,6 +12,8 @@ from docx import Document
 
 
 FILES = {
+    "5B": ROOT / "Chapters Created So Far" / "Chapter_5B_Evaluating_Document_Conversion_Engines.docx",
+    "7B": ROOT / "Chapters Created So Far" / "Chapter_7B_Chunking_Converted_Documents.docx",
     15: ROOT / "Chapters Created So Far" / "Chapter_15_What_Agentic_Really_Means.docx",
     16: ROOT / "Chapters Created So Far" / "Chapter_16_Designing_the_Agent_Loop.docx",
     17: ROOT / "Chapters Created So Far" / "Chapter_17_Tool_Use_and_Function_Calling.docx",
@@ -20,12 +22,16 @@ FILES = {
 }
 
 EXPECTED = {
+    "5B": [f"5B.{index}" for index in range(1, 11)],
+    "7B": [f"7B.{index}" for index in range(1, 13)],
     15: ["15.1", "15.2", "15.3", "15.4", "15.5"],
     16: ["16.1", "16.2", "16.3", "16.4", "16.5"],
     17: ["17.1", "17.2", "17.3", "17.4", "17.5", "17.6", "17.7"],
     28: ["28.1", "28.2", "28.3", "28.4", "28.5"],
     40: ["40.1", "40.2", "40.3", "40.4", "40.5", "40.6"],
 }
+
+MIN_WORDS = {"5B": 2800, "7B": 3000}
 
 
 def count_words(doc: Document) -> int:
@@ -37,7 +43,7 @@ def count_words(doc: Document) -> int:
     return len(re.findall(r"\b[\w’'-]+\b", "\n".join(chunks)))
 
 
-def audit(chapter: int, path: Path) -> list[str]:
+def audit(chapter: int | str, path: Path) -> list[str]:
     errors: list[str] = []
     doc = Document(path)
     sec = doc.sections[0]
@@ -61,7 +67,7 @@ def audit(chapter: int, path: Path) -> list[str]:
 
     text = "\n".join(p.text for p in doc.paragraphs)
 
-    caption_pattern = re.compile(rf"^Figure {chapter}\.\d+ — ")
+    caption_pattern = re.compile(rf"^Figure {chapter}\.\d+\s+[—-]\s+")
     captions = [p.text for p in doc.paragraphs if caption_pattern.match(p.text)]
     if len(captions) != 2:
         errors.append(f"figure captions={len(captions)}, expected 2")
@@ -70,7 +76,8 @@ def audit(chapter: int, path: Path) -> list[str]:
             errors.append(f"Figure {chapter}.{i} not referenced")
 
     words = count_words(doc)
-    if words < 2300:
+    minimum = MIN_WORDS.get(chapter, 2300)
+    if words < minimum:
         errors.append(f"word count too low: {words}")
 
     with ZipFile(path) as zf:
@@ -94,7 +101,19 @@ def audit(chapter: int, path: Path) -> list[str]:
 
 def main() -> None:
     failures = []
-    for chapter, path in FILES.items():
+    requested = sys.argv[1:]
+    selected = {}
+    if requested:
+        for raw in requested:
+            key = int(raw) if raw.isdigit() else raw.upper()
+            if key not in FILES:
+                failures.append(f"Unknown chapter: {raw}")
+                continue
+            selected[key] = FILES[key]
+    else:
+        selected = FILES
+
+    for chapter, path in selected.items():
         if not path.exists():
             failures.append(f"Chapter {chapter}: missing file")
             continue

@@ -1,0 +1,590 @@
+(Customer_Support_Agent) PS C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent> python main.py
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpx\_transports\default.py", line 250, in handle_request
+    resp = self._pool.handle_request(req)
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpcore\_sync\connection_pool.py", line 256, in handle_request
+    raise exc from None
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpcore\_sync\connection_pool.py", line 236, in handle_request
+    response = connection.handle_request(
+        pool_request.request
+    )
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpcore\_sync\connection.py", line 101, in handle_request
+    raise exc
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpcore\_sync\connection.py", line 78, in handle_request
+    stream = self._connect(request)
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpcore\_sync\connection.py", line 124, in _connect
+    stream = self._network_backend.connect_tcp(**kwargs)
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpcore\_backends\sync.py", line 207, in connect_tcp
+    with map_exceptions(exc_map):
+         ~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\LOQ\AppData\Roaming\uv\python\cpython-3.13-windows-x86_64-none\Lib\contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ConnectError: [Errno 11001] getaddrinfo failed
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\main.py", line 22, in <module>
+    mem0 = MemoryClient()
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\mem0\client\main.py", line 147, in __init__
+    self.user_email = self._validate_api_key()
+                      ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\mem0\client\main.py", line 164, in _validate_api_key
+    response = self.client.get("/v1/ping/", params=params)
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpx\_client.py", line 1053, in get
+    return self.request(
+           ~~~~~~~~~~~~^
+        "GET",
+        ^^^^^^
+    ...<7 lines>...
+        extensions=extensions,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpx\_client.py", line 825, in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpx\_client.py", line 914, in send
+    response = self._send_handling_auth(
+        request,
+    ...<2 lines>...
+        history=[],
+    )
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpx\_client.py", line 942, in _send_handling_auth
+    response = self._send_handling_redirects(
+        request,
+        follow_redirects=follow_redirects,
+        history=history,
+    )
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpx\_client.py", line 979, in _send_handling_redirects
+    response = self._send_single_request(request)
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpx\_client.py", line 1014, in _send_single_request
+    response = transport.handle_request(request)
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpx\_transports\default.py", line 249, in handle_request
+    with map_httpcore_exceptions():
+         ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\LOQ\AppData\Roaming\uv\python\cpython-3.13-windows-x86_64-none\Lib\contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ConnectError: [Errno 11001] getaddrinfo failed
+(Customer_Support_Agent) PS C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent>
+Show less
+Read c:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\main.py
+Bash List Customer_Support_Agent directory contents
+IN
+ls -la "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent" 2>&1 | head -50
+
+OUT
+total 12
+drwxr-xr-x 1 LOQ 197121   0 Jul 30 14:13 .
+drwxr-xr-x 1 LOQ 197121   0 Jul 30 14:09 ..
+drwxr-xr-x 1 LOQ 197121   0 Jul 30 14:10 .venv
+-rw-r--r-- 1 LOQ 197121 654 Jul 30 14:19 main.py
+-rw-r--r-- 1 LOQ 197121   0 Jul 30 14:12 state.py
+Bash Check state.py, mem0 env vars, and DNS resolution
+IN
+cd "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent" && cat state.py; echo "---env check---"; env | grep -i mem0; echo "---dns test---"; nslookup api.mem0.ai 2>&1 | head -20
+
+OUT
+---env check---
+---dns test---
+*** Request to gpon.net timed-out
+
+Server:  gpon.net
+Address:  fe80::1
+
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+Bash Check general DNS and internet connectivity
+IN
+nslookup google.com 2>&1 | head -20; echo "---ping---"; ping -n 2 8.8.8.8 2>&1
+
+OUT
+Non-authoritative answer:
+
+Server:  gpon.net
+Address:  fe80::1
+
+Name:    google.com
+Addresses:  2a00:1450:4019:80f::200e
+	  142.250.200.174
+
+---ping---
+
+Pinging 8.8.8.8 with 32 bytes of data:
+Reply from 8.8.8.8: bytes=32 time=57ms TTL=119
+Reply from 8.8.8.8: bytes=32 time=552ms TTL=119
+
+Ping statistics for 8.8.8.8:
+    Packets: Sent = 2, Received = 2, Lost = 0 (0% loss),
+Approximate round trip times in milli-seconds:
+    Minimum = 57ms, Maximum = 552ms, Average = 304ms
+Bash Retry DNS lookup for api.mem0.ai directly and via Google DNS
+IN
+nslookup api.mem0.ai 2>&1; echo "---retry---"; nslookup api.mem0.ai 8.8.8.8 2>&1
+
+OUT
+*** Request to gpon.net timed-out
+
+Server:  gpon.net
+Address:  fe80::1
+
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+---retry---
+Non-authoritative answer:
+
+Server:  dns.google
+Address:  8.8.8.8
+
+Name:    api.mem0.ai
+Addresses:  54.187.129.55
+	  35.85.175.198
+	  35.155.69.186
+	  52.37.167.56
+Bash Flush DNS cache and retry lookup via default resolver
+IN
+ipconfig /flushdns 2>&1; echo "---retry default DNS---"; nslookup api.mem0.ai 2>&1
+
+OUT
+Error: unrecognized or incomplete command line.
+
+USAGE:
+    ipconfig [/allcompartments] [/? | /all |
+                                 /renew [adapter] | /release [adapter] |
+                                 /renew6 [adapter] | /release6 [adapter] |
+                                 /flushdns | /displaydns | /registerdns |
+                                 /showclassid adapter |
+                                 /setclassid adapter [classid] |
+                                 /showclassid6 adapter |
+                                 /setclassid6 adapter [classid] ]
+
+where
+    adapter             Connection name
+                       (wildcard characters * and ? allowed, see examples)
+
+    Options:
+       /?               Display this help message
+       /all             Display full configuration information.
+       /release         Release the IPv4 address for the specified adapter.
+       /release6        Release the IPv6 address for the specified adapter.
+       /renew           Renew the IPv4 address for the specified adapter.
+       /renew6          Renew the IPv6 address for the specified adapter.
+       /flushdns        Purges the DNS Resolver cache.
+       /registerdns     Refreshes all DHCP leases and re-registers DNS names
+       /displaydns      Display the contents of the DNS Resolver Cache.
+       /showclassid     Displays all the dhcp class IDs allowed for adapter.
+       /setclassid      Modifies the dhcp class id.
+       /showclassid6    Displays all the IPv6 DHCP class IDs allowed for adapter.
+       /setclassid6     Modifies the IPv6 DHCP class id.
+
+
+The default is to display only the IP address, subnet mask and
+default gateway for each adapter bound to TCP/IP.
+
+For Release and Renew, if no adapter name is specified, then the IP address
+leases for all adapters bound to TCP/IP will be released or renewed.
+
+For Setclassid and Setclassid6, if no ClassId is specified, then the ClassId is removed.
+
+Examples:
+    > ipconfig                       ... Show information
+    > ipconfig /all                  ... Show detailed information
+    > ipconfig /renew                ... renew all adapters
+    > ipconfig /renew EL*            ... renew any connection that has its
+                                         name starting with EL
+    > ipconfig /release *Con*        ... release all matching connections,
+                                         eg. "Wired Ethernet Connection 1" or
+                                             "Wired Ethernet Connection 2"
+    > ipconfig /allcompartments      ... Show information about all
+                                         compartments
+    > ipconfig /allcompartments /all ... Show detailed information about all
+                                         compartments
+---retry default DNS---
+Non-authoritative answer:
+
+Server:  gpon.net
+Address:  fe80::1
+
+DNS request timed out.
+    timeout was 2 seconds.
+Name:    api.mem0.ai
+Addresses:  52.37.167.56
+	  54.187.129.55
+	  35.85.175.198
+	  35.155.69.186
+Bash Check for env files and mem0 client key requirements
+IN
+cd "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent" && find . -iname "*.env*" -not -path "./.venv/*" 2>/dev/null; echo "---"; grep -n "def __init__\|MEM0_API_KEY\|os.environ" .venv/Lib/site-packages/mem0/client/main.py | head -20
+
+OUT
+---
+95:    def __init__(
+105:                     provided, it will attempt to use the MEM0_API_KEY
+116:        self.api_key = api_key or os.getenv("MEM0_API_KEY")
+984:    def __init__(
+994:                     provided, it will attempt to use the MEM0_API_KEY
+1005:        self.api_key = api_key or os.getenv("MEM0_API_KEY")
+Two separate issues here, both confirmed by testing directly:
+
+1. The crash you saw (DNS failure) is intermittent, not a code bug. nslookup api.mem0.ai failed once against your router's resolver (gpon.net) but succeeded on a retry a moment later — general connectivity (google.com, 8.8.8.8 ping) is fine. Your router's DNS resolver is just flaky for that hostname. Simply re-running python main.py may work now.
+
+2. Even once DNS resolves, MemoryClient() will fail auth. It requires MEM0_API_KEY (checked at mem0/client/main.py:116), and there's no .env file anywhere in Customer_Support_Agent/ and no MEM0_API_KEY in your shell env — main.py:10 calls load_dotenv() with no path, and no .env exists in this directory or its parents for it to find.
+
+To fix: add a .env file in Customer_Support_Agent/ with MEM0_API_KEY=<your mem0 key> (and CUSTOM_API_BASE / CUSTOM_API_KEY for the LLM, per main.py:14-15 — currently also unset). Want me to create a .env template there, or do you already have these credentials to fill in?
+
+c#13-20
+.env is at the same directory-level as Customer_Support_Agent/ folder. Adjust the path in main.py to use it
+Bash Check for .env in project root
+IN
+cd "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools" && ls -la .env 2>&1; find . -maxdepth 1 -iname "*.env*"
+
+OUT
+-rw-r--r-- 1 LOQ 197121 817 Jul 30 14:18 .env
+./.env
+Found it at Memory-Management-Tools/.env. Updating main.py to load it explicitly by path rather than relying on load_dotenv()'s cwd-based search.
+
+Edit c:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\Customer_Support_Agent\main.py
+Added 1 line
+Bash List env var names in .env without exposing values
+IN
+cd "C:\Users\LOQ\Desktop\Projects\Memory-Management-Tools" && grep -oE '^[A-Z_]+=' .env
+
+OUT
+CUSTOM_API_BASE=
+CUSTOM_API_KEY=
+CUSTOM_API_MODEL_NAME=
+MODEL_NAME=
+MONGODB_URI=
+MONGODB_DB_NAME=
+main.py:10 now loads ../.env (Memory-Management-Tools/.env) by absolute path. Note it has CUSTOM_API_BASE/CUSTOM_API_KEY but no MEM0_API_KEY — you'll still need to add that for MemoryClient() to authenticate.
+
+c:\Users\LOQ\Desktop\Projects\Memory-Management-Tools\.env
+Why is DNS failing again and again?
+PowerShell Show configured DNS server addresses per network adapter
+IN
+Get-DnsClientServerAddress | Format-Table -AutoSize
+
+OUT
+InterfaceAlias                     InterfaceIndex AddressFamily ServerAddresses                                       
+--------------                     -------------- ------------- ---------------                                       
+vEthernet (WSL (Hyper-V firewall))             44 IPv4          {}                                                    
+vEthernet (WSL (Hyper-V firewall))             44 IPv6          {fec0:0:0:ffff::1, fec0:0:0:ffff::2, fec0:0:0:ffff::3}
+Local Area Connection* 1                       17 IPv4          {}                                                    
+Local Area Connection* 1                       17 IPv6          {fec0:0:0:ffff::1, fec0:0:0:ffff::2, fec0:0:0:ffff::3}
+Local Area Connection* 2                        7 IPv4          {}                                                    
+Local Area Connection* 2                        7 IPv6          {fec0:0:0:ffff::1, fec0:0:0:ffff::2, fec0:0:0:ffff::3}
+Wi-Fi                                          15 IPv4          {192.168.1.1}                                         
+Wi-Fi                                          15 IPv6          {fe80::1, fe80::1}                                    
+Bluetooth Network Connection                   14 IPv4          {}                                                    
+Bluetooth Network Connection                   14 IPv6          {fec0:0:0:ffff::1, fec0:0:0:ffff::2, fec0:0:0:ffff::3}
+Ethernet                                        9 IPv4          {172.16.99.2, 172.16.99.10, 172.16.99.5}              
+Ethernet                                        9 IPv6          {}                                                    
+Loopback Pseudo-Interface 1                     1 IPv4          {}                                                    
+Loopback Pseudo-Interface 1                     1 IPv6          {fec0:0:0:ffff::1, fec0:0:0:ffff::2, fec0:0:0:ffff::3}
+Bash Repeatedly query the router's IPv6 DNS resolver to check reliability
+IN
+for i in 1 2 3 4 5; do echo "--- attempt $i ---"; nslookup api.mem0.ai fe80::1 2>&1 | tail -6; done
+
+OUT
+--- attempt 1 ---
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+--- attempt 2 ---
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+--- attempt 3 ---
+Name:    api.mem0.ai
+Addresses:  35.155.69.186
+	  52.37.167.56
+	  35.85.175.198
+	  54.187.129.55
+
+--- attempt 4 ---
+Name:    api.mem0.ai
+Addresses:  35.155.69.186
+	  52.37.167.56
+	  35.85.175.198
+	  54.187.129.55
+
+--- attempt 5 ---
+Name:    api.mem0.ai
+Addresses:  54.187.129.55
+	  35.85.175.198
+	  52.37.167.56
+	  35.155.69.186
+Root cause found. Your Wi-Fi adapter is configured with fe80::1 (a link-local IPv6 address on your router) as its DNS resolver, and Windows prefers IPv6 resolution first. Testing that resolver directly 5x in a row: it timed out on attempts 1–2, then succeeded on 3–5 — it's genuinely flaky/overloaded, not something on your end.
+
+Contrast: 192.168.1.1 (same router, over IPv4) is also configured but only gets tried as fallback after the IPv6 one times out (~2s per failed query, ×3 retries in nslookup's default behavior — matches the delay you saw).
+
+So: it's your router's IPv6 DNS service intermittently failing to resolve/forward queries, most likely because the router is slow or dropping requests to its upstream (ISP) resolver over IPv6, while its own IPv4 path and any cached/common domains (google.com) are fine.
+
+Two ways to stop it from biting you:
+
+Quick app-level fix: point Python/the OS at a reliable public resolver (8.8.8.8 / 1.1.1.1) instead of the router, at least for this network adapter.
+Router-level fix: the router itself is the flaky resolver — a reboot of the router, or disabling its IPv6 DNS advertisement, would address it for all apps, not just this one.
+AskUserQuestion
+OUT
+The user answered: "Want me to change your Wi-Fi adapter's DNS servers to a reliable public resolver (8.8.8.8/1.1.1.1) to stop this from recurring?"="If i use the local server for mem0 using docker (which is do-able as per mem0 docs) will this issue be solved?". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.
+Partially — it depends on which lookup you mean.
+
+The mem0 part: yes, this fixes it. Self-hosting mem0 via Docker replaces MemoryClient() (which resolves api.mem0.ai over the internet) with a local Memory instance pointing at localhost/127.0.0.1 or a Docker Compose service name. Loopback/Docker-internal addresses don't go through your flaky Windows/router DNS resolver at all — so that specific getaddrinfo failed failure mode disappears entirely for mem0 calls.
+
+But it doesn't fix the underlying router issue. Your main.py also calls ChatOpenAI(base_url=CUSTOM_API_BASE, ...) — an external LLM endpoint. That hostname still resolves through the same flaky fe80::1 router resolver, so you could still hit intermittent DNS timeouts there (or on any other external call: embeddings, Chroma telemetry, etc.). Self-hosting mem0 only removes one of several things going out to the internet — it's a workaround for that one dependency, not a fix for the DNS flakiness itself.
+
+If you want it actually fixed everywhere rather than avoided per-service, the DNS server change I offered earlier is the one that does that.
+
+mem0ai/mem0
+
+Consider I m using mem0 locally-hosted using docker, 
+- Does mem0 provide persistant storage of all of my interactions? Does it required a database (like mongoDB) setup or does the database comes within the local server?
+- Does mem0 provide the persistant storage of both positive and negative episodic memories?
+- Does mem0 provide CRUD and consolidation operations on memories?
+- Does mem0 provide semantic search on persistantly stored memories?
+
+
+
+1. Persistent Storage — Built-in, no external DB needed
+
+The Docker stack bundles PostgreSQL + pgvector — no separate MongoDB or external database setup required. All memories are persisted in this bundled Postgres instance. You can optionally override it with your own via POSTGRES_* env vars. See Self-Hosted Setup.*_
+
+2. Positive & Negative Episodic Memories
+
+Mem0 supports episodic memory (summaries of past interactions) as a long-term memory type. It also has a Feedback API where you can tag memories as POSITIVE, NEGATIVE, or VERY_NEGATIVE — but this is a feedback/rating mechanism, not automatic emotional tagging.
+
+3. CRUD + Consolidation
+
+Yes — full CRUD is supported: add, get, update, delete, and bulk delete. Consolidation (deduplication) happens automatically at write time — Mem0 checks existing memories to avoid storing duplicate facts.
+
+4. Semantic Search
+
+Yes — Mem0 provides hybrid semantic search combining vector similarity, BM25 keyword matching, and entity matching, all fused into a single relevance score. See Search Memories.
+
+Does mem0's use require tool-calling? My local server's LLM doesnt allow tool-calls
+
+Yes, Mem0 requires tool-calling support from the LLM — this is a hard requirement. The Ollama docs explicitly state: "These models support tool calling", implying only tool-calling-capable models work.
+
+Switch to an Ollama model that supports tool-calling — Ollama hosts many local models with tool-call support (e.g., llama3.1, mixtral). You can browse them at ollama.com/search?c=tools.
+1. Use vLLM — if your model is served via vLLM, Mem0 supports it as an LLM provider, though tool-calling support still depends on the underlying model. 
+2. The LLM in Mem0 is used internally to extract and manage memories (deciding what to store/update/delete), which requires structured JSON responses — hence the tool-calling dependency. 
+Worked for 1m 10s
+
+The earlier answer is partly incorrect—especially the claim that Mem0 has a hard tool-calling requirement.
+
+Based on the current Mem0 repository:
+
+Question	Correct answer
+Persistent storage?	Yes, for extracted memories—not automatically every complete interaction.
+Database included?	The self-hosted Docker stack includes PostgreSQL + pgvector.
+Positive/negative episodic memories?	They can be stored, but OSS does not provide a special positive/negative episodic-memory system automatically.
+CRUD?	Yes.
+Consolidation?	Limited automatic extraction and deduplication; not full semantic consolidation in the current v3 pipeline.
+Semantic search?	Yes, with optional hybrid signals.
+Tool-calling required?	No—not in current Mem0 OSS v3.
+1. Persistent storage and raw interactions
+
+The Docker stack includes PostgreSQL with pgvector and a persistent Docker volume. You do not need MongoDB. You must configure credentials, but the database container is included. Removing the Docker volume deletes the stored data. See the self-hosted server README.
+
+However, Mem0 should not be described as storing “all interactions.”
+
+With the default infer=True, Mem0:
+
+receives conversation messages;
+uses an LLM to extract useful memory statements;
+stores those extracted memories.
+
+Therefore, it is a memory database, not necessarily your authoritative conversation-history database. You should continue storing complete interactions in MongoDB if you need full transcripts, feedback records, auditability, or reprocessing.
+
+You can use infer=False to store the supplied messages directly without LLM extraction:
+
+memory.add(
+    messages,
+    user_id="user-123",
+    infer=False
+)
+
+This path embeds and persists messages without calling the LLM. See Memory.add().
+
+2. Positive and negative episodic memories
+
+Mem0 can persist both successful examples and failure lessons, but “positive” and “negative” are not distinct built-in OSS memory classes.
+
+For your system, you could use metadata:
+
+metadata={
+    "memory_kind": "failure_lesson",
+    "quality": "negative",
+    "source": "user_thumbdown"
+}
+
+Mem0’s POSITIVE, NEGATIVE, and VERY_NEGATIVE feedback feature belongs to the Mem0 Platform/client feedback API. It rates a stored memory; it does not automatically convert a negative interaction into a reusable failure lesson. See the feedback documentation.
+
+Thus, you would still need your own pipeline to turn a thumb-down into something useful such as:
+
+When answering queries about X, do not use Y because it caused Z; instead, apply A.
+
+Then store that lesson in Mem0.
+
+3. CRUD and consolidation
+
+Mem0 provides explicit operations to:
+
+add memories;
+retrieve one or all memories;
+update memories;
+delete individual memories;
+delete memories by scope;
+inspect memory history.
+
+But the description of “automatic consolidation” needs qualification. In the current OSS v3 addition pipeline, Mem0 retrieves related memories, asks the LLM for additive memory extraction, and performs hash-based duplicate checking. That is useful extraction and deduplication, but it is not necessarily full semantic merging of multiple memories into one continuously rewritten summary.
+
+For your failed_variants and user_thumbdowns, you may still need a scheduled consolidation process that combines repeated failure lessons into a concise procedural memory.
+
+4. Semantic search
+
+Yes. Mem0 embeds the query and searches persistent vector storage. Current OSS search can combine:
+
+vector similarity;
+BM25 keyword score, when supported by the vector store;
+entity-based score boosts;
+optional reranking;
+metadata filters.
+
+PostgreSQL/pgvector is listed as supporting the keyword-search component, so the included server backend can provide hybrid retrieval. See the search implementation documentation.
+
+5. Does your LLM need tool-calling?
+
+No. Current Mem0 OSS v3 does not require the memory-extraction LLM to call tools.
+
+The present pipeline calls the LLM with:
+
+response_format={"type": "json_object"}
+
+It then parses a JSON response containing extracted memories. It does not pass a tool definition in that extraction call. Therefore, your model needs to reliably produce structured JSON—not native function/tool calls.
+
+There are three possibilities:
+
+Your server supports OpenAI-compatible response_format
+
+Normal infer=True operation should be possible.
+
+Your model returns valid JSON but rejects response_format
+
+You may need a small Mem0 provider adapter or OpenAI-compatible proxy that removes the unsupported parameter while keeping the JSON instructions.
+
+Your model cannot reliably return structured JSON
+
+Use infer=False and perform memory extraction using your existing distillation pipeline before passing the final memory text to Mem0.
+
+One additional complication: the standard self-hosted server image currently bundles only OpenAI, Anthropic, and Gemini LLM providers by default. Using Ollama, vLLM, or your own OpenAI-compatible local server may require adding its dependency/provider configuration and rebuilding the server image. See the self-hosted setup documentation.
+
+For your architecture, the safest arrangement is:
+
+MongoDB
+  └── Complete interactions and feedback—the source of truth
+
+Your distillation pipeline
+  ├── Successful QA/example memories
+  └── Consolidated failure lessons
+
+Mem0 + PostgreSQL/pgvector
+  └── Persistent, searchable long-term memories
+
+So your non-tool-calling local LLM does not automatically disqualify Mem0. The important test is whether it can produce reliable JSON—or whether you use infer=False.
+
+
+
+https://github.com/mem0ai/mem0
+Consider I m using mem0 locally-hosted using docker, - Does mem0 provide persistant storage of all of my interactions? Does it required a database (like mongoDB) setup or does the database comes within the local server? - Does mem0 provide the persistant storage of both positive and negative episodic memories? - Does mem0 provide CRUD and consolidation operations on memories? - Does mem0 provide semantic search on persistantly stored memories? 1. Persistent Storage — Built-in, no external DB needed The Docker stack bundles PostgreSQL + pgvector — no separate MongoDB or external database setup required. All memories are persisted in this bundled Postgres instance. You can optionally override it with your own via POSTGRES_* env vars. See Self-Hosted Setup.*_ 2. Positive & Negative Episodic Memories Mem0 supports episodic memory (summaries of past interactions) as a long-term memory type. It also has a Feedback API where you can tag memories as POSITIVE, NEGATIVE, or VERY_NEGATIVE — but this is a feedback/rating mechanism, not automatic emotional tagging. 3. CRUD + Consolidation Yes — full CRUD is supported: add, get, update, delete, and bulk delete. Consolidation (deduplication) happens automatically at write time — Mem0 checks existing memories to avoid storing duplicate facts. 4. Semantic Search Yes — Mem0 provides hybrid semantic search combining vector similarity, BM25 keyword matching, and entity matching, all fused into a single relevance score. See Search Memories. Does mem0's use require tool-calling? My local server's LLM doesnt allow tool-calls Yes, Mem0 requires tool-calling support from the LLM — this is a hard requirement. The Ollama docs explicitly state: "These models support tool calling", implying only tool-calling-capable models work. Switch to an Ollama model that supports tool-calling — Ollama hosts many local models with tool-call support (e.g., llama3.1, mixtral). You can browse them at ollama.com/search?c=tools. 1. Use vLLM — if your model is served via vLLM, Mem0 supports it as an LLM provider, though tool-calling support still depends on the underlying model. 2. The LLM in Mem0 is used internally to extract and manage memories (deciding what to store/update/delete), which requires structured JSON responses — hence the tool-calling dependency.
+
+Show less
+
+Deciphering user's actual needs beyond answered questions
+Deciphering user's actual needs beyond answered questions
+I'll verify these claims against the actual repo and docs, since several of them look like they conflate Mem0's hosted platform with the open-source self-hosted version.
+
+
+Reconciling memory extraction mechanisms with hybrid search capabilities
+Reconciling memory extraction mechanisms with hybrid search capabilities
+Let me check the actual self-hosted server stack.
+
+
+Searched the web
+Searched the web
+Now the key question — the tool-calling claim. Let me check the source and Ollama docs.
+
+
+Reconciled platform-specific features with open-source capabilities and corrected tool-calling misconceptions
+Reconciled platform-specific features with open-source capabilities and corrected tool-calling misconceptions
+Several of those answers are right in outline but wrong in detail, and two are wrong in ways that matter for your setup. Mem0 shipped a new memory algorithm ("v3") in April 2026 that changed the write pipeline substantially, and the answers you have look like they describe the pre-v3 version plus some Platform-only features.
+
+1. Persistent storage — mostly correct
+The server/ Docker Compose stack bundles Postgres with pgvector (image pgvector/pgvector:pg17, data on a named postgres_db volume), the FastAPI API on 8888, and now a mem0-dashboard container on 3000. No MongoDB, no external DB. POSTGRES_* env vars override it, as you had. 
+GitHub
+GitHub
+
+Two corrections worth knowing before you docker compose up:
+
+JWT_SECRET is now required — auth is on by default, and the server refuses to start without it. AUTH_DISABLED=true exists for local dev only. POSTGRES_PASSWORD is likewise mandatory now.
+Neo4j is gone. Blog posts describing "three containers: API, Postgres, Neo4j" are stale. In v3, external graph store support was removed from the open-source SDK entirely (~4000 lines, including Neo4j/Memgraph/Kuzu/AGE/Neptune) and replaced by built-in entity linking that stores entities in a parallel {collection}_entities collection in your existing vector store.
+One conceptual point: this persists extracted facts, not your raw interactions. If you want verbatim turns stored, pass infer=False on add() — more on that below.
+
+2. Positive/negative episodic memory — this one is wrong for self-hosted
+The Feedback API is a Platform-only feature. It lives on MemoryClient (the hosted client): client.feedback(memory_id=..., feedback="POSITIVE", feedback_reason=...), documented under Platform → Features → Feedback Mechanism. The OSS Memory class and the self-hosted REST server don't expose it. Nor is there an episodic-vs-semantic type field or any valence tagging in the OSS store — the memory-type taxonomy in the docs is conceptual framing, not a schema. 
+GitHub
+
+If you want positive/negative episodic memories locally, you implement it yourself: store the valence in metadata on add() and filter on it at search time. That works fine, it's just your code, not a Mem0 feature.
+
+3. CRUD yes — "consolidation" no longer means what that answer says
+CRUD is fine: add, get, get_all, update, delete, delete_all, history, all exposed over REST too.
+
+But automatic write-time consolidation was removed in v3. Extraction is now single-pass ADD-only: one LLM call, no UPDATE/DELETE. add() returns ADD events only, and the ADD-only model means memories accumulate — when information changes, the new fact is stored alongside the old one, and retrieval handles ranking. What remains at write time is thin: the top-10 related existing memories are passed in as deduplication context, plus MD5 hash-based dedup that prevents exact duplicates.
+
+So contradiction resolution moved from write time to ranking time. If your application needs genuine consolidation (merging or retiring superseded facts), you'll be building that on top of update/delete yourself.
+
+4. Semantic search — correct, with a dependency catch
+Hybrid search is now in OSS, not just Platform: semantic + BM25 keyword + entity matching, scored in parallel and fused into one score. But it degrades silently if you don't install the extras — without spaCy (pip install "mem0ai[nlp]" plus python -m spacy download en_core_web_sm) you get semantic-only: no entity extraction, no BM25 lemmatization. BM25 is a boost signal, not a recall expander: only semantic results are candidates.
+
+Also mind the new v3 defaults, which will change your results: top_k dropped from 100 to 20, threshold from None to 0.1, rerank from True to False, and entity IDs must now go inside a filters dict — passing user_id= as a top-level kwarg to search() raises ValueError.
+
+5. Tool calling — not required. This is the important correction.
+Mem0's memory pipeline needs reliable JSON output, not tool calls. Look at the Ollama provider: tools is an optional parameter (if tools: params["tools"] = tools), and when Mem0 asks for JSON it uses Ollama's native structured-output path — params["format"] = "json" plus an appended nudge, "Please respond with valid JSON only." The core pipeline calls with response_format={"type": "json_object"}, and failures show up as JSON parse errors, not missing-tool errors — as in the open issue where the vLLM provider drops response_format and memory extraction fails with Invalid JSON response: Expecting value: line 1 column 1. 
+GitHub
+GitHub
+
+The part of Mem0 that genuinely did require tool calling was graph memory — and as noted, that's been deleted from OSS. The docs line "these models support tool calling" is a recommendation on a page that predates the change, not a hard gate.
+
+Practical implications for your no-tool-call local model:
+
+Prefer an OpenAI-compatible endpoint over the native providers. Serve your model via vLLM's or Ollama's OpenAI-compatible API and configure provider: "openai" with a custom base URL. That path forwards response_format correctly and sidesteps issue #4607. It also matters because the shipped server container only bundles packages for openai, anthropic, and gemini LLMs — adding another provider means editing server/requirements.txt, extending BUNDLED_LLM_PROVIDERS in server/main.py, and rebuilding the image. Using the openai provider against localhost avoids all of that.
+Use constrained decoding if your server supports it (vLLM guided JSON / Ollama format). Small models drift on JSON structure; grammar constraints make malformed output impossible.
+infer=False is your escape hatch. m.add(messages, user_id="alice", infer=False) stores raw messages without inference — no LLM call at all on the write path. You still get embeddings, persistence, and semantic search; you just lose automatic fact extraction. You can pair this with your own extraction step if you want control. 
+Mem0
+v3 actually helps you here: one extraction call instead of the old two-call extract-then-diff sequence, and the removed call was the harder one for small models to get right. Check which version your image is on — if you pulled an older tag, you're on the two-call pipeline.

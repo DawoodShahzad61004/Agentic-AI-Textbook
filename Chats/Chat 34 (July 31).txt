@@ -1,0 +1,546 @@
+I have to design or use an existing workflow from a library or any such thing...but it has to be open source and locally deployable.
+
+I use codex, claude code etc as coding agents. But these and other agents have token limits. 
+What I need is:
+I give the instructions of the tasks I need to get done to this workflow. Then, it checks for the graphify skill, the current situation of graphify's graph and the token availability. Based on this it decides which agent should perform the graphify work (if needed). 
+Then, it checks the token availability of the agents and decide which agent shall do the planning. Using, all the given info it has and reading files using the graphify's graph...the selected coding agent creates a To-Do List.
+The second agent receives this list and should verify it is enough for all the work that needs to be done.
+The first agent then starts to complete the tasks one-by-one and the other agent verifies its working.
+If at any point, one agent token limit is finished or is insufficient for the given task, the other agent should do it all by itself.
+
+Show less
+
+README.md
+md
+
+I have already done a simple but detailed project on LangGraph.
+
+Answer briefly:
+LangGraph has functions simply, python scripts. How can I integrate codex, claude-code, github-copilot and other coding agents in a graph constructed with LangGraph?
+
+
+Consulted documentation to contextualize integration strategies
+Consulted documentation to contextualize integration strategies
+Good context — you already know StateGraph, nodes-as-functions, conditional routing. That part transfers directly. What's new is just: a node is a function that shells out instead of one that calls an LLM.
+
+The pattern, in three pieces:
+
+Wrap each CLI as a plain Python function, same signature shape as any node you've already written — (state: GraphState) -> dict. Inside, subprocess.run([...], capture_output=True).
+python
+def agent_a_node(state: GraphState) -> dict:
+    result = subprocess.run(
+        ["claude", "-p", state["current_task"],
+         "--output-format", "json",
+         "--permission-mode", "acceptEdits"],
+        cwd=state["repo_path"], capture_output=True, text=True, timeout=1800,
+    )
+    payload = json.loads(result.stdout)
+    return {"last_output": payload, "quota_a": read_quota_a()}
+
+def codex_node(state: GraphState) -> dict:
+    result = subprocess.run(
+        ["codex", "exec", state["current_task"], "--json"],
+        cwd=state["repo_path"], capture_output=True, text=True, timeout=1800,
+    )
+    return {"last_output": json.loads(result.stdout), "quota_b": read_quota_b()}
+builder.add_node("agent_a", agent_a_node) — identical to wiring in an LLM node.
+
+Copilot is the odd one out — it has no scriptable headless CLI in the same sense (gh copilot suggest is interactive/advisory, not agentic-loop capable). Treat it as a tool call inside a node rather than its own node: shell out to gh copilot suggest, parse the suggestion, feed it back into state for the primary agent to apply. Don't expect it to own a task end-to-end the way Claude Code/Codex can.
+Return values become graph state, not chat history. state["last_output"], state["quota_a"] flow into your existing route_next conditional edge exactly like any other state field already does in app_workflow/. That's the whole integration — LangGraph doesn't know or care that the "reasoning" happened outside the process. To it, agent_a_node looks identical to judge_llm_node.
+One thing to carry over from your project specifically: you already have services/operation_tracing.py bounding what gets logged into traces. Route subprocess stdout/stderr through the same policy before it lands in a checkpoint — CLI output can be large and you don't want it blowing up your Langfuse/Phoenix payloads or your SQLite checkpoint size.
+
+Is there a way that i putt a new skill (SKILL.md file) in the LangGraph (or in its directory) somewhere and both the coding agents are able to use it?
+
+
+Weighed shared skill placement strategies and prompt injection reliability
+Weighed shared skill placement strategies and prompt injection reliability
+Yes — but the native "put a file somewhere and it's auto-discovered" mechanism differs per agent, and in headless/subprocess mode you shouldn't trust auto-discovery at all. Two layers:
+
+Layer 1 — one canonical file, not two. Keep a single source of truth outside either agent's convention:
+
+repo/
+├── skills/
+│   └── graphify/
+│       ├── SKILL.md
+│       └── scripts/...
+├── .claude/skills/graphify -> ../../skills/graphify   # symlink
+└── AGENTS.md                                          # references skills/graphify/SKILL.md
+Claude Code discovers skills under .claude/skills/, so a symlink into your canonical folder satisfies that convention without duplicating content. Codex has no native skills folder — it reads AGENTS.md at repo root — so AGENTS.md just needs a line like "Before graph-related tasks, read skills/graphify/SKILL.md." One file, two doorways.
+
+Layer 2 — don't rely on that in your LangGraph pipeline. Auto-discovery is a nicety for interactive sessions; it's not guaranteed to trigger reliably in a one-shot -p/exec headless call, and you have no visibility into whether it fired. Since your orchestrator already constructs the prompt string before calling subprocess.run, just read the skill and inject it explicitly — deterministic, agent-agnostic, and you can log exactly what was sent:
+
+python
+def load_skill(name: str) -> str:
+    return (SKILLS_DIR / name / "SKILL.md").read_text()
+
+def agent_a_node(state: GraphState) -> dict:
+    prompt = f"{load_skill('graphify')}\n\n---\n\nTask: {state['current_task']}"
+    result = subprocess.run(["claude", "-p", prompt, "--output-format", "json"], ...)
+Same function serves the Codex node — same string, same skill, no dependency on either CLI's discovery quirks working the same way. Treat the symlink/AGENTS.md setup as a fallback for when a human runs the agent interactively outside your graph, not as the mechanism your orchestrator depends on.
+
+
+Worked for 17s
+
+Use Sandbox Agent.
+
+It is an open-source universal adapter for controlling existing coding agents through one API, including:
+
+Claude Code
+OpenAI Codex
+OpenCode
+Cursor
+Amp
+Pi
+
+You can program your orchestrator to select or alternate agents by task:
+
+const agent =
+  task.type === "architecture" ? "claude" :
+  task.type === "implementation" ? "codex" :
+  "opencode";
+
+await client.createSession(task.id, {
+  agent,
+  permissionMode: "auto",
+});
+
+It normalizes sessions, streaming events, permissions, cancellation, and responses. However, it does not automatically determine which agent is best—that routing logic is something you construct, potentially using LangGraph.
+
+So the best stack for your requirement is:
+
+Sandbox Agent + LangGraph
+
+Sandbox Agent: launches and controls Claude Code, Codex, etc.
+LangGraph: decides the sequence—such as Claude plans → Codex implements → Claude reviews → Codex fixes.
+
+Gemini CLI is not currently listed as a first-class Sandbox Agent adapter, so you would need to add a custom adapter or invoke Gemini separately. “DeepSeek” is a model rather than a coding-agent CLI; it can be accessed through an agent such as OpenCode or Aider.
+
+Give me 10 libraries/frameworks (not necessarily open source) that complete tasks by ALTERING between claude code, codex etc (coding agents) AS NEEDED while MAINTAING SESSION CONTEXT.
+Worked for 34s
+
+Yes—there are now several projects aimed at coordinating existing coding agents. However, they differ substantially in what “maintaining session context” means.
+
+Important distinction:
+
+Claude Code’s internal session cannot literally become a Codex session. Cross-agent continuity is maintained through structured handoff summaries, shared Git state, task records, event transcripts, and each agent’s native resumable session ID.
+
+Here are the 10 strongest candidates as of July 31, 2026.
+
+#	Library/framework	Agents	How context is maintained	Automatic alternation?	Fit
+1	Maestro Orchestrate	Claude, Codex, Gemini, Qwen	Persistent sessions, shared task state and orchestration artifacts	Yes—role and workflow based	9/10
+2	Claw Orchestrator	Claude, Codex, Gemini, Cursor, custom CLIs	Named persistent sessions, event history and shared runtime	Yes—programmable routing	9/10
+3	Codex Orchestrator	Claude Code + Codex	Run directory, task requirements, commits, reports and resumable Codex sessions	Yes—within a defined Claude/Codex workflow	9/10
+4	The Pair	OpenCode, Claude, Codex, Gemini	Shared event stream and structured handoff prompts	Yes—planner/executor alternation	8.5/10
+5	Sandbox Agent	Claude, Codex, OpenCode, Cursor, Amp, Pi	Universal session/event schema suitable for storage and replay	Routing must be constructed	8.5/10
+6	AgentOS	Claude, Codex, OpenCode, Pi, ACP agents	Universal transcript format and resumable ACP sessions	Routing must be constructed	8/10
+7	Agent Orchestrator	Claude, Codex, Cursor, Kimi, OpenCode, others	Persistent terminals, branches, PRs and feedback loops	Mostly supervised routing	8/10
+8	claude-codex-gemini	Gemini + Claude Code + Codex	Task files and separately persisted Codex plan/review session IDs	Yes—fixed role routing	7.5/10
+9	Session Orchestrator	Claude, Codex, Cursor, Pi	Research, plan, execution waves, verification results and closure artifacts	Workflow-driven, but limited dynamic routing	7/10
+10	CLI Continues	Claude, Codex, Gemini, Copilot, OpenCode	Generates portable handoff documents from existing native sessions	No—it is a context-transfer layer	7/10
+Best matches
+1. Maestro Orchestrate — closest complete framework
+
+This is currently the closest match to your literal requirement:
+
+Supports Claude Code, Codex, Gemini CLI and Qwen Code.
+Provides persistent sessions.
+Assigns different specialist roles to different agents.
+Supports delegation, review and debugging workflows.
+Can move work between agents during a larger task.
+Apache-2.0 licensed.
+
+The downside is that it comes with an opinionated set of specialists and workflows. It is closer to a ready-made orchestration platform than a low-level construction library.
+
+2. Claw Orchestrator — best neutral multi-CLI runtime
+
+Claw Orchestrator exposes Claude Code, Codex, Gemini, Cursor and custom coding CLIs through one runtime. It provides commands such as:
+
+clawo session-start implementation --engine codex --cwd .
+clawo session-send implementation "Implement the approved plan"
+
+It is a strong option if you want persistent named sessions while retaining control over routing.
+
+3. Codex Orchestrator — best Claude + Codex combination
+
+It implements a concrete workflow:
+
+Claude plans
+→ Codex reviews
+→ Claude delegates
+→ Codex implements
+→ Claude verifies
+→ Codex fixes
+→ Claude accepts or rejects
+
+Context is carried through run artifacts, task requirements, commits, verification evidence and resumable sessions. Its main limitation is that it is designed specifically around Claude as the controlling agent and Codex as the implementation/review agent.
+
+4. The Pair — best simple planner/executor alternation
+
+The Pair provides:
+
+A planning “Mentor.”
+An implementation “Executor.”
+Structured handoffs between them.
+Quality gates.
+A unified event timeline.
+Support for Claude, Codex, Gemini and OpenCode.
+
+It is attractive when your desired workflow is primarily:
+
+Agent A plans/reviews ⇄ Agent B implements/fixes
+Best option for constructing your own system
+
+For your stated goal of building the orchestration instead of adopting predefined agents, I would use:
+
+Sandbox Agent + LangGraph + persistent task packets
+
+Sandbox Agent normalizes agent execution:
+
+session = start_session(
+    agent="claude",
+    task_id="feature-142",
+    workspace="worktrees/feature-142"
+)
+
+LangGraph decides when to switch:
+
+def select_agent(state):
+    if state["phase"] == "architecture":
+        return "claude"
+    if state["phase"] == "implementation":
+        return "codex"
+    if state["phase"] == "large_codebase_analysis":
+        return "gemini"
+    return "opencode"
+
+Before switching agents, persist a canonical context packet:
+
+{
+  "task_id": "feature-142",
+  "objective": "Add persistent semantic memory",
+  "requirements": [],
+  "decisions": [],
+  "completed_steps": [],
+  "remaining_steps": [],
+  "files_changed": [],
+  "git_commit": "abc123",
+  "tests": {},
+  "failed_attempts": [],
+  "current_agent_sessions": {
+    "claude": "claude-session-id",
+    "codex": "codex-session-id"
+  }
+}
+
+The next agent receives this packet, current Git diff and relevant repository instructions. If control later returns to the previous agent, resume its native session and inject changes made since it last ran.
+
+Final shortlist for you
+
+I would test these in this order:
+
+Maestro Orchestrate — if you want something already capable of completing coordinated tasks.
+Claw Orchestrator — if you want a neutral cross-agent runtime.
+Sandbox Agent + LangGraph — if you want to construct a production-grade custom orchestrator.
+Codex Orchestrator — if Claude Code and Codex are your two primary agents.
+The Pair — if planner/executor alternation covers your workflow.
+
+For your existing LangGraph experience and your requirement that the framework help you construct the orchestration, Sandbox Agent + LangGraph remains the most architecturally appropriate choice. But if you want a single existing project that already performs cross-agent delegation, start by testing Maestro Orchestrate and Claw Orchestrator.
+
+Create a checklist that u think i m looking for.
+Do not give unncessary words. Just the checklist
+Worked for 14s
+ Orchestrates existing coding agents—not internally created agents
+ Supports Claude Code
+ Supports OpenAI Codex
+ Supports Gemini CLI
+ Supports OpenCode/Aider or custom agent adapters
+ Dynamically selects the most suitable agent for each task
+ Switches agents during the same task when needed
+ Supports planner → implementer → reviewer → fixer workflows
+ Maintains one canonical task context across agents
+ Preserves objectives, requirements, constraints, and acceptance criteria
+ Records decisions, completed work, remaining work, and failed attempts
+ Transfers relevant conversation transcripts between agents
+ Stores each agent’s native resumable session ID
+ Resumes an earlier agent when control returns to it
+ Shares current files, Git diff, commits, and test results
+ Uses isolated Git worktrees, containers, or sandboxes per task
+ Supports parallel and sequential agent execution
+ Detects task completion using deterministic checks
+ Runs tests, linting, type checks, and security checks
+ Sends failed checks back to an appropriate agent for correction
+ Supports independent agent review before acceptance
+ Prevents conflicting edits and unsafe merges
+ Provides cancellation, timeout, retry, and recovery
+ Persists workflow state across crashes and restarts
+ Streams normalized events from every supported agent
+ Maintains complete logs, traces, costs, and audit history
+ Supports human approval gates
+ Exposes an API or SDK for constructing custom workflows
+ Allows configurable agent-routing policies
+ Allows adding new coding-agent adapters
+ Works on Windows/WSL/Linux or through Docker
+ Can operate locally without mandatory cloud infrastructure
+ Supports long-running and resumable tasks
+ Actively maintained with usable documentation
+ Preferably open source with a permissive license
+ Completes end-to-end tasks—not merely launches multiple terminals
+ Does not falsely claim to transfer hidden token-level state between vendors
+
+
+
+ Worked for 56s
+Best combination
+
+Claw Orchestrator + your existing LangGraph + MongoDB + Git worktrees + Phoenix
+
+Do not combine several full orchestrators such as Claw, Agent Orchestrator, The Pair, and agentOS. Their responsibilities overlap and would increase integration time, failure points, and resource usage.
+
+Component responsibilities
+Component	Responsibility
+Claw Orchestrator	Runs Claude Code, Codex, Gemini/Antigravity, OpenCode, and custom CLI agents; manages sessions and normalized runtime interaction
+LangGraph	Dynamic routing, agent switching, planner → implementer → reviewer → fixer workflow
+MongoDB	Canonical task context, workflow checkpoints, decisions, failures, session IDs, audit events
+Git worktrees	Parallel agent isolation and controlled merging
+Deterministic check runner	Tests, lint, types, security, acceptance commands
+Phoenix/OpenTelemetry	Traces, latency, events, errors, and observability
+Docker/WSL2	Reproducible Windows-compatible execution
+
+Claw already supplies persistent programmable sessions, multiple external CLI engines, custom engines, parallel councils, event streaming, cost estimates, and Planner/Coder/Reviewer loops. Its current code supports Claude Code, Codex, Gemini, OpenCode and custom CLI integration, although recent documentation recommends Google Antigravity as Gemini CLI’s successor. Claw Orchestrator, Claw changelog
+
+Why this is the best choice
+
+You already have:
+
+LangGraph workflow experience
+MongoDB transactional persistence
+Docker-based services
+Phoenix/OpenTelemetry tracing
+Structured error handling and retries
+Request-scoped workflow configuration
+Deterministic batch testing infrastructure
+
+These are documented in your 
+05-Architecture.md, 
+02-Status.md, and 
+06-README.md.
+
+Therefore, you only need to add the missing coding-agent execution and routing layer—not adopt an entirely new orchestration platform.
+
+Recommended routing policy
+
+Use deterministic rules first and an LLM router only for ambiguous tasks:
+
+Task	Primary agent	Alternative
+Architecture and planning	Claude Code	Gemini
+Feature implementation	Codex	Claude Code
+Large-context repository analysis	Gemini/Antigravity	Claude Code
+Mechanical edits/refactoring	OpenCode or Aider	Codex
+Independent review	Agent different from implementer	—
+Test/CI correction	Original implementer session	Codex fixer
+Security review	Claude Code or Gemini	Separate session
+
+Example workflow:
+
+What requires custom implementation
+
+Only four relatively thin components:
+
+Agent router
+
+Selects an engine based on task type, required tools, complexity, cost, previous success, and availability.
+
+Canonical task-state schema
+
+Store:
+
+Objective
+Requirements and constraints
+Acceptance criteria
+Decisions
+Completed and remaining work
+Failed attempts
+Agent/session IDs
+Git/worktree state
+Check results
+Relevant transcript summaries
+Verification manifest
+checks:
+  - name: unit-tests
+    command: pytest
+    timeout: 600
+  - name: lint
+    command: ruff check .
+  - name: types
+    command: mypy .
+  - name: security
+    command: bandit -r app
+
+Exit codes—not an LLM—determine whether each check passes.
+
+Handoff builder
+
+Before switching agents, provide only:
+
+Canonical objective and constraints
+Relevant decisions
+Current Git diff
+Check failures
+Remaining work
+Native session reference when available
+Expected checklist coverage
+Status	Requirements
+Covered primarily by Claw	External CLI agents, multi-engine adapters, sessions, parallel execution, custom adapters, event streaming, local operation
+Covered by LangGraph	Dynamic routing, mid-task switching, workflow phases, retry branches, human gates
+Covered by MongoDB	Crash-safe workflow state, canonical context, decisions, audit records, long-running task resumption
+Covered by Git + check runner	Shared files, diffs, commits, tests, deterministic completion
+Covered by Phoenix	Traces, event history, errors, duration and observability
+Must be honestly qualified	Native resumption depends on what each vendor CLI exposes; otherwise resume from explicit transcript and canonical state
+Final recommendation
+
+Use:
+
+Claw Orchestrator as the external-agent runtime, while keeping LangGraph as the actual supervisor.
+
+Avoid adding The Pair, agentOS, Sandbox Agent, or Agent Orchestrator initially. Add one only if Claw proves unable to provide a required runtime capability.
+
+This combination offers the best balance:
+
+Least implementation: reuses most of your existing stack
+Best performance: lightweight routing over direct CLI sessions
+Best extensibility: LangGraph routing plus Claw custom engines
+Best reliability: MongoDB checkpoints and deterministic checks
+Best transparency: explicit context handoffs without claiming hidden cross-vendor state transfer
+05-Architecture.md
+Document
+02-Status.md
+Document
+06-README.md
+Document
+List 10 names for this project
+Worked for 22s
+AgentWeave
+ContextRelay
+PolyAgent
+SessionForge
+AgentSwitch
+ContextMesh
+CodeConductor
+AgentContinuum
+Orchestrix
+RelayForge
+CommandCodeAI/command-code
+
+OpenHands/openhands
+
+- Orchestrates existing coding agents—not internally created agents
+- Supports Claude Code, OpenAI Codex, Gemini CLI, and OpenCode/Aider or custom agent adapters
+- Dynamically selects the most suitable agent for each task
+- Switches agents during the same task when needed
+- Supports planner → implementer → reviewer → fixer workflows
+- Maintains one canonical task context across agents
+- Preserves objectives, requirements, constraints, and acceptance criteria
+- Records decisions, completed work, remaining work, and failed attempts
+- Transfers relevant conversation transcripts between agents
+- Stores each agent’s native resumable session ID
+- Resumes an earlier agent when control returns to it
+- Shares current files, Git diff, commits, and test results
+- Supports parallel and sequential agent execution
+- Detects task completion using deterministic checks
+- Runs tests, linting, type checks, and security checks
+- Sends failed checks back to an appropriate agent for correction
+- Supports independent agent review before acceptance
+- Provides cancellation, timeout, retry, and recovery
+- Persists workflow state across crashes and restarts
+- Streams normalized events from every supported agent
+- Maintains complete logs, traces, costs, and audit history
+- Supports human approval gates
+- Allows configurable agent-routing policies
+- Allows adding new coding-agent adapters
+- Works on Windows or through Docker
+- Can operate locally without mandatory cloud infrastructure
+- Supports long-running and resumable tasks
+- Open source
+- Completes end-to-end tasks—not merely launches multiple terminals
+- Does not falsely claim to transfer hidden token-level state between vendors
+Worked for 1m 1s
+Verdict
+
+Neither project fully satisfies your checklist.
+
+Command Code: Not suitable. It is a standalone proprietary coding agent—not a cross-vendor orchestrator.
+OpenHands Agent Canvas: A strong multi-agent execution platform, but currently lets users select/switch agents manually. It does not dynamically route one task among Claude Code, Codex, Gemini CLI, and others.
+Requirement	Command Code	OpenHands Agent Canvas
+Orchestrates existing external coding agents	❌	🟡 Hosts external ACP agents, but does not supervise them as a team
+Claude Code	❌	✅
+OpenAI Codex	❌	✅
+Gemini CLI	❌	✅
+OpenCode/Aider/custom adapters	❌	🟡 Any ACP-compatible agent; Aider not built in
+Dynamically selects the best agent	❌	❌ User/profile selection
+Switches agents during one task	❌	❌ No automatic cross-agent handoff
+Planner → implementer → reviewer → fixer	❌	🟡 Can be constructed with automations; not a built-in cross-agent pipeline
+Canonical task context across agents	❌	🟡 Conversation state exists, but it is associated with one selected profile
+Preserves requirements and acceptance criteria	🟡 Within its own session	🟡 Within conversation/goal prompts
+Decision/completion/failure ledger	❌	🟡 Conversation history and automation state, not a structured project ledger
+Transfers relevant transcripts	❌	🟡 Supports transcript export and conversation branching, not automatic vendor handoffs
+Stores native agent session IDs	❌	🟡 ACP sessions are managed, but multi-agent native-session mapping is not established
+Resumes an earlier external agent	❌	🟡 Conversation persistence depends on the ACP agent’s session capabilities
+Shares files, Git diff and results	🟡 One agent’s workspace	✅ Shared workspace and Git integration
+Parallel agent execution	❌	🟡 Multiple conversations/automations can run; no coordinated parallel task graph
+Sequential agent execution	❌	🟡 Possible through custom automation
+Deterministic completion checks	❌	❌ /goal uses a judge LLM, not purely deterministic checks
+Runs tests, lint and type checks	✅ Agent can run commands	✅ Agent can run commands
+Built-in security-check pipeline	❌	❌ Requires configuration/prompts
+Routes failed checks to a fixer	❌	🟡 /goal returns judge feedback to the same agent
+Independent review	❌	🟡 Critic/judge functionality exists, but not necessarily a different coding agent
+Cancellation and timeout	🟡 Interactive-process controls	🟡 Agent/automation controls exist
+Retry and recovery	🟡 Within its own operation	🟡 Goal iterations and persistent conversations
+Crash-safe workflow persistence	🟡 Undocumented	🟡 Settings and conversation history persist; complete workflow durability is not guaranteed
+Normalized event streaming	❌	✅ Agent Server provides normalized conversation/action events
+Logs, traces, costs and audit history	❌	🟡 Conversation/event history exists; comprehensive cost/audit tracing is incomplete
+Human approval gates	✅ Interactive approvals	✅ Agent confirmation controls
+Configurable agent-routing policies	❌	❌ Agent profiles are selection/configuration, not routing policies
+Add new adapters	❌	✅ Through ACP-compatible agents
+Windows/Docker	🟡 Node-based; Docker undocumented	✅ Official Docker image and Windows instructions
+Local without mandatory cloud	🟡 CLI is local, but service/model dependencies apply	✅ Self-hosted local operation
+Long-running/resumable tasks	🟡 Single-agent sessions	✅ Long-running backend conversations and automations
+Open source	❌ Repository contains essentially documentation only and no OSS license/source	✅ MIT
+End-to-end task completion	✅ As one coding agent	✅ As one selected agent or custom automation
+No hidden-state-transfer claim	✅	✅
+Command Code
+
+Command Code is categorically different from what you want:
+
+It is a coding agent that learns the user’s coding preferences—not a supervisor over Claude Code, Codex, Gemini CLI, or Aider.
+
+Its public repository currently contains mainly its README and GitHub configuration. The actual implementation and an open-source license are not present, so it should not be classified as open source. Command Code repository
+
+OpenHands
+
+OpenHands Agent Canvas is much closer as an execution layer:
+
+Runs OpenHands, Claude Code, Codex and Gemini CLI.
+Supports additional ACP-compatible agents.
+Provides persisted conversations and branching.
+Provides Docker, Windows and self-hosting.
+Supports automations, live events and shared workspaces.
+Can keep working through /goal, using an LLM judge to request further corrections.
+
+However, a conversation is defined as one agent session using one selected agent profile. Agent Canvas does not currently inspect a task, select Claude for planning, transfer implementation to Codex, send review to Gemini, and later resume Codex automatically. Agent Canvas README, conversation behavior, agent selection
+
+Recommendation
+
+Between these two, use:
+
+OpenHands Agent Canvas as the external-agent execution and session layer, with your LangGraph supervisor above it.
+
+You would still need to implement:
+
+Capability-based routing.
+Canonical cross-agent task state.
+Planner/implementer/reviewer/fixer transitions.
+Vendor-session registry.
+Deterministic verification manifests.
+Automatic failure routing and merge acceptance.
+
+Compared with the earlier recommendation, OpenHands could potentially replace much of Claw’s execution-layer role because it already provides ACP agents, normalized conversations, Docker, Windows support and an active open-source platform. But it does not replace LangGraph as your intelligent supervisor.

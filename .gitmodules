@@ -1,0 +1,3 @@
+[submodule "Code-bases/Paperclip"]
+	path = Code-bases/Paperclip
+	url = https://github.com/DawoodShahzad61004/Paperclip.git

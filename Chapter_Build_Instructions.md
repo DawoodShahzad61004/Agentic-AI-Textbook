@@ -55,15 +55,14 @@ narrower at the foot — leaving room for a discreet header rule and page-number
 
 ### Header and footer
 
-Present but minimal; a single thin gray rule separates each from the body. Empty in
-the reference chapter — chapter title and page number may be added if needed.
+Present but **no text at all** — no chapter title, no page number. Only a single thin
+gray rule separates each from the body.
 
 | Element | Specification |
 | --- | --- |
 | Header rule | Bottom border, single line, color #CCCCCC, size 2 (0.25pt), space 4 |
 | Footer rule | Top border, single line, color #CCCCCC, size 2 (0.25pt), space 4 |
-| Header/footer text font | Times New Roman 9pt, color #888888 (muted gray) |
-| Footer tab stop | Center at 4680 DXA (page-number alignment) |
+| Header/footer text | None — leave empty |
 
 ---
 
@@ -84,7 +83,7 @@ everything machine-shaped. Size ladder: 24 / 16 / 13 / 12 / 11 / 10 / 9 pt, each
 | Italic inline emphasis | Times New Roman | 11pt | Italic, #000000 |
 | Figure caption | Times New Roman | 10pt | Italic, #555555 |
 | Table header | Times New Roman | 11pt | Bold, #FFFFFF on dark blue |
-| Header / footer | Times New Roman | 9pt | Regular, #888888 |
+| Header / footer | — | — | No text — header/footer are empty except for the rule |
 
 ### Paragraph spacing and alignment
 
@@ -108,7 +107,7 @@ read continuously in sequence.
 | Section heading text | #2E74B5 (brand blue) |
 | Sub-section heading text | #1F4D78 (deeper blue) |
 | Caption / figure subtitle text | #555555 (dark gray) |
-| Header / footer text | #888888 (muted gray) |
+| Header / footer text | None — header/footer carry no text, only the rule |
 
 ### Callout box palette (3 variants)
 
@@ -136,15 +135,18 @@ read continuously in sequence.
 Numbered hierarchy `N → N.M → N.M.K`, mirroring the Book Index. The cover page shows
 three centered, increasingly large lines, followed by an italic epigraph in #555555.
 
+All heading levels — cover lines, chapter heading, section, and sub-section — use
+**Times New Roman**, the same font as body text. No other font ever appears in a heading.
+
 | Level | Example | Style |
 | --- | --- | --- |
-| Cover — Part label | PART II — BUILDING THE INGESTION PIPELINE | 12pt bold #555555 centered |
-| Cover — Chapter number | Chapter 4 | 18pt bold #2E74B5 centered |
-| Cover — Title | The Document Structure | 15pt bold black centered |
-| Cover — Epigraph | "Quote here." | 11pt italic #555555 centered |
-| Chapter heading (in flow) | Chapter 4 — The Document Structure | 16pt bold #1A3A5C, left |
-| Section (H2) | 4.1 What a Document Object Really Is | 16pt bold #2E74B5, left |
-| Sub-section (H3) | Layer 1 — What the loader gave you | 13pt bold #1F4D78, left |
+| Cover — Part label | PART II — BUILDING THE INGESTION PIPELINE | Times New Roman, 12pt bold #555555 centered |
+| Cover — Chapter number | Chapter 4 | Times New Roman, 18pt bold #2E74B5 centered |
+| Cover — Title | The Document Structure | Times New Roman, 15pt bold black centered |
+| Cover — Epigraph | "Quote here." | Times New Roman, 11pt italic #555555 centered |
+| Chapter heading (in flow) | Chapter 4 — The Document Structure | Times New Roman, 16pt bold #1A3A5C, left |
+| Section (H2) | 4.1 What a Document Object Really Is | Times New Roman, 16pt bold #2E74B5, left |
+| Sub-section (H3) | Layer 1 — What the loader gave you | Times New Roman, 13pt bold #1F4D78, left |
 
 ---
 

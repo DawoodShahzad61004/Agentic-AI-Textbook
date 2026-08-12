@@ -12,6 +12,11 @@ from docx import Document
 
 
 FILES = {
+    11: ROOT / "Chapters Created So Far" / "Chapter_11_Query_Retrieval_Fundamentals.docx",
+    12: ROOT / "Chapters Created So Far" / "Chapter_12_Advanced_Retrieval_Techniques.docx",
+    13: ROOT / "Chapters Created So Far" / "Chapter_13_Generating_Answers_with_an_LLM.docx",
+    "13B": ROOT / "Chapters Created So Far" / "Chapter_13B_Centralized_LLM_Invocation_and_Error_Handling.docx",
+    14: ROOT / "Chapters Created So Far" / "Chapter_14_Prompt_Engineering_for_RAG.docx",
     "5B": ROOT / "Chapters Created So Far" / "Chapter_5B_Evaluating_Document_Conversion_Engines.docx",
     "7B": ROOT / "Chapters Created So Far" / "Chapter_7B_Chunking_Converted_Documents.docx",
     15: ROOT / "Chapters Created So Far" / "Chapter_15_What_Agentic_Really_Means.docx",
@@ -22,6 +27,11 @@ FILES = {
 }
 
 EXPECTED = {
+    11: ["11.1", "11.2", "11.3", "11.4", "11.5", "11.6", "11.7"],
+    12: [f"12.{i}" for i in range(1, 11)],
+    13: [f"13.{i}" for i in range(1, 10)],
+    "13B": [f"13B.{i}" for i in range(1, 20)],
+    14: [f"14.{i}" for i in range(1, 17)],
     "5B": [f"5B.{index}" for index in range(1, 11)],
     "7B": [f"7B.{index}" for index in range(1, 13)],
     15: ["15.1", "15.2", "15.3", "15.4", "15.5"],

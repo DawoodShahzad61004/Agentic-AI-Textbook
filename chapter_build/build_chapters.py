@@ -2445,7 +2445,1054 @@ The bid remains valid...''',
     return path
 
 
+def diagram_pipeline_11() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400">'
+        '<rect width="1200" height="400" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 42, ["From a question to ranked chunks"], size=28, bold_first=True)
+        + svg_labeled_box(30, 110, 270, 140, "Embed Query", ["EmbeddingManager", "one vector per query"], fill="#F2F2F2")
+        + svg_labeled_box(320, 110, 270, 140, "Search Index", ["ChromaDB k-NN", "docs + learned_qa"], fill="#D9D9D9")
+        + svg_labeled_box(610, 110, 270, 140, "Score + Filter", ["score = 1 - distance", "drop below threshold"], fill="#808080", text_fill="#FFFFFF")
+        + svg_labeled_box(900, 110, 270, 140, "Ranked Top-k", ["sorted, deduped", "ready to prompt"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(300, 180, 318, 180)
+        + svg_arrow(590, 180, 608, 180)
+        + svg_arrow(880, 180, 898, 180)
+        + svg_labeled_box(150, 290, 900, 90, "One embedding call, reused for every collection queried",
+                           ["documents and learned_qa are ranked as two independent lists"], fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter11_pipeline", svg)
+
+
+def diagram_retrieve_separate_11() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="880">'
+        '<rect width="1200" height="880" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Two tracks, one ranking function"], size=27, bold_first=True)
+        + svg_centered_text(990, 78, ["* right track only runs when", "learned_collection.count() > 0"], size=14, gap=20)
+        + '<ellipse cx="600" cy="105" rx="175" ry="44" fill="#2C3E6B" stroke="#000000" stroke-width="4"/>'
+        + svg_centered_text(600, 105, ["retrieve_separate()"], size=19, fill="#FFFFFF", bold_first=True)
+        + svg_arrow(600, 152, 600, 178)
+        + svg_labeled_box(390, 180, 420, 100, "Embed Query Once", ["one query vector feeds", "both collections"], fill="#F2F2F2")
+        + svg_arrow(480, 280, 270, 330)
+        + svg_arrow(720, 280, 930, 330)
+        + svg_labeled_box(60, 335, 340, 110, "Query Documents", ["collection.query(...)", "top_k nearest neighbors"], fill="#D9D9D9")
+        + svg_labeled_box(800, 335, 340, 110, "Query Learned QA", ["collection.query(...)", "top_l nearest neighbors"], fill="#D9D9D9")
+        + svg_arrow(230, 445, 230, 485)
+        + svg_arrow(970, 445, 970, 485)
+        + svg_labeled_box(60, 490, 340, 110, "Rank + Filter", ["sort by score", "drop below threshold"], fill="#808080", text_fill="#FFFFFF")
+        + svg_labeled_box(800, 490, 340, 110, "Rank + Filter", ["sort by score", "drop below threshold"], fill="#808080", text_fill="#FFFFFF")
+        + svg_arrow(270, 600, 430, 650)
+        + svg_arrow(930, 600, 770, 650)
+        + svg_labeled_box(280, 655, 640, 100, "Cache the Last Retrieval", ["_last_document_chunks", "_last_learned_qa_chunks"], fill="#F2F2F2")
+        + svg_arrow(600, 755, 600, 783)
+        + '<ellipse cx="600" cy="805" rx="195" ry="38" fill="#2C3E6B" stroke="#000000" stroke-width="4"/>'
+        + svg_centered_text(600, 805, ["Return both chunk lists"], size=17, fill="#FFFFFF", bold_first=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter11_retrieve_separate", svg)
+
+
+def build_chapter_11() -> Path:
+    title = "Query Retrieval Fundamentals"
+    doc = configure_document(title)
+    add_cover(doc, 11, title, "PART III — BUILDING THE RETRIEVAL PIPELINE", "A retriever can only ever answer the question you actually embedded — not the one you meant to ask.")
+    add_chapter_heading(doc, 11, title)
+    add_body(doc, "Part II turned a folder of files into embedded, persisted chunks sitting quietly in ChromaDB. None of that work matters until a human asks a real question and something in the store answers it. This chapter builds the mechanism that closes that gap: a `RAGRetriever` that takes a live query, embeds it with the same model used at ingestion, searches one or more collections, and returns a small, ranked, score-labeled list of chunks a language model can actually use.")
+    add_body(doc, "Memora's retriever is deliberately unglamorous. It does one thing — turn a query into ranked evidence — and it does it the same way whether it is called from a simple command-line loop or from deep inside an agent's tool-calling turn. That simplicity is a feature: Chapter 12 will make the ranking smarter, and Chapter 15 onward will make the calling pattern autonomous, but neither upgrade should require touching the retrieval mechanism itself.")
+    add_body(doc, "By the end of this chapter you will be able to build a retriever class that embeds a query, queries a vector collection safely, converts raw distance into an interpretable score, filters and deduplicates results, and exposes what it just found in a form the rest of the pipeline can inspect — and remember.")
+
+    add_heading(doc, "11.1 From question to query embedding")
+    add_callout(doc, "Definition", "Query embedding", "The dense vector produced by running a user's natural-language question through the same embedding model used at ingestion time, so that the question and every stored chunk live in the same geometric space and a distance between them is meaningful.")
+    add_body(doc, "Retrieval starts with a single call: embed the question. `RAGRetriever._embed_and_log` wraps `EmbeddingManager.generate_embedding` and immediately logs what came out — the model name, the vector's shape, its first eight values, and its L2 norm. None of that logging changes behavior; it exists because an embedding is otherwise a black box, and the fastest way to catch a wrong model or an empty string is to look at the numbers before they disappear into a similarity search.")
+    add_code(doc, '''def _embed_and_log(self, query: str):
+    query_embedding = self.embedding_manager.generate_embedding(query)
+    _log(
+        "STEP: QUERY -> EMBEDDING",
+        f'Query        : "{query}"',
+        f"Model        : {self.embedding_manager.model_name}",
+        f"Shape        : {query_embedding.shape}",
+        f"First 8 vals : {[round(float(v), 6) for v in query_embedding[:8]]}",
+        f"L2 norm      : {float(np.linalg.norm(query_embedding)):.6f}",
+    )
+    return query_embedding''')
+    add_callout(doc, "Analogy", "A shared coordinate system", "Embedding the question and embedding every stored chunk are the same act of translating text onto one map. A distance between two points is only meaningful if both were plotted with the same projection — a query embedded by one model and chunks embedded by another are two maps drawn to different scales, and every distance computed between them is noise.")
+    add_body(doc, "This is also why the embedding model is never a per-query choice. It is fixed once, at ingestion time (Chapter 8), and the retriever simply reuses it. Swapping embedding models mid-project does not raise an error — ChromaDB will still return a nearest-neighbor list — but the resulting distances stop meaning what the code assumes they mean.")
+    add_body(doc, "Memora's `EmbeddingManager` defaults to `all-MiniLM-L6-v2`, a compact SentenceTransformer model chosen for speed over an agentic loop that may embed several query variants per request. `generate_embedding` mirrors the retrieval timeout pattern from Section 11.2: `model.encode()` runs inside its own bounded call, and an `EmbeddingEncodingTimeoutError` fires if it exceeds `EMBEDDING_ENCODING_TIMEOUT_SECONDS` rather than letting a stalled encode silently stall the request. The two timeout classes exist for the same reason — a local model call and a network call are both external calls from the pipeline's point of view, and both deserve an upper bound.")
+
+    add_heading(doc, "11.2 Similarity search mechanics, step by step")
+    add_body(doc, "With a query vector in hand, `_query_collection` submits it to ChromaDB and asks for the closest `n_results`. Two details keep this simple call from becoming a production liability: the requested count is clamped with `min(top_k, collection.count())` so a small or freshly created collection never receives an impossible request, and the query itself runs inside a bounded worker so a stalled database connection cannot stall the whole pipeline.")
+    add_figure(doc, diagram_pipeline_11(), "Figure 11.1 — One embedded query drives every collection search that follows.")
+    add_body(doc, "As Figure 11.1 shows, the same query embedding is reused for every collection queried in a single request — the documents collection and, where present, the learned-QA collection. Each collection returns its own documents, metadatas, and distances, which the retriever immediately reshapes into a list of plain dictionaries carrying an id, content, metadata, similarity score, and raw distance.")
+    add_code(doc, '''with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+    future = executor.submit(
+        collection.query,
+        query_embeddings=[query_embedding.tolist()],
+        n_results=min(top_k, collection.count()),
+        include=["documents", "metadatas", "distances"],
+    )
+    try:
+        results = future.result(timeout=RETRIEVAL_TIMEOUT_SECONDS)
+    except concurrent.futures.TimeoutError:
+        raise RetrievalTimeoutError(collection.name, RETRIEVAL_TIMEOUT_SECONDS)''')
+    add_callout(doc, "Common pitfall", "A vector-store call that never returns", "Early versions had no upper bound on a collection query, so a stalled ChromaDB connection could hang the entire request. `RETRIEVAL_TIMEOUT_SECONDS` was not guessed once and left alone — it was set from documentation estimates, then recalibrated after a benchmark run measured the actual p95 query latency at roughly 0.7 seconds and fixed the timeout at 10 seconds, about fourteen times that figure. Treat any external call inside a retrieval path as a call that can hang, not merely one that can fail.")
+
+    add_heading(doc, "11.3 Top-k selection, score thresholds, and MIN_SIMILARITY heuristics")
+    add_callout(doc, "Definition", "Score threshold", "A minimum similarity value below which a retrieved chunk is discarded before it ever reaches ranking or the prompt, regardless of how it compares to the other results in the batch.")
+    add_body(doc, "`RAGRetriever.retrieve` and `retrieve_separate` both accept a `score_threshold`, but they default it to `0.0` — accept everything the database returns, and let the caller decide what counts as relevant. That is a deliberate separation of mechanism from policy: the retriever's job is to search correctly, not to decide what \"good enough\" means for a particular caller.")
+    add_body(doc, "Policy lives one layer up. The agent-facing tool in `tools.py` calls `retrieve_separate` with `score_threshold=MIN_SIMILARITY`, a single project-wide constant set to `0.5`. A simple command-line query script can choose a looser threshold, or none at all, without touching the retriever itself.")
+    add_table(doc, ["Caller", "top_k / top_l", "score_threshold", "Intent"], [
+        ["`RAGRetriever.retrieve`", "caller-supplied, default 5", "0.0 (accept all)", "Mechanism only"],
+        ["`query.py: generate_answer`", "`--top-k`, default 7", "not applied", "Fast, permissive CLI answer"],
+        ["`query.py: advanced_answer`", "`--top-k`, default 7", "`--min-score`, default 0.2", "Answer with sources + confidence"],
+        ["`tools.py: retrieve_documents`", "`RETRIEVAL_TOP_K` / `RETRIEVAL_TOP_L`", "`MIN_SIMILARITY` = 0.5", "Agent-facing policy"],
+    ], [1.95, 1.55, 1.55, 1.25])
+    add_body(doc, "Reading this table top to bottom is reading the project's own escalation in caution: the raw mechanism trusts nothing, the simplest script filters nothing, and the surface the language model actually calls filters hardest, because a model that receives a weakly related chunk will often use it anyway.")
+
+    add_heading(doc, "11.4 Distance-to-score conversion and what scores actually mean")
+    add_body(doc, "ChromaDB returns distances, not similarities, and distance is the wrong quantity to reason about — smaller is better, thresholds read backwards, and \"0.9\" looks like a strong match when it might be a weak one. `_rank_collection_results` converts every distance into a similarity score with `similarity_score = 1 - distance`, sorts descending by that score, drops anything below the threshold, deduplicates by chunk id, and assigns each surviving chunk a 1-based rank.")
+    add_code(doc, '''@staticmethod
+def _rank_collection_results(results, limit, score_threshold):
+    seen_ids = set()
+    ranked = []
+    for doc in sorted(results, key=lambda d: d["similarity_score"], reverse=True):
+        if doc["id"] in seen_ids:
+            continue
+        seen_ids.add(doc["id"])
+        if doc["similarity_score"] < score_threshold:
+            continue
+        ranked.append({**doc, "rank": len(ranked) + 1})
+        if len(ranked) >= limit:
+            break
+    return ranked''')
+    add_table(doc, ["Score range", "Interpretation"], [
+        ["0.7 – 1.0", "Strong topical match"],
+        ["0.4 – 0.7", "Related, same domain"],
+        ["0.2 – 0.4", "Loosely related — shared vocabulary only"],
+        ["0.0 – 0.2", "Effectively unrelated"],
+        ["below 0.0", "Rare — usually a sign of a malformed query or a distance-space mismatch"],
+    ], [1.60, 4.70])
+    add_callout(doc, "Common pitfall", "The `1 - distance` formula only holds for cosine distance", "Memora once ran the `documents` collection with cosine distance and the `learned_qa` collection with L2 distance, because `learned_qa` was created before its `hnsw:space` was ever specified, and ChromaDB's default is L2. Both collections were still scored as `similarity_score = 1 - distance`, which is correct only for cosine distance on normalized vectors — on L2 it computes an unrelated quantity. Relevant learned-answer chunks survived their threshold by a hair, or were silently dropped, and nothing raised an exception because the code was syntactically fine; it was just scoring two collections under two different, incompatible definitions of \"distance.\" Fix the distance metric at the single point where a collection is created, and verify it there — never assume every collection you query shares the same geometry.")
+
+    add_heading(doc, "11.5 Building the RAGRetriever class")
+    add_body(doc, "`RAGRetriever` wraps a `VectorStore`, an `EmbeddingManager`, and an optional learned-QA collection behind two public methods: `retrieve`, which searches the documents collection alone, and `retrieve_separate`, which searches documents and learned QA as two independent ranked lists. Keeping them independent — rather than merging into one combined ranking — matters because the two collections answer different questions: one holds source material, the other holds the system's own validated prior answers, and Chapter 22C will give them different compression treatment for exactly this reason.")
+    add_body(doc, "Figure 11.2 traces `retrieve_separate` end to end. The embedding step runs exactly once regardless of how many collections exist; everything after it forks into independent, symmetric tracks that share the same querying, ranking, and filtering logic but never influence each other's scores or thresholds. A learned-QA collection with zero entries — true for every fresh install — simply produces an empty right-hand track rather than a special case the caller has to detect.")
+    add_figure(doc, diagram_retrieve_separate_11(), "Figure 11.2 — retrieve_separate() runs both tracks through the same embed-query-rank pipeline, independently.")
+    add_code(doc, '''class RAGRetriever:
+    def __init__(self, vector_store, embedding_manager, learned_collection=None):
+        self.vector_store = vector_store
+        self.embedding_manager = embedding_manager
+        self.learned_collection = learned_collection
+        self._last_document_chunks: list[dict] = []
+        self._last_learned_qa_chunks: list[dict] = []
+
+    def retrieve_separate(self, query, top_k, top_l, score_threshold=0.0):
+        query_embedding = self._embed_and_log(query)
+
+        documents = self._rank_collection_results(
+            self._query_collection(self.vector_store.collection, query_embedding, top_k),
+            limit=top_k, score_threshold=score_threshold,
+        )
+
+        learned_qa = []
+        if self.learned_collection and self.learned_collection.count() > 0:
+            learned_qa = self._rank_collection_results(
+                self._query_collection(self.learned_collection, query_embedding, top_l),
+                limit=top_l, score_threshold=score_threshold,
+            )
+
+        self._last_document_chunks = documents
+        self._last_learned_qa_chunks = learned_qa
+        return {"documents": documents, "learned_qa": learned_qa}''')
+    add_bullets(doc, [
+        "One embedding call per query — never re-embed for a second collection.",
+        "Guard every collection query with `min(top_k, collection.count())`.",
+        "Rank, dedupe, and threshold-filter each collection independently.",
+        "Return plain dictionaries, not database objects — the rest of the pipeline should never import a ChromaDB type.",
+        "Skip a collection cleanly (empty list) rather than special-casing its absence downstream.",
+    ])
+
+    add_heading(doc, "11.6 Inspecting what came back — scores, sources, previews")
+    add_body(doc, "A ranked list of dictionaries is only useful if a human — or a log file — can read it. `_log_ranked_results` writes one line per surviving chunk: its rank, its score to four decimal places, its source filename, and a 120-character content preview with newlines flattened. That single debug block is usually the fastest way to answer \"why did the agent say that?\" — before looking at prompts, before looking at the model's output, look at what was actually retrieved.")
+    add_body(doc, "`query.py`'s `advanced_answer` builds a caller-facing version of the same idea. Each source entry carries the filename, page, similarity score, and a 300-character preview, and the whole answer's `confidence` is simply the highest similarity score among the retrieved chunks — a cheap, honest signal that a caller can display without asking the language model to grade its own homework.")
+    add_code(doc, '''sources = [
+    {
+        "source": doc["metadata"].get("source", "Unknown"),
+        "page": doc["metadata"].get("page", "unknown"),
+        "similarity_score": doc["similarity_score"],
+        "preview": doc["content"][:300] + ("..." if len(doc["content"]) > 300 else ""),
+    }
+    for doc in retrieved_docs
+]
+confidence = max(doc["similarity_score"] for doc in retrieved_docs)''')
+    add_callout(doc, "Analogy", "An itemized receipt, not just a total", "An answer without its retrieved sources is a total with no line items — plausible, but unauditable. Attaching score, source, and preview to every chunk that fed the answer turns a single confidence number into something a reader can actually check, chunk by chunk, against the claim it supposedly supports.")
+    add_body(doc, "Notice that the two previews are sized for different readers: the debug log's 120-character preview is tuned for a developer scanning dozens of lines per request in a terminal, while `advanced_answer`'s 300-character preview is tuned for an end user reading a handful of source cards. Neither number is arbitrary once you ask who reads it and how many of them they will read in one sitting — a log preview optimizes for scan speed across many entries, a source preview optimizes for enough context to judge one entry on its own.")
+
+    add_heading(doc, "11.7 Why the retriever caches its last chunks (and who consumes that cache)")
+    add_body(doc, "`retrieve` and `retrieve_separate` both end by writing their results into `self._last_document_chunks` and `self._last_learned_qa_chunks`, exposed through `get_last_document_chunks()` and `get_last_learned_qa_chunks()`. This looks redundant — the caller already has the return value — until you notice who the caller actually is later in the book.")
+    add_body(doc, "When `retrieve_documents` runs as a tool inside the agent loop (Chapters 17–18), its return value is a flattened string formatted for the language model's context window. That string is the only thing the model ever sees, but the orchestrator around the model needs the original structured chunks — with ids, metadata, and per-chunk scores — to track which sources were used, deduplicate across retrieval rounds, and feed compression. Threading structured objects through a channel designed to carry model-readable text would mean re-parsing the retriever's own formatted output. The cache sidesteps that: the orchestrator calls the tool for the model's benefit, then calls `get_last_document_chunks()` for its own, immediately afterward, on the same retriever instance.")
+    add_callout(doc, "Analogy", "A carbon-copy receipt", "The tool result handed to the model is the customer's copy — readable, final, and not meant to be parsed back apart. The retriever keeps its own carbon copy of the same transaction, in full structured detail, for whoever in the system needs to reconcile the books afterward.")
+    add_callout(doc, "Common pitfall", "Trusting the cache across two different queries", "The cache holds the *last* retrieval only. If anything in the pipeline calls `retrieve_separate` again — a reformulated query, a second collection, a retry — the previous chunks are gone from `_last_document_chunks` the moment the new call returns. Read the cache immediately after the call it belongs to, not at some later point in the loop where a second retrieval may have already overwritten it.")
+
+    add_body(doc, "Chapter 12 picks up exactly where this one stops: cosine similarity alone, ranked and thresholded, is a correct floor for a retrieval pipeline — not a ceiling. Memora's own research log identifies the next rungs of the ladder — Maximal Marginal Relevance for diversity, BM25 for exact-term recall, cross-encoder reranking for precision, and Reciprocal Rank Fusion for combining ranked lists — as evaluated, understood, and not yet built. That gap between researched and implemented is where the next chapter begins.")
+
+    path = OUT_DIR / "Chapter_11_Query_Retrieval_Fundamentals.docx"
+    doc.core_properties.title = f"Chapter 11 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_ladder_12() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720">'
+        '<rect width="1200" height="720" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 40, ["The retrieval upgrade ladder"], size=27, bold_first=True)
+        + svg_labeled_box(310, 100, 580, 115, "+ Cross-Encoder Rerank", ["reads query + chunk together", "highest precision, added latency"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_centered_text(985, 157, ["not yet built —", "this chapter"], size=15, gap=20)
+        + svg_arrow(600, 355, 600, 227)
+        + svg_labeled_box(310, 235, 580, 115, "+ BM25 Hybrid", ["adds exact-term recall", "catches IDs, codes, names"], fill="#808080", text_fill="#FFFFFF")
+        + svg_arrow(600, 490, 600, 362)
+        + svg_labeled_box(310, 370, 580, 115, "+ MMR", ["adds result diversity", "penalizes near-duplicate picks"], fill="#D9D9D9")
+        + svg_arrow(600, 625, 600, 497)
+        + svg_labeled_box(310, 505, 580, 115, "Cosine Similarity", ["Chapter 11's shipped baseline", "fast, semantic, direction only"], fill="#F2F2F2", stroke_width=5)
+        + svg_centered_text(985, 562, ["current, shipped", "pipeline"], size=15, gap=20)
+        + "</svg>"
+    )
+    return svg_to_png("chapter12_ladder", svg)
+
+
+def diagram_rrf_12() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660">'
+        '<rect width="1200" height="660" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 40, ["Reciprocal Rank Fusion merges two ranked lists"], size=26, bold_first=True)
+        + svg_labeled_box(60, 105, 480, 155, "Dense Ranking (cosine)", ["1. chunk_A   2. chunk_C", "3. chunk_B"], fill="#D9D9D9")
+        + svg_labeled_box(660, 105, 480, 155, "Sparse Ranking (BM25)", ["1. chunk_B   2. chunk_A", "3. chunk_D"], fill="#D9D9D9")
+        + svg_arrow(340, 260, 500, 335)
+        + svg_arrow(860, 260, 700, 335)
+        + svg_labeled_box(360, 340, 480, 120, "RRF Score", ["score(d) = sum of 1 / (k + rank_i(d))", "k ≈ 60, summed across both lists"], fill="#808080", text_fill="#FFFFFF")
+        + svg_arrow(600, 460, 600, 498)
+        + svg_labeled_box(310, 505, 580, 115, "Fused Ranking", ["1. chunk_A   2. chunk_B", "3. chunk_C   4. chunk_D"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter12_rrf", svg)
+
+
+def build_chapter_12() -> Path:
+    title = "Advanced Retrieval Techniques"
+    doc = configure_document(title)
+    add_cover(doc, 12, title, "PART III — BUILDING THE RETRIEVAL PIPELINE", "Every technique in this chapter was researched, understood, and left for the version of this project that needs it.")
+    add_chapter_heading(doc, 12, title)
+    add_body(doc, "Chapter 11 built a retriever whose entire ranking logic fits on one line: `similarity_score = 1 - distance`, sorted, deduplicated, and threshold-filtered. That is a complete, correct, shippable retrieval mechanism — and it is also the floor of what a production RAG system can do, not the ceiling. This chapter is a tour of the rungs above that floor.")
+    add_body(doc, "Memora's own research log is unusually candid about this gap. Its eighth research topic, \"Retrieval Ranking Algorithms,\" evaluated Maximal Marginal Relevance, BM25 hybrid search, cross-encoder reranking, and Reciprocal Rank Fusion against the shipped cosine-only pipeline, wrote down a recommended upgrade order, and closed with one honest sentence: not yet implemented. The techniques in this chapter are not hypothetical — they were investigated for this exact retriever — they simply were not the project's next priority. A few of them, like multi-query rephrasing, did ship, just in the later agentic pipeline (Chapter 19B) rather than in the retriever itself.")
+    add_body(doc, "By the end of this chapter you will be able to explain, and skeleton-implement, every rung of the upgrade ladder — hybrid dense-plus-sparse search, Reciprocal Rank Fusion, Maximal Marginal Relevance, cross-encoder reranking, metadata filtering, multi-query retrieval, HyDE, parent-child retrieval, and contextual compression — and, just as importantly, know which of them a real project chose to defer, and why deferring was a defensible engineering decision rather than an oversight.")
+
+    add_heading(doc, "12.1 The upgrade ladder")
+    add_body(doc, "Treat the four researched techniques as an ordered ladder rather than four independent options. Each rung keeps everything below it working and adds one specific capability cosine similarity lacks on its own; none of them replace the retriever built in Chapter 11 — they sit on top of it.")
+    add_figure(doc, diagram_ladder_12(), "Figure 12.1 — Each rung fixes one specific weakness of plain cosine similarity.")
+    add_body(doc, "Figure 12.1 mirrors Memora's own recommended order: add MMR first because it costs nothing extra to retrieve (it only changes which already-fetched candidates get kept), add BM25 hybrid scoring next because it fixes an entire class of query cosine embeddings handle poorly, and add cross-encoder reranking last because it is the most accurate rung and the most expensive one, best spent on a small top-10 candidate set rather than every chunk in the collection.")
+    add_table(doc, ["Rung", "Fixes", "Approximate cost"], [
+        ["MMR", "Near-duplicate chunks crowding out coverage", "Negligible — reorders results already in hand"],
+        ["BM25 hybrid", "Exact terms (IDs, model names, codes) dense vectors miss", "One extra lexical index + a fusion step"],
+        ["Cross-encoder rerank", "Ranking precision on the final short list", "One model call per candidate chunk, on a small top-10"],
+    ], [1.55, 2.90, 1.85])
+
+    add_heading(doc, "12.2 Hybrid search — dense and sparse combined")
+    add_callout(doc, "Definition", "BM25", "A keyword-frequency ranking function (Best Matching 25) that scores a document against a query using term frequency and inverse document frequency, normalized by document length. It has no notion of meaning — it matches surface tokens.")
+    add_body(doc, "Dense embeddings and BM25 fail in complementary ways. A cosine search over `all-MiniLM-L6-v2` embeddings is excellent at \"documents about the same topic as this question\" and poor at exact identifiers — a model name, a part number, an error code — because those tokens carry little of the semantic signal the embedding space was trained to capture. BM25 is the mirror image: it excels at exact-term matching and has no idea that \"lowers electricity costs\" and \"minimizes energy expenses\" mean the same thing.")
+    add_code(doc, '''from rank_bm25 import BM25Okapi
+
+class BM25Index:
+    def __init__(self, chunks: list[dict]):
+        self.chunks = chunks
+        tokenized = [c["content"].lower().split() for c in chunks]
+        self.index = BM25Okapi(tokenized)
+
+    def search(self, query: str, top_k: int) -> list[dict]:
+        scores = self.index.get_scores(query.lower().split())
+        ranked = sorted(zip(self.chunks, scores), key=lambda p: p[1], reverse=True)
+        return [{**chunk, "bm25_score": score} for chunk, score in ranked[:top_k]]''')
+    add_callout(doc, "Analogy", "Two ways to search a library", "A dense search is asking a librarian who has read every book to point you toward the right shelf. A sparse search is scanning the index card catalog for your exact search term. A librarian who has read everything may forget an exact part number; a card catalog does not know that two books use different words for the same idea. A hybrid search asks both and keeps whichever answer actually helps.")
+    add_body(doc, "Combining them requires two ranked lists and a way to merge them — which is exactly what Section 12.3 builds.")
+
+    add_heading(doc, "12.3 Reciprocal Rank Fusion — merging ranked lists")
+    add_callout(doc, "Definition", "Reciprocal Rank Fusion (RRF)", "A rank-merging formula that scores each document by summing 1 / (k + rank) across every ranked list it appears in, where k is a small constant (commonly 60). Documents ranked highly in multiple lists rise to the top of the fused ranking without needing the lists' raw scores to be on comparable scales.")
+    add_figure(doc, diagram_rrf_12(), "Figure 12.2 — RRF needs only rank position from each list, not comparable score scales.")
+    add_body(doc, "RRF's real advantage, visible in Figure 12.2, is that it sidesteps score calibration entirely. A cosine similarity and a BM25 score live on completely different numeric scales, and picking a weighted average between them requires tuning a mixing coefficient per corpus. RRF only asks each list for a rank position — first, second, third — so a chunk that both searches consider strong rises to the top regardless of how the two underlying scores were computed.")
+    add_code(doc, '''def rrf_fuse(ranked_lists: list[list[str]], k: int = 60) -> list[str]:
+    scores: dict[str, float] = {}
+    for ranked in ranked_lists:
+        for position, doc_id in enumerate(ranked, start=1):
+            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + position)
+    return sorted(scores, key=scores.get, reverse=True)''')
+    add_body(doc, "It is worth naming a distinction Memora's research notes blur slightly: RRF fuses two rankings over the *same* corpus produced by *different retrieval methods* — dense and sparse search over the same documents collection. That is a different problem from `retrieve_separate`'s decision (Chapter 11.5) to keep the `documents` and `learned_qa` collections as two independent lists rather than one merged ranking. Those two collections differ in trust level and provenance, not in retrieval method — merging them with RRF would blur a distinction the two-track architecture exists specifically to preserve.")
+
+    add_heading(doc, "12.4 Maximal Marginal Relevance for diversity")
+    add_callout(doc, "Definition", "Maximal Marginal Relevance (MMR)", "A re-selection strategy that picks each next result by balancing relevance to the query against dissimilarity to results already chosen, controlled by a weight λ between 0 (pure diversity) and 1 (pure relevance).")
+    add_body(doc, "Plain top-k cosine ranking has a blind spot: if a corpus contains five paraphrased sentences of the same fact, cosine similarity happily returns all five as the top five results, because each one really is highly similar to the query. The retrieved set is technically correct and practically useless — five slots spent saying one thing. MMR fixes this by re-scoring each *candidate* result against what has already been selected, not just against the query.")
+    add_code(doc, '''def mmr_select(query_vec, candidates: list[dict], k: int, lambda_mult: float = 0.5):
+    selected: list[dict] = []
+    pool = list(candidates)
+    while pool and len(selected) < k:
+        def mmr_score(c):
+            relevance = cosine(query_vec, c["embedding"])
+            if not selected:
+                return relevance
+            redundancy = max(cosine(c["embedding"], s["embedding"]) for s in selected)
+            return lambda_mult * relevance - (1 - lambda_mult) * redundancy
+
+        best = max(pool, key=mmr_score)
+        selected.append(best)
+        pool.remove(best)
+    return selected''')
+    add_body(doc, "MMR needs no new index and no new retrieval call — it re-ranks a candidate pool already fetched with a slightly larger `top_k` than the final answer needs, which is why it is the cheapest rung on the ladder and the one Memora's research flagged as the best immediate upgrade.")
+
+    add_heading(doc, "12.5 Reranking with cross-encoders")
+    add_callout(doc, "Definition", "Cross-encoder", "A model that scores relevance by encoding the query and a candidate chunk together, in a single forward pass, rather than encoding each independently and comparing vectors afterward. It cannot be precomputed or indexed — every query/candidate pair requires its own inference call.")
+    add_body(doc, "Chapter 11's bi-encoder embeds the query and every chunk independently, then compares vectors with cosine similarity — fast, and precomputable for every chunk at ingestion time. A cross-encoder such as `cross-encoder/ms-marco-MiniLM-L-6-v2` gives up that precomputation for accuracy: it reads the query and one candidate chunk together as a single input and outputs a direct relevance score, letting the model's attention mechanism compare them token by token instead of collapsing each into an independent point in space first.")
+    add_table(doc, ["Property", "Bi-encoder (Chapter 11)", "Cross-encoder (this section)"], [
+        ["Encodes", "Query and chunk separately", "Query and chunk together"],
+        ["Precomputable", "Yes — chunks embedded once at ingestion", "No — one inference per query/chunk pair"],
+        ["Cost per query", "One query embedding + a vector search", "One model call per candidate reranked"],
+        ["Best used for", "Narrowing millions of chunks to dozens", "Narrowing dozens of chunks to a final few"],
+    ], [1.55, 2.30, 2.45])
+    add_code(doc, '''from sentence_transformers import CrossEncoder
+
+reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+
+def rerank(query: str, candidates: list[dict], top_k: int) -> list[dict]:
+    pairs = [(query, c["content"]) for c in candidates]
+    scores = reranker.predict(pairs)
+    ranked = sorted(zip(candidates, scores), key=lambda p: p[1], reverse=True)
+    return [{**c, "rerank_score": s} for c, s in ranked[:top_k]]''')
+    add_callout(doc, "Common pitfall", "Reranking the whole collection", "A cross-encoder call is orders of magnitude slower than a vector comparison because nothing about it can be precomputed. Never run it over an entire collection — retrieve a wider candidate set with the cheap bi-encoder first (top-10 to top-20), then spend the cross-encoder budget narrowing that small set down to the top-5 that actually reach the prompt.")
+
+    add_heading(doc, "12.6 Metadata filtering and hybrid filters")
+    add_body(doc, "Every chunk Chapter 11's retriever returns already carries metadata — `source`, `page`, and (from Chapter 7's chunking pipeline) a `chunk_seq` position within its source document. ChromaDB accepts a `where` clause alongside the vector query, letting a caller narrow the search space before similarity ranking even runs, rather than filtering a ranked list after the fact.")
+    add_code(doc, '''collection.query(
+    query_embeddings=[query_embedding.tolist()],
+    n_results=top_k,
+    where={"source": "policy_manual.pdf"},
+    include=["documents", "metadatas", "distances"],
+)''')
+    add_body(doc, "A hybrid filter narrows twice: once structurally (only this source, only pages after 10, only chunks tagged as a table) and once semantically (the actual vector search among the survivors). Reach for a metadata filter whenever a caller already knows something deterministic about where the answer lives — a filter costs nothing in retrieval quality and everything in retrieval precision, because it removes candidates the similarity score would otherwise have to out-rank on its own.")
+
+    add_heading(doc, "12.7 Multi-query retrieval — rephrasing for coverage")
+    add_callout(doc, "Definition", "Multi-query retrieval", "Generating several differently-worded variants of a single user question and retrieving for each, so that a corpus's varied vocabulary is covered by more than one angle of attack, then combining or deduplicating the results before they reach the prompt.")
+    add_body(doc, "This rung is the one exception in the chapter: Memora actually built it. `app_workflow/nodes/query_variants.py` generates several query rephrasings per question and retrieves for each — but an LLM asked for three rephrasings will sometimes hand back three near-identical ones (\"motor delays in autism\" and \"motor skill delays in ASD\"), and running retrieval for near-duplicates wastes an entire retrieval-and-validation cycle on a query that was never going to surface anything new.")
+    add_body(doc, "The fix is a two-phase filter, run before any retrieval call is spent: deduplicate near-identical variants by pairwise cosine similarity at a conservative `PRE_RETRIEVAL_SIM_THRESHOLD = 0.95`, then rank the survivors by similarity to the *original* query and keep only as many as an adaptive budget allows.")
+    add_code(doc, '''def pre_retrieval_filter(variants: list[str], query_embedding, budget: int) -> list[str]:
+    embeddings = embed_all(variants)
+    survivors: list[tuple[str, "vector"]] = []
+    for variant, vec in zip(variants, embeddings):
+        if any(cosine(vec, s_vec) >= PRE_RETRIEVAL_SIM_THRESHOLD for _, s_vec in survivors):
+            continue  # near-duplicate of an already-kept variant
+        survivors.append((variant, vec))
+
+    survivors.sort(key=lambda pair: cosine(pair[1], query_embedding), reverse=True)
+    return [variant for variant, _ in survivors[:budget]]''')
+    add_body(doc, "The order matters: deduplicating before ranking ensures a high-quality unique variant is never discarded just because a near-duplicate happened to rank slightly higher by chance. Cosine was chosen over cheaper token-overlap (Jaccard) similarity deliberately — Jaccard fails on exactly the paraphrase pairs this filter exists to catch, since two paraphrases can share almost no vocabulary at all.")
+
+    add_heading(doc, "12.8 HyDE — hypothetical document embeddings")
+    add_callout(doc, "Definition", "HyDE (Hypothetical Document Embeddings)", "A retrieval strategy that first asks an LLM to write a plausible, hypothetical answer to the query, then embeds and searches with that generated passage instead of the raw question — on the theory that an answer-shaped passage sits closer in embedding space to real answer-shaped chunks than a short question does.")
+    add_body(doc, "HyDE was on the table early in Memora's own architecture decision — the choice between a fixed classic-RAG pipeline and an agentic loop that decides its own retrieval strategy explicitly listed HyDE as a considered alternative before the project committed to the agentic decision loop covered starting in Chapter 15. It was not rejected as flawed; it was set aside because an iterative, self-correcting agent loop solved the same underlying problem — a short question retrieving poorly against long-form source text — more generally, by letting the model reformulate and retry rather than betting everything on one generated hypothetical passage.")
+    add_code(doc, '''def hyde_retrieve(query: str, llm, retriever, top_k: int):
+    hypothetical = llm_invoke(
+        llm, [{"role": "user", "content": f"Write a short passage answering: {query}"}],
+        caller_tag="HYDE",
+    ).content
+    return retriever.retrieve(hypothetical, top_k=top_k)''')
+    add_body(doc, "HyDE trades one extra LLM call for a better-shaped query vector. That trade is worth making when questions are short and source material is long-form prose — exactly the mismatch it is designed to close — and worth skipping when an agent can already retry with reformulated queries, as Section 12.7's multi-query filter and Chapter 18's agent loop both do.")
+
+    add_heading(doc, "12.9 Parent–child and small-to-big retrieval")
+    add_callout(doc, "Definition", "Parent–child retrieval", "Indexing and searching small, precise child chunks for matching accuracy, but returning each match's larger parent chunk — or its neighboring siblings — to the language model, so retrieval precision and context completeness are optimized independently instead of trading off against a single chunk size.")
+    add_body(doc, "Small chunks embed precisely — a tight paragraph produces a focused vector — but a language model reading only that paragraph often loses surrounding context that would have prevented a misreading. Large chunks preserve context but dilute the embedding, since a long chunk's vector is an average over many different ideas, some relevant and some not. Parent-child retrieval is one answer: search small, return big.")
+    add_body(doc, "Memora never built this pattern, but it solved a closely related problem with a different mechanism. Chapter 22B's Neighbor-Aware Compression (NAC) merges consecutive chunks from the same source, identified by their shared `chunk_seq` metadata, *after* retrieval rather than restructuring the index beforehand — restoring the document flow that fixed-size chunking breaks, without maintaining two chunk granularities side by side. Parent-child retrieval solves the boundary problem before search; NAC solves it after. Either is defensible — the tradeoff is index complexity (parent-child) against a compression pass on the critical path (NAC).")
+
+    add_heading(doc, "12.10 Contextual compression — extracting only relevant sentences")
+    add_callout(doc, "Definition", "Contextual compression", "Reducing a retrieved chunk to only the sentences that bear on the current query, discarding the rest of the chunk's content before it reaches the prompt, so a fixed context budget carries a higher density of query-relevant material.")
+    add_body(doc, "A retrieved chunk is relevant as a whole — it passed the similarity threshold — but rarely uniformly relevant sentence by sentence; a paragraph about a policy typically contains one governing clause and several sentences of surrounding boilerplate. Contextual compression trims that surrounding text after retrieval, before the prompt is assembled.")
+    add_body(doc, "Memora's research evaluated this rung most thoroughly of all ten in this chapter, and — unlike the others — actually shipped it, as the extractive stage of a three-part compression hierarchy documented in full in Chapter 22B. Extractive compression, using SentenceTransformers cosine similarity between each sentence and the query, was judged the safest option: no generation, no hallucination risk, purely a subtractive filter over sentences that were already retrieved as faithful source text. LangChain's `ContextualCompressionRetriever` plus `LLMChainExtractor` was evaluated as a framework-level alternative and set aside for the same reason recurring throughout this chapter — an extra dependency and latency cost for a capability the project could implement directly, with a clearer view of exactly what it was doing to the text.")
+    add_bullets(doc, [
+        "Score each sentence in a retrieved chunk against the query independently.",
+        "Keep sentences above a relevance threshold; drop the rest.",
+        "Never rewrite a kept sentence — compression here is subtractive, not generative.",
+        "Guard against over-compression: if retention falls below a safety floor, prefer the original chunk.",
+    ])
+
+    add_body(doc, "Ten rungs, one honest throughline: a retriever is never finished, only appropriately sized for what it currently needs to do. Chapter 11's cosine-only mechanism is correct and sufficient for a small, well-scoped corpus; every technique in this chapter earns its cost only once a real failure mode — missed exact terms, redundant results, imprecise ranking, an over-long chunk — actually shows up in practice. With ranked, filtered, sufficiently precise evidence in hand by whichever rung a project needs, the next job is turning that evidence and the original question into an answer a reader can trust. Chapter 13 builds the generation step that consumes everything this chapter produces.")
+
+    path = OUT_DIR / "Chapter_12_Advanced_Retrieval_Techniques.docx"
+    doc.core_properties.title = f"Chapter 12 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_generation_13() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400">'
+        '<rect width="1200" height="400" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 42, ["From ranked chunks to a generated answer"], size=27, bold_first=True)
+        + svg_labeled_box(30, 110, 270, 140, "Ranked Chunks", ["from Chapters 11-12", "content + score + source"], fill="#F2F2F2")
+        + svg_labeled_box(320, 110, 270, 140, "Assemble Prompt", ["question + context", "one instruction block"], fill="#D9D9D9")
+        + svg_labeled_box(610, 110, 270, 140, "LLM Call", ["llm_invoke(...)", "Groq / OpenAI / local"], fill="#808080", text_fill="#FFFFFF")
+        + svg_labeled_box(900, 110, 270, 140, "Answer", ["+ sources", "+ confidence"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(300, 180, 318, 180)
+        + svg_arrow(590, 180, 608, 180)
+        + svg_arrow(880, 180, 898, 180)
+        + svg_labeled_box(150, 290, 900, 90, "The prompt never sees an unranked, unfiltered collection",
+                           ["only the chunks Chapters 11-12 already decided were worth keeping"], fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter13_generation", svg)
+
+
+def diagram_retry_13() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="920">'
+        '<rect width="1200" height="920" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Not every failed call deserves a retry"], size=26, bold_first=True)
+        + '<ellipse cx="600" cy="100" rx="160" ry="42" fill="#FFFFFF" stroke="#000000" stroke-width="3"/>'
+        + svg_centered_text(600, 100, ["llm_invoke()"], size=19, bold_first=True)
+        + svg_arrow(600, 142, 600, 170)
+        + svg_labeled_box(410, 172, 380, 115, "Call the Provider", ["Groq / OpenAI / local", "one HTTP request"], fill="#F2F2F2")
+        + svg_arrow(600, 287, 600, 311)
+        + '<polygon points="600,313 760,373 600,433 440,373" fill="#D9D9D9" stroke="#000000" stroke-width="3"/>'
+        + svg_centered_text(600, 373, ["Error?"], size=20, bold_first=True)
+        + svg_arrow(752, 358, 828, 388)
+        + svg_centered_text(800, 358, ["no"], size=16, bold_first=True)
+        + svg_labeled_box(830, 343, 330, 115, "Return LLMResult", ["ok=True", "content = the answer"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 433, 600, 457)
+        + svg_centered_text(630, 452, ["yes"], size=16, bold_first=True)
+        + svg_labeled_box(410, 459, 380, 115, "Classify the Error", ["LLMErrorKind taxonomy", "rate limit · timeout · 5xx"], fill="#D9D9D9")
+        + svg_arrow(600, 574, 600, 598)
+        + '<polygon points="600,600 760,660 600,720 440,660" fill="#808080" stroke="#000000" stroke-width="3"/>'
+        + svg_centered_text(600, 660, ["Transient?"], size=19, fill="#FFFFFF", bold_first=True)
+        + svg_arrow(752, 645, 828, 675)
+        + svg_centered_text(800, 645, ["no"], size=16, bold_first=True)
+        + svg_labeled_box(830, 630, 330, 115, "Fail Fast", ["ok=False, logged", "no blind retry"], fill="#FFFFFF", dashed=True)
+        + svg_arrow(600, 720, 600, 744)
+        + svg_centered_text(630, 739, ["yes"], size=16, bold_first=True)
+        + svg_labeled_box(410, 746, 380, 115, "Backoff, Then Retry", ["exponential backoff", "capped attempt count"], fill="#808080", text_fill="#FFFFFF")
+        + '<path d="M 410 803 C 250 803 250 229 408 229" fill="none" stroke="#000000" stroke-width="3" stroke-dasharray="10 8"/>'
+        + '<polygon points="408,229 392,221 392,237" fill="#000000"/>'
+        + svg_centered_text(255, 515, ["retry the call"], size=16, bold_first=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter13_retry", svg)
+
+
+def build_chapter_13() -> Path:
+    title = "Generating Answers with an LLM"
+    doc = configure_document(title)
+    add_cover(doc, 13, title, "PART III — BUILDING THE RETRIEVAL PIPELINE", "An answer is not correct because it reads well; it is correct because it is grounded in something the retriever actually found.")
+    add_chapter_heading(doc, 13, title)
+    add_body(doc, "Everything so far — ingestion, embedding, retrieval, and the ranking upgrades in Chapter 12 — exists to produce one thing: a short, well-chosen stack of text a language model can read before it answers. This chapter closes the loop. It takes the ranked chunks Chapter 11 built and turns them, together with the original question, into a generated answer.")
+    add_body(doc, "Memora's simplest answer path lives in `query.py`, a deliberately small command-line tool that predates the agentic loop covered from Chapter 15 onward. It is worth building and understanding on its own terms: every later chapter's answer generation — draft, judge, retry, distill — is this same augmentation step, called more than once and wrapped in more machinery, never a different idea.")
+    add_body(doc, "By the end of this chapter you will be able to assemble a grounded prompt from retrieved context, choose and configure a hosted LLM provider, write a working answer function with source attribution and a confidence score, and recognize which of a provider's failures are worth retrying and which are not.")
+
+    add_heading(doc, "13.1 The augmentation step — prompt, context, and question")
+    add_callout(doc, "Definition", "Augmentation", "The step in a RAG pipeline where retrieved chunks are combined with the user's question into a single prompt, so the language model generates its answer conditioned on that specific evidence instead of on its training data alone.")
+    add_body(doc, "The augmentation step in `query.py` is almost aggressively simple: number the retrieved documents, join them with blank lines, and drop both the question and that joined context into one instruction string.")
+    add_code(doc, '''context = "\\n\\n".join(
+    [f"Document {doc['rank']}:\\n{doc['content']}" for doc in retrieved_docs]
+)
+prompt = f"""You are an expert assistant. Use the following retrieved documents to answer the question.
+
+Question: {query}
+
+Context:
+{context}
+
+Provide a concise and accurate answer based on the above information."""''')
+    add_callout(doc, "Analogy", "An open-book exam", "A model answering from training data alone is reciting from memory — confident, but unable to point at a source. Augmentation hands the model the actual retrieved pages and asks it to answer with them open on the desk. The answer should be traceable back to a specific page, not to whatever the model happened to remember.")
+    add_body(doc, "Nothing about this step requires an agent, a tool call, or a framework. It requires only that the context passed to the model is exactly the evidence Chapters 11 and 12 decided was worth keeping — no more, no less. Everything more sophisticated later in the book is this same idea under load.")
+
+    add_heading(doc, "13.2 Choosing a hosted LLM")
+    add_body(doc, "A RAG pipeline's generation step is a provider choice as much as a code choice. Memora's own architecture decision record weighed four options before settling on one, on criteria specific to an agentic pipeline that can call the model several times per question — not just once, the way a single-pass classic RAG script would.")
+    add_table(doc, ["Provider", "Strength", "Tradeoff for this project"], [
+        ["Groq", "LPU hardware — very fast, cheap, open models", "Narrower model catalogue than a general API"],
+        ["OpenAI", "Highest general quality, broad tooling", "Slower and roughly 10x the cost at this call volume"],
+        ["Together AI", "Open-source models, competitive pricing", "Not evaluated as deeply for this project's needs"],
+        ["Local (Ollama / vLLM)", "No per-call API cost", "Hardware-constrained; latency depends on local GPU"],
+    ], [1.60, 2.55, 2.15])
+    add_body(doc, "The deciding factor was latency compounding: an agentic loop that retrieves, compresses, and judges may call the LLM five to ten times for a single user question, so per-call latency is not a minor detail — it is multiplied by every iteration the loop takes. Groq's LPU inference measured roughly 250 tokens per second against a typical GPU provider's 50, and because both Groq and OpenAI expose OpenAI-compatible REST APIs, the choice was never permanent: switching providers later is a `base_url` and `api_key` change, not a rewrite.")
+    add_body(doc, "Anthropic's Claude models are a reasonable option on the same axis, reached through the identical OpenAI-compatible pattern once a project's priorities shift from development-loop speed toward maximum instruction-following and reasoning quality on the final, user-facing generation call — the same tradeoff Section 13.6 makes deliberately per-role rather than per-project, since a compression or judging call rarely needs the strongest, most expensive model available.")
+
+    add_heading(doc, "13.3 Groq with langchain-groq — fast and cheap for development")
+    add_callout(doc, "Definition", "Inference provider", "A hosted service that runs a model and exposes it over an API, so an application never has to own the GPU, the weights, or the serving stack itself — only the network call and the credentials.")
+    add_code(doc, '''from langchain_groq import ChatGroq
+
+llm = ChatGroq(
+    api_key=os.getenv("GROQ_API_KEY"),
+    model_name=os.getenv("MODEL_NAME", "llama-3.1-8b-instant"),
+    temperature=0.1,
+    max_tokens=2048,
+    max_retries=0,
+)''')
+    add_body(doc, "`max_retries=0` is deliberate, not an oversight — it appears on every LLM client Memora constructs. LangChain's own retry wrapper and the project's own `llm_invoke` wrapper (Section 13.7) would otherwise both be retrying the same failed call, doubling backoff delays and making failures harder to diagnose. Retry belongs in exactly one place; here, it is explicitly turned off at the client so it can be owned centrally.")
+    add_table(doc, ["Model", "Context window", "Speed", "Tool-use reliability"], [
+        ["`llama-3.1-8b-instant`", "128K in / 8K out", "Fastest", "Moderate — degrades past ~16K prompt tokens"],
+        ["`llama-3.3-70b-versatile`", "128K in / 32K out", "Slower", "Strong — better instruction-following"],
+    ], [1.90, 1.55, 1.15, 1.70])
+    add_body(doc, "Memora used the 8B model for development, where iteration speed matters more than perfect instruction-following, and identified the 70B model as the production-grade target — particularly for compression and judging stages, where faithfulness to the source text matters more than raw speed.")
+
+    add_heading(doc, "13.4 A simple RAG answer function, end to end")
+    add_body(doc, "Figure 13.1 lays out the whole generation stage as one straight line, deliberately with no branching and no loop — that comes later, once Chapter 15 turns this same augmentation step into something an agent can call repeatedly with different queries.")
+    add_figure(doc, diagram_generation_13(), "Figure 13.1 — Generation is the last of three stages; it never sees anything retrieval didn't already rank and filter.")
+    add_body(doc, "`generate_answer` in `query.py` is the smallest complete version of everything this chapter builds toward: retrieve, check for an empty result, assemble the prompt from Section 13.1, and invoke the model through the project's central `llm_invoke` wrapper rather than the raw LangChain client.")
+    add_code(doc, '''def generate_answer(query: str, retriever: RAGRetriever, llm, top_k: int) -> str:
+    retrieved_docs = retriever.retrieve(query, top_k=top_k)
+    if not retrieved_docs:
+        return "No relevant documents found to answer the question."
+
+    context = "\\n\\n".join(
+        [f"Document {doc['rank']}:\\n{doc['content']}" for doc in retrieved_docs]
+    )
+    prompt = f"""You are an expert assistant. Use the following retrieved documents to answer the question.
+
+Question: {query}
+
+Context:
+{context}
+
+Provide a concise and accurate answer based on the above information."""
+
+    result = llm_invoke(llm, [{"role": "user", "content": prompt}], caller_tag="QUERY-SIMPLE")
+    if not result.ok:
+        return f"LLM call failed: {result.error_message}"
+    return result.content''')
+    add_body(doc, "Notice the empty-retrieval check runs before a single token is spent on the model. A prompt built from zero chunks is not a harder question for the LLM to answer carefully — it is an invitation for the model to fill the gap from its own training data, precisely the behavior augmentation exists to prevent. Refusing to call the model at all is the correct response to no evidence, not a last resort.")
+
+    add_heading(doc, "13.5 Model names, deprecations, and staying current")
+    add_body(doc, "Hosted model names are not stable identifiers — providers deprecate and rename them on their own schedule, not the project's. Memora hit this twice mid-project: both `gemma2-9b-it` and `llama3-8b-8192` were deprecated by Groq while the codebase still referenced them by name.")
+    add_callout(doc, "Common pitfall", "Hardcoding a model name in application code", "A model string typed directly into a `ChatGroq(...)` call becomes a bug the day the provider deprecates it — every call site needs to be found and edited, under time pressure, while the pipeline is down. Memora's fix was structural: read the model name from `.env` (`MODEL_NAME`) with a sane default, so a provider deprecation is a configuration change, not a code change, and can be rolled out without touching `llm_setup.py` at all.")
+    add_body(doc, "Treat every hosted model name the way you would treat a version-pinned dependency: know where it is declared, know how to change it in one place, and expect that place to need editing eventually.")
+
+    add_heading(doc, "13.6 Temperature, max_tokens, and other generation knobs")
+    add_callout(doc, "Definition", "Temperature", "A generation parameter that scales the randomness of next-token sampling. A temperature near 0 makes the model consistently choose its highest-probability token; higher values let lower-probability tokens win more often, producing more varied output across repeated calls.")
+    add_body(doc, "Memora does not use one temperature for every LLM role — it uses the parameter deliberately, tuned to what each call is for.")
+    add_table(doc, ["Role", "Temperature", "max_tokens", "Why"], [
+        ["Answer generation (`llm`)", "0.1", "2048", "Mostly deterministic prose, slight room for natural phrasing"],
+        ["Chunk merging (`merge_llm`)", "0.0", "2048", "A merge must be faithful, not creative — zero variance"],
+        ["Quality judging (`judge_llm`)", "0.0", "1024", "A judge that disagrees with itself between runs is useless"],
+    ], [2.15, 1.30, 1.25, 1.60])
+    add_body(doc, "The pattern generalizes: any call whose output must be checkable, reproducible, or diffable against a prior run belongs at temperature 0. Only the final, user-facing prose has any reason to tolerate variance, and even there, 0.1 is a small concession, not an invitation for creativity.")
+
+    add_heading(doc, "13.7 Handling API errors, rate limits, and retries")
+    add_body(doc, "A hosted LLM call fails more often than local code does, in ways local code rarely has to reason about: rate limits, transient server errors, connection drops, and provider-specific rejections of a well-formed request. Two incidents from Memora's own history show what happens when a pipeline treats every failure the same way — badly.")
+    add_callout(doc, "Common pitfall", "Treating every LLM failure as fatal", "Groq once rejected a mid-session tool-call payload with `BadRequestError` / `tool_use_failed`, and the pipeline's response was a hard abort — \"Unable to generate a clean answer,\" no retry, no fallback. Separately, an agent with no iteration cap looped over 40 times on one query, and the accumulated prompt tripped Groq's 6,000-token-per-minute limit outright (`413: Requested 6785, Limit 6000`). Neither failure was unrecoverable on its own; treating both as identical, fatal events was the actual bug.")
+    add_body(doc, "The fix in both cases was the same shape: stop treating \"the call failed\" as one category. `llm_invoke` classifies every failure into an `LLMErrorKind` — rate limit, server error, connection, timeout, bad request, and more — and returns a typed `LLMResult` rather than raising or returning a bare string.")
+    add_code(doc, '''@dataclass
+class LLMResult:
+    ok: bool
+    content: str = ""
+    error_kind: LLMErrorKind | None = None
+    error_message: str = ""
+
+def llm_invoke(llm, messages: list, *, caller_tag: str = "LLM") -> LLMResult:
+    ...  # classify failures, retry the transient ones, return either shape''')
+    add_figure(doc, diagram_retry_13(), "Figure 13.2 — Only transient failures earn a retry; everything else fails fast with a structured reason.")
+    add_body(doc, "As Figure 13.2 shows, the classification decides everything downstream: a rate limit or a timeout backs off and retries, capped at a small number of attempts, while a genuinely malformed request fails immediately with a logged reason instead of retrying a call that will never succeed. Chapter 13B opens `llm_caller.py` fully — its FIFO call ordering, its adaptive cooldown derived from a provider's own rate-limit headers, and its full error taxonomy. For now, the shape to remember is simpler than the implementation: classify before you retry, and never retry a request that was wrong, only one that was unlucky.")
+
+    add_heading(doc, "13.8 Advanced answer formatting — sources, confidence, previews")
+    add_body(doc, "A bare answer string is enough for a terminal demo and not enough for anything a user needs to trust. `advanced_answer` builds the same augmented prompt as Section 13.4's simple path, but returns a structured result a caller can actually display and audit.")
+    add_code(doc, '''def advanced_answer(query, retriever, llm, top_k, min_score=DEFAULT_MIN_SCORE):
+    retrieved_docs = retriever.retrieve(query, top_k=top_k, score_threshold=min_score)
+    if not retrieved_docs:
+        return {"answer": "No relevant documents found.", "sources": [], "confidence": 0.0}
+
+    context = "\\n\\n".join(f"Document {d['rank']}:\\n{d['content']}" for d in retrieved_docs)
+    sources = [
+        {
+            "source": d["metadata"].get("source", "Unknown"),
+            "page": d["metadata"].get("page", "unknown"),
+            "similarity_score": d["similarity_score"],
+            "preview": d["content"][:300],
+        }
+        for d in retrieved_docs
+    ]
+    confidence = max(d["similarity_score"] for d in retrieved_docs)
+
+    result = llm_invoke(llm, [{"role": "user", "content": build_prompt(query, context)}], caller_tag="QUERY-ADVANCED")
+    answer = result.content if result.ok else f"LLM call failed: {result.error_message}"
+    return {"answer": answer, "sources": sources, "confidence": confidence}''')
+    add_body(doc, "`confidence` here is deliberately cheap: the single highest similarity score among the retrieved chunks, not a second model call asking the LLM to grade itself. A retrieval-derived number is honest about what it measures — how well the evidence matched the question — instead of dressing up a model's self-assessment as if it were calibrated, which Chapter 20 will show it usually is not.")
+    add_body(doc, "`print_advanced_result` is the last piece of this shape: a terminal-friendly renderer that walks the same dictionary and prints the answer, the confidence score, and one line per source with its filename, page, score, and a truncated preview. Nothing about the dictionary itself is terminal-specific — a web endpoint or an API response would serialize the same fields to JSON instead of `print` statements, which is exactly why `advanced_answer` returns structured data rather than a formatted string in the first place.")
+
+    add_heading(doc, "13.9 Streaming, citations, and conversational history — the enhanced pipeline")
+    add_body(doc, "`query.py` answers one question at a time, with no memory of the previous turn and no partial output while the model is still generating. Both are real, common upgrades to this same augmentation step, and neither changes the core idea — only how much of the pipeline's plumbing a caller has to manage.")
+    add_body(doc, "Streaming trades a single blocking call for a sequence of incremental chunks, useful the moment an answer takes long enough that a user benefits from seeing it arrive rather than waiting on a spinner:")
+    add_code(doc, '''def stream_answer(query: str, retriever, llm, top_k: int):
+    context = build_context(retriever.retrieve(query, top_k=top_k))
+    for chunk in llm.stream([{"role": "user", "content": build_prompt(query, context)}]):
+        yield chunk.content''')
+    add_body(doc, "Conversational history is the other common addition: pass prior turns as additional messages ahead of the current question, so the model can resolve \"what about the second one\" against something it actually saw. Memora's own answer to needing memory across turns is not a chat-history list, though — it is the agentic loop's run state (Chapter 16) and its persistent learned-QA collection (Chapter 11.5), which carry validated context forward deliberately rather than replaying an unfiltered transcript. Citations follow the same trajectory: Section 13.1's prompt has none yet, but Chapter 14 formalizes the `[Source: filename]` convention this chapter's `sources` list already collects the raw material for.")
+    add_body(doc, "Generation, in every version of this chapter, is only as good as the instructions wrapped around it. Chapter 14 turns to that wrapping directly — what makes a grounding instruction actually hold, why word-count caps behave like suggestions, and how to structure a prompt so its most important constraint survives contact with a real, imperfect model.")
+
+    path = OUT_DIR / "Chapter_13_Generating_Answers_with_an_LLM.docx"
+    doc.core_properties.title = f"Chapter 13 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_anatomy_14() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680">'
+        '<rect width="1200" height="680" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 40, ["The anatomy of a grounded prompt"], size=27, bold_first=True)
+        + svg_labeled_box(310, 100, 580, 115, "Role + Hard Rules", ["persona, hard limits, tool list", "prepended first"], fill="#F2F2F2")
+        + svg_arrow(600, 215, 600, 241)
+        + svg_labeled_box(310, 243, 580, 115, "Injected Context", ["retrieved chunks, prior feedback", "grows and shrinks per request"], fill="#D9D9D9")
+        + svg_arrow(600, 358, 600, 384)
+        + svg_labeled_box(310, 386, 580, 115, "Process + Output Format", ["steps to follow, format rules", "closest to generation"], fill="#2C3E6B", text_fill="#FFFFFF", stroke_width=5)
+        + svg_labeled_box(150, 535, 900, 100, "Recency bias",
+                           ["the instruction nearest the model's next token gets the most attention weight"], fill="#FFFFFF", dashed=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter14_anatomy", svg)
+
+
+def diagram_structured_hierarchy_14() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="790">'
+        '<rect width="1200" height="790" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["The structured-output prompt hierarchy"], size=25, bold_first=True)
+        + svg_labeled_box(310, 100, 580, 105, "Role / Task", ["“you are validating...”", "not a coding task"], fill="#F2F2F2")
+        + svg_arrow(600, 205, 600, 233)
+        + svg_labeled_box(310, 235, 580, 105, "Rules", ["what counts as a match", "when unsure, reject"], fill="#D9D9D9")
+        + svg_arrow(600, 340, 600, 368)
+        + svg_labeled_box(310, 370, 580, 105, "Worked Examples", ["GOOD example + verdict", "BAD example + reason"], fill="#808080", text_fill="#FFFFFF")
+        + svg_arrow(600, 475, 600, 503)
+        + svg_labeled_box(310, 505, 580, 105, "Output Format", ["exact JSON shape", "field by field"], fill="#D9D9D9")
+        + svg_arrow(600, 610, 600, 638)
+        + svg_labeled_box(310, 640, 580, 105, "Final Reminder", ["“return ONLY the JSON array”", "placed last, closest to generation"], fill="#2C3E6B", text_fill="#FFFFFF", stroke_width=5)
+        + "</svg>"
+    )
+    return svg_to_png("chapter14_structured_hierarchy", svg)
+
+
+def build_chapter_14() -> Path:
+    title = "Prompt Engineering for RAG"
+    doc = configure_document(title)
+    add_cover(doc, 14, title, "PART III — BUILDING THE RETRIEVAL PIPELINE", "The instruction closest to the point of generation is the instruction the model actually obeys.")
+    add_chapter_heading(doc, 14, title)
+    add_body(doc, "Chapters 11 through 13 built a complete mechanism: retrieve, rank, filter, assemble, call. All of that machinery converges on one artifact — the prompt — and everything about how well the pipeline actually performs depends on that artifact's exact wording, structure, and ordering, not just on whether the right chunks were retrieved.")
+    add_body(doc, "Memora's `prompts.py` holds more than a dozen distinct prompt families — draft generation, answer judging, chunk merging, redundancy scanning, compression, distillation — and none of them arrived at their current wording on a first attempt. ADR-012, one of the project's own architecture decisions, exists entirely because a prompt's *structure* (not its content) was silently causing tool calls to fire in the wrong order. Prompt engineering here was never decorative wording; it was iterated the same way code is — hypothesis, observed failure, targeted fix, regression note.")
+    add_body(doc, "By the end of this chapter you will be able to structure a prompt's role, context, and constraints deliberately; write a grounded-answer template that resists hallucination; build a citation convention a downstream parser can rely on; and diagnose why a well-intentioned instruction — like a word-count cap — is being politely ignored.")
+
+    add_heading(doc, "14.1 Anatomy of a good prompt — role, instruction, context, constraints")
+    add_callout(doc, "Definition", "System prompt", "The portion of a prompt that establishes persona, permissions, and standing rules for the model's behavior across a request, as distinct from the context (the evidence for this specific question) and the immediate instruction (what to do with it right now).")
+    add_body(doc, "Memora's agent-facing prompt is split into exactly these parts, and the split is not cosmetic. `_ROLE_AND_RULES` establishes persona and hard limits; the retrieved context and any prior feedback are injected in the middle; `_PROCESS_INSTRUCTIONS` — the actual step-by-step task — is appended last, immediately before the user's message.")
+    add_figure(doc, diagram_anatomy_14(), "Figure 14.1 — Role and rules come first for stability; process instructions come last for attention.")
+    add_body(doc, "That ordering in Figure 14.1 is itself a finding, not a convention borrowed from a style guide. Section 14.9 traces the exact failure that produced it: as injected context grew, instructions buried in the middle of the prompt were being followed less and less reliably.")
+    add_table(doc, ["Part", "Memora's implementation", "Purpose"], [
+        ["Role", "\"You are a research assistant.\"", "Frames every subsequent instruction"],
+        ["Rules", "Hard limits — max retrievals, never fabricate", "Standing constraints, not per-turn"],
+        ["Context", "Retrieved chunks, thumbdown history", "The evidence for this specific turn"],
+        ["Instruction", "`_PROCESS_INSTRUCTIONS`, appended last", "What to do, right now, with the above"],
+    ], [1.35, 3.10, 1.85])
+
+    add_heading(doc, "14.2 Zero-shot, one-shot, few-shot prompting")
+    add_callout(doc, "Definition", "Few-shot prompting", "Including one or more worked input/output examples inside the prompt itself, so the model infers the expected pattern from demonstration rather than from a rule description alone.")
+    add_body(doc, "Memora uses all three, deliberately matched to task difficulty. `GROUNDING_PROMPT` is zero-shot — the judgment ('does this answer address the query, grounded in these chunks?') is simple enough that a clear rule description is sufficient. The redundancy scanner is few-shot, because \"do these two sentences express the same fact\" is a judgment call where a rule alone leaves too much room for a smaller model to drift.")
+    add_code(doc, '''GOOD EXAMPLE:
+Chunk 0: "ASD affects 1 in 36 children."
+Chunk 1: "Approximately 1 in 36 children have autism."
+These ARE redundant because they express the same fact.
+
+NOT REDUNDANT — SAME TOPIC BUT DIFFERENT FACTS:
+Chunk 0: "ASD patients may experience sensory overload."
+Chunk 1: "Healthcare providers should reduce loud noises."
+These are RELATED but NOT redundant.''')
+    add_body(doc, "Notice the negative example is doing as much work as the positive one — a rule stated in isolation (\"redundant means same fact\") is far more ambiguous than a rule shown failing on a plausible near-miss. Reach for few-shot examples exactly when a task has a plausible wrong answer that a rule alone won't rule out.")
+
+    add_heading(doc, "14.3 Chain-of-Thought and self-consistency")
+    add_callout(doc, "Definition", "Chain-of-Thought (CoT) prompting", "Instructing a model to produce intermediate reasoning steps before its final answer, on the premise that generating the steps improves the odds of reaching a correct conclusion, not merely explaining one.")
+    add_body(doc, "CoT and strict output-format constraints (Section 14.12) pull in opposite directions, and Memora's judge prompts resolve the tension by picking a side deliberately: `GROUNDING_PROMPT` demands \"Reply with EXACTLY one of these two lines\" — no visible reasoning at all. That is not an oversight; a judge whose output must be parsed by code downstream cannot afford a model that reasons out loud before it commits to a verdict, however much that reasoning might have improved the verdict's quality.")
+    add_callout(doc, "Definition", "Self-consistency", "Sampling a model's chain-of-thought several times at nonzero temperature and taking the majority-vote answer, trading extra inference calls for a reasoning path that isn't sensitive to one unlucky sampling run.")
+    add_body(doc, "Self-consistency is expensive in exactly the currency Chapter 13.7 showed is scarce — LLM calls — which is why Memora's design leans toward deterministic, temperature-0 judges instead: a judge that disagrees with itself between runs is a bigger problem than one that occasionally reasons imperfectly but consistently.")
+
+    add_heading(doc, "14.4 ReAct — reasoning and acting")
+    add_callout(doc, "Definition", "ReAct", "A prompting pattern that interleaves reasoning (\"what do I need next\") with acting (\"call this tool to get it\") in a loop, rather than asking a model to reason to a complete answer before taking any action.")
+    add_body(doc, "Memora's own codebase never uses the word \"ReAct,\" but Chapter 16 onward builds exactly this pattern: an agent loop that decides whether to retrieve, retrieves, evaluates what came back, and decides again — reasoning and acting interleaved rather than front-loaded. The prompt-engineering version of that idea is simpler than the architecture around it: give the model a reason to act between reasoning steps, rather than asking it to reason once, silently, all the way to a final answer.")
+
+    add_heading(doc, "14.5 The grounded-answer prompt template for RAG")
+    add_callout(doc, "Definition", "Grounded answer", "An answer whose claims are traceable to specific retrieved evidence, as distinct from a fluent answer that merely sounds plausible.")
+    add_body(doc, "Every answer-generating prompt in this book, from `query.py`'s simplest version to the agent's full `_ROLE_AND_RULES`, is a variation on the same four-part template: identity, question, evidence, instruction.")
+    add_code(doc, '''You are an expert assistant. Use the following retrieved documents to answer the question.
+
+Question: {query}
+
+Context:
+{context}
+
+Provide a concise and accurate answer based on the above information.''')
+    add_body(doc, "The agent-facing version adds hard limits and tool descriptions around this same core, but the core itself never changes shape: identify the role, state the question, hand over the evidence, instruct the model to answer from it. Every technique in the rest of this chapter is a refinement of one of these four parts — never a fifth part bolted on.")
+
+    add_heading(doc, "14.6 Reducing hallucination through prompt constraints")
+    add_body(doc, "\"Answer ONLY from retrieved chunks — never from memory\" and \"Never fabricate facts\" appear as explicit, standalone lines in `_ROLE_AND_RULES` — not folded into a longer sentence, not implied by context. `GROUNDING_PROMPT` then checks the same constraint from the other side, asking whether \"the key claims in the answer are traceable to the retrieved chunks (not invented).\"")
+    add_body(doc, "Stating a constraint once and checking it once is weaker than stating it in the generation prompt and re-checking it in a separate judging prompt with a separate model call. A generation prompt's constraint shapes what the model is more likely to produce; a judging prompt's constraint catches what slipped through anyway. Chapter 20 builds the second half of that pair in full.")
+
+    add_heading(doc, "14.7 Citation-aware prompts and the [Source: filename] convention")
+    add_callout(doc, "Definition", "Citation-aware prompt", "A prompt that requires every factual claim to carry an inline, machine-parseable pointer back to the specific source it came from, so groundedness can be verified per-claim instead of trusted for the answer as a whole.")
+    add_body(doc, "Memora's convention is exact and repeated verbatim across every prompt that produces cited text: `[Source: filename]`, placed inline after the sentence it supports, never collected into a trailing list.")
+    add_code(doc, '''- Cite every source inline as [Source: filename] after the sentence it supports.
+- If multiple sources support the same fact, list them all: [Source: a.pdf] [Source: b.pdf].
+...
+- Citations appear ONLY inline within sentences as [Source: filename]. Never as a trailing list.''')
+    add_body(doc, "The \"never as a trailing list\" rule is not a style preference — a trailing citation list disconnects the source from the specific claim it supports, so a reader (or a downstream faithfulness checker) can no longer tell which of three sources backs which of five sentences. Inline placement keeps the pointer next to the claim it is a pointer for.")
+
+    add_heading(doc, "14.8 Controlling tone, length, and output format")
+    add_body(doc, "`_PROCESS_INSTRUCTIONS`'s OUTPUT FORMAT block controls all three at once, in four short bullet lines: plain prose, no headings or markdown, a 400-word ceiling, and inline-only citations. Compare that to the judge and repair prompts elsewhere in the file, which demand the opposite of prose — a single JSON object, no markdown fences, first character mandated to be `{` or `[`.")
+    add_table(doc, ["Output need", "Format constraint used", "Where"], [
+        ["Human-readable answer", "Plain prose, no markdown, word cap", "`_PROCESS_INSTRUCTIONS`"],
+        ["Machine-parsed verdict", "Exactly one of two literal lines", "`GROUNDING_PROMPT`"],
+        ["Machine-parsed structure", "Single JSON object, no fences, no prose", "`_JSON_REPAIR_PROMPT`, `_DC_SCAN_PROMPT`"],
+    ], [2.05, 2.65, 1.70])
+    add_body(doc, "The format constraint is chosen by who reads the output next, not by what feels natural to write. A human reads prose; a parser needs a format it can call `json.loads()` on without a preprocessing step. Mixing the two — prose with an embedded JSON block, say — creates work for whichever consumer didn't get the format it needed.")
+
+    add_heading(doc, "14.9 Why word-count caps are honored as suggestions, not rules")
+    add_body(doc, "The 400-word ceiling in `_PROCESS_INSTRUCTIONS` was not a stylistic preference from day one — it was added after a specific, observed failure. Under context dilution, the model entered a repetition-degeneration loop that produced an 11,133-character answer, vomiting citations in a cycle with no natural stopping point. The word cap, along with \"no headings,\" \"citations inline only,\" and \"never as a trailing list,\" were added together as one OUTPUT FORMAT block specifically to close that failure mode.")
+    add_callout(doc, "Common pitfall", "Treating a stated cap as an enforced one", "Nothing downstream of generation in this pattern counts words and truncates the response — the 400-word instruction is exactly that, an instruction, honored to the degree an autoregressive model can honor a global property of text it is generating one token at a time without foresight of its own final length. Contrast this with Chapter 11's `score_threshold`, which is enforced in code after the fact regardless of what the retriever \"intended.\" A prompt constraint shapes probability; a code constraint guarantees an outcome. Know which one you are relying on, and reach for the code-enforced version whenever the cost of violation is high enough to matter.")
+
+    add_heading(doc, "14.10 Debugging a bad prompt")
+    add_body(doc, "Memora tracks every deliberate prompt revision in a dedicated `Prompt_Changes.txt` file, not scattered across commit messages — a small habit worth adopting directly: when a prompt changes because of an observed failure, write down what failed, what changed, and why, in one place a future edit can be checked against.")
+    add_bullets(doc, [
+        "Read the actual retrieved context the model saw, not what you assume was retrieved (Chapter 22's dry-run trace exists for exactly this).",
+        "Isolate structure from content — move the failing instruction closer to the end of the prompt before rewriting its wording.",
+        "Check whether the failure is a generation problem or a parsing problem; a well-grounded answer in the wrong format looks identical to a badly grounded one until you check which stage actually broke.",
+        "Reproduce with the same model and temperature before concluding a fix worked — a single passing run proves little at temperature above 0.",
+        "Prefer one small, explainable change per iteration; a rewrite that touches five instructions at once teaches you nothing about which one mattered.",
+    ])
+
+    add_heading(doc, "14.11 The Conservative-Grounding Prompt Pattern")
+    add_callout(doc, "Definition", "Conservative-Grounding Prompt Pattern", "A reusable instruction template — applied identically across generation, drafting, and judging prompts — that forbids any claim, inference, or value not directly traceable to the supplied evidence, with an explicit instruction to prefer an empty or default result over a fabricated one.")
+    add_body(doc, "This is not one prompt; it is a pattern repeated with the same backbone across roles that have nothing else in common. The answer generator is told to answer only from context. The merge judge is told a claim is fabricated unless a source supports it \"verbatim or as a clear paraphrase.\" The value-verification prompt is told to \"use the existing default... for genuinely missing fields\" rather than invent one.")
+    add_code(doc, '''# Generation
+Answer ONLY from retrieved chunks — never from memory.
+Never fabricate facts.
+
+# Judging (same backbone, applied to someone else's output)
+For every factual claim in the MERGED CHUNK, ask: "Is this claim
+supported by at least one SOURCE CHUNK above?"
+If NO -> list it in "fabricated_claims".''')
+    add_body(doc, "The pattern's real value is consistency across roles: a project that only forbids fabrication at generation time has one gate; the same rule enforced identically at generation, drafting, and judging is three independent chances to catch the same failure mode, in the same vocabulary, checkable against each other.")
+
+    add_heading(doc, "14.12 Structure for reliable structured-output LLM calls")
+    add_body(doc, "Every JSON-producing prompt in `prompts.py` — the redundancy scanner, the merge judge, the JSON repair model — follows the identical five-layer shape shown in Figure 14.2, in the identical order.")
+    add_figure(doc, diagram_structured_hierarchy_14(), "Figure 14.2 — The reminder that matters most for output compliance goes last, nearest the point of generation.")
+    add_body(doc, "That ordering is the same recency-bias finding from Section 14.1 and ADR-012, applied to a different problem: a rule stated once at the top of a long prompt is exactly as vulnerable to being \"forgotten\" by the time generation starts as a process instruction buried in the middle of an agent's system prompt was.")
+    add_code(doc, '''Return ONLY a JSON object — no markdown, no prose, no code fences:
+{{"compressed": "<retained content, or __IRRELEVANT__>", "dropped_count": <int>, "reason": "<one sentence>"}}
+
+...
+
+The first character of your response must be '['.
+Your response will be parsed directly using json.loads().
+Invalid JSON will cause failure.
+
+Return ONLY the JSON array.''')
+    add_body(doc, "The repeated, almost redundant-sounding final reminder — stating the format constraint a second time, immediately before generation begins — is not padding. It is the same lesson as the system prompt split, compressed into three lines instead of two files.")
+
+    add_heading(doc, "14.13 Advanced reasoning prompts — Tree of Thoughts, Step-Back, and Socratic prompting")
+    add_callout(doc, "Definition", "Tree of Thoughts (ToT)", "A reasoning strategy that explores several candidate reasoning branches in parallel, evaluates each, and continues only the most promising ones — trading a single linear chain-of-thought for a searchable tree of partial solutions.")
+    add_body(doc, "None of these three techniques appear in Memora's own prompt library — they are heavier-weight tools than a RAG answer or a compression judgment typically needs, and they belong in this chapter as tools worth recognizing rather than ones this particular project reached for.")
+    add_table(doc, ["Technique", "Core idea", "Best fit"], [
+        ["Tree of Thoughts", "Explore and prune multiple reasoning branches", "Problems with many plausible partial solutions"],
+        ["Step-Back prompting", "Ask a general question before the specific one", "Questions that need a principle before a detail"],
+        ["Socratic prompting", "Have the model interrogate its own draft with questions", "Self-review passes on a completed answer"],
+    ], [1.75, 2.65, 2.00])
+    add_body(doc, "A useful filter for all three: reach for them when a single forward pass of reasoning is demonstrably insufficient, not by default. Memora's own judges deliberately avoid open-ended reasoning (Section 14.3) precisely because their task — a bounded classification — does not need a searchable reasoning tree to get right.")
+
+    add_heading(doc, "14.14 Multi-stage prompting — prompt chaining and meta prompting")
+    add_callout(doc, "Definition", "Prompt chaining", "Splitting a task across two or more sequential LLM calls, where each call's output becomes the next call's input, instead of asking one prompt to do the entire task in one pass.")
+    add_body(doc, "Memora's answer generation is a real, shipped example. An earlier design asked one call to produce the final answer directly from context. It was later split into `generate_draft` — produce a working draft from raw context — followed by `generate_answer`, which takes that draft as synthesis input and produces the answer actually returned to the user. The draft is not the answer; it is the first link in a two-call chain, and Chapter 20 covers the quality-gate bug that this exact split once introduced when the two stages' ordering wasn't reconciled with a judge sitting between them.")
+    add_callout(doc, "Definition", "Meta prompting", "A prompt whose job is to construct, evaluate, or repair another prompt's output, rather than to answer the user's original question directly.")
+    add_body(doc, "The `_JSON_REPAIR_PROMPT` and `_VALUE_VERIFY_PROMPT` are both meta prompts in exactly this sense — neither one answers a user's question; each one exists to fix what an earlier call in the chain produced. A pipeline with enough prompt chaining tends to accumulate meta prompts almost by necessity, since more stages means more places a stage's output can arrive malformed.")
+
+    add_heading(doc, "14.15 Delimiter techniques")
+    add_callout(doc, "Definition", "Delimiter", "A visual or structural marker — capitalized labels, brackets, fenced blocks — that separates one part of a prompt (instructions, examples, evidence, user input) from another, so the model does not have to infer the boundary from prose alone.")
+    add_body(doc, "Memora's delimiter of choice, used identically across every prompt in the file, is a capitalized label on its own line: `USER QUERY:`, `RETRIEVED CHUNKS:`, `ANSWER TO EVALUATE:`, `PROPOSED GROUPS:`. No XML tags, no triple backticks around plain text sections — just a consistent, unambiguous label immediately before each block.")
+    add_code(doc, '''USER QUERY:
+{query}
+
+RETRIEVED CHUNKS (the only allowed source of facts):
+{context}
+
+ANSWER TO EVALUATE:
+{answer}''')
+    add_body(doc, "The label does two jobs at once: it tells the model where one section ends and the next begins, and its wording — \"the only allowed source of facts\" — smuggles a constraint into what looks like a plain section header. A delimiter is free real estate for reinforcing a rule the model needs to see again anyway.")
+
+    add_heading(doc, "14.16 Persona and constraint hybrids")
+    add_body(doc, "\"You are a research assistant\" is a persona. \"You are NOT writing software. You are NOT generating Python. You are NOT solving a coding task\" — three negative constraints, stacked immediately after a persona line in the redundancy scanner — is something else: a persona paired with an explicit boundary on what that persona is not permitted to drift into.")
+    add_callout(doc, "Common pitfall", "A structured-comparison task read as a coding task", "Smaller, general-purpose models asked to compare sentences for redundancy will sometimes respond as if the task were \"write a script that checks for redundancy\" — a plausible-sounding but useless answer to a task that needed a direct judgment, not code. `_DC_SCAN_PROMPT` and its sibling judge prompts address this by stating the negative constraint explicitly and early, immediately after the persona, rather than assuming the task framing alone rules it out.")
+    add_body(doc, "The pairing generalizes: a persona alone describes who the model should sound like; a persona plus explicit negative constraints describes who the model should sound like and which nearby, tempting failure mode that persona is specifically not allowed to slide into. The second half is only worth writing once you have actually watched a model slide.")
+
+    add_body(doc, "Every prompt in this chapter was tuned against something that broke — a recency-bias failure, a repetition loop, a model that wrote code instead of judging. That is the throughline worth keeping past this chapter: a prompt is not finished when it reads well, only when it has survived contact with the model's actual, imperfect behavior. Part IV picks up from here and asks a harder question than any single prompt can answer alone — not just how to phrase an instruction well, but how to build a system that decides, on its own, when to retrieve, when to stop, and when to admit it does not yet know enough.")
+
+    path = OUT_DIR / "Chapter_14_Prompt_Engineering_for_RAG.docx"
+    doc.core_properties.title = f"Chapter 14 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_chokepoint_13b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650">'
+        '<rect width="1200" height="650" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Five roles, one call path"], size=27, bold_first=True)
+        + svg_labeled_box(20, 95, 220, 115, "llm", ["generation", "temp 0.1"], fill="#F2F2F2")
+        + svg_labeled_box(250, 95, 220, 115, "merge_llm", ["chunk merging", "temp 0.0"], fill="#F2F2F2")
+        + svg_labeled_box(480, 95, 220, 115, "judge_llm", ["quality judging", "temp 0.0"], fill="#F2F2F2")
+        + svg_labeled_box(710, 95, 220, 115, "json_fix_llm", ["structured repair", "temp 0.0"], fill="#F2F2F2")
+        + svg_labeled_box(940, 95, 220, 115, "llm_tool", ["tool-calling traffic", "temp 0.1"], fill="#F2F2F2")
+        + svg_arrow(130, 210, 460, 308)
+        + svg_arrow(360, 210, 520, 308)
+        + svg_arrow(590, 210, 600, 308)
+        + svg_arrow(820, 210, 680, 308)
+        + svg_arrow(1050, 210, 740, 308)
+        + svg_labeled_box(360, 310, 480, 100, "llm_invoke()", ["classify errors, retry, gate, cool down", "the only place that calls .invoke()"], fill="#808080", text_fill="#FFFFFF")
+        + svg_arrow(600, 410, 600, 436)
+        + svg_labeled_box(280, 438, 640, 100, "Provider Client", ["Groq · Custom OpenAI-compatible endpoint · HF router", "returns a typed LLMResult either way"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter13b_chokepoint", svg)
+
+
+def diagram_consolidation_13b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="480">'
+        '<rect width="1240" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(620, 38, ["The provider-consolidation timeline"], size=26, bold_first=True)
+        + svg_labeled_box(40, 100, 270, 140, "ADR-004", ["Groq only", "llm · merge_llm · judge_llm"], fill="#F2F2F2")
+        + svg_arrow(315, 170, 343, 170)
+        + svg_labeled_box(350, 100, 270, 140, "ADR-054", ["+ HF router", "judge_llm · json_fix_llm"], fill="#D9D9D9")
+        + svg_arrow(625, 170, 653, 170)
+        + svg_labeled_box(660, 100, 270, 140, "ADR-060", ["+ custom endpoint", "llm_tool stays on Groq"], fill="#808080", text_fill="#FFFFFF")
+        + svg_arrow(935, 170, 963, 170)
+        + svg_labeled_box(970, 100, 270, 140, "ADR-062", ["full consolidation", "Groq + HF commented out"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_labeled_box(170, 300, 900, 100, "Commented out, not deleted",
+                           ["every retired provider block stayed in the file — reverting is an uncomment, not a rewrite"], fill="#FFFFFF", dashed=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter13b_consolidation", svg)
+
+
+def build_chapter_13b() -> Path:
+    title = "Centralized LLM Invocation and Error Handling"
+    doc = configure_document(title)
+    add_cover(doc, "13B", title, "PART III — BUILDING THE RETRIEVAL PIPELINE", "A provider outage is not a design failure. Handling it in nine different places is.")
+    add_chapter_heading(doc, "13B", title)
+    add_body(doc, "Chapter 13 called `llm_invoke` without asking what was inside it. That was deliberate — the augmentation step needed a black box that took messages in and returned an answer out, and opening the box would have buried the actual subject, prompt-and-context assembly, under provider plumbing. This chapter opens the box.")
+    add_body(doc, "`llm_caller.py` is 913 lines for a project whose actual generation logic fits in a page. Almost none of that length is generation logic. It is a FIFO call gate, an adaptive cooldown derived from live rate-limit headers, a twenty-branch error taxonomy spanning two SDKs and three HTTP libraries, and a recovery path for a specific, once-observed provider failure. Every line of it exists because a single, simpler version broke in production first.")
+    add_body(doc, "By the end of this chapter you will be able to build a centralized LLM-invocation layer that classifies failures instead of merely catching them, decide which errors deserve a retry and which deserve to fail fast, run several differently-configured model roles behind one interface, and read a real multi-provider migration history for what it actually teaches: consolidate when juggling providers costs more than committing to one, and always leave yourself a fast way back.")
+
+    add_heading(doc, "13B.1 Why every LLM call should flow through one wrapper")
+    add_body(doc, "Chapter 13.7 showed a simplified two-branch version of this idea: classify, then decide whether to retry. The real `llm_caller.py` handles ten distinct Groq exceptions, ten parallel OpenAI-SDK exceptions (because the custom-endpoint and Hugging Face paths speak the OpenAI protocol, not Groq's), plus raw `httpx` and `requests` failures for HTTP-level problems neither SDK wraps. That is roughly thirty except-blocks. Written once, in one file, that is a maintainable taxonomy. Written at every call site that invokes an LLM — and this project has dozens, across drafting, judging, merging, redundancy scanning, and distillation — it is thirty except-blocks multiplied by every call site, each one a chance to classify a failure slightly differently from its neighbor.")
+    add_figure(doc, diagram_chokepoint_13b(), "Figure 13B.1 — Every role-specific client still funnels through the same invocation, retry, and classification logic.")
+    add_body(doc, "Figure 13B.1 is the argument in one picture: five differently-configured clients, one call path. A provider migration, a new retry policy, or a newly discovered failure mode gets fixed once, in `llm_invoke`, and every caller inherits the fix on its next call — not on its next edit.")
+
+    add_heading(doc, "13B.2 The LLMResult dataclass and the LLMErrorKind enum")
+    add_callout(doc, "Definition", "LLMErrorKind", "A closed enumeration of failure categories an LLM call can terminate in — rate limiting, authentication, a malformed request, a server error, a network failure, a timeout, and more — used to route every failure through the same typed decision logic instead of a generic exception message.")
+    add_body(doc, "Every call into `llm_invoke` returns an `LLMResult`, win or lose, rather than raising for failure and returning a string for success. A caller checks `result.ok` exactly once and reads whichever half of the dataclass is populated; nothing downstream needs a `try/except` around a call it did not make.")
+    add_code(doc, '''class LLMErrorKind(Enum):
+    TOOL_USE_FAILED = auto()   # 400, code="tool_use_failed" — partial gen available
+    BAD_REQUEST     = auto()   # 400, other cause
+    RATE_LIMIT      = auto()   # 429
+    AUTH            = auto()   # 401
+    PERMISSION      = auto()   # 403
+    NOT_FOUND       = auto()   # 404
+    UNPROCESSABLE   = auto()   # 422
+    SERVER_ERROR    = auto()   # 5xx
+    CONNECTION      = auto()   # network failure, no HTTP status
+    TIMEOUT         = auto()   # request timed out
+    UNKNOWN         = auto()   # anything else
+
+@dataclass
+class LLMResult:
+    ok: bool
+    response: Any = None
+    content: str = ""
+    error_kind: LLMErrorKind | None = None
+    status_code: int | None = None
+    error_message: str = ""
+    recovered_text: str = ""
+    raw_error: BaseException | None = None''')
+    add_body(doc, "`recovered_text` is worth noticing before Section 13B.4 explains it: a failed call can still carry partial, usable output. A dataclass that only had `ok` and `content` would have no field to put that in.")
+
+    add_heading(doc, "13B.3 The Groq error taxonomy")
+    add_body(doc, "Groq's Python SDK — and, in parallel, the OpenAI SDK used for the custom endpoint and the Hugging Face router — raises a distinct exception class per HTTP status family. `_invoke_once` catches each one by name and maps it to exactly one `LLMErrorKind`, so two SDKs that disagree about class names agree, by the time a caller sees the result, about what actually happened.")
+    add_table(doc, ["Exception", "HTTP status", "LLMErrorKind"], [
+        ["`BadRequestError`", "400", "`TOOL_USE_FAILED` or `BAD_REQUEST`"],
+        ["`RateLimitError`", "429", "`RATE_LIMIT`"],
+        ["`AuthenticationError`", "401", "`AUTH`"],
+        ["`PermissionDeniedError`", "403", "`PERMISSION`"],
+        ["`NotFoundError`", "404", "`NOT_FOUND`"],
+        ["`UnprocessableEntityError`", "422", "`UNPROCESSABLE`"],
+        ["`InternalServerError`", "5xx", "`SERVER_ERROR`"],
+        ["`APIConnectionError`", "— (network)", "`CONNECTION`"],
+        ["`APITimeoutError`", "— (client-side)", "`TIMEOUT`"],
+        ["`APIStatusError` (catch-all)", "anything else", "`UNKNOWN`"],
+    ], [2.30, 1.55, 2.55])
+    add_body(doc, "The catch-all matters as much as the specific branches: `APIStatusError` is the parent class every specific Groq exception inherits from, so a status code the taxonomy has not seen yet — Section 13B.17's HTTP 402 is exactly this case — still returns a typed `LLMResult` instead of an uncaught exception. `UNKNOWN` is not a bug in the taxonomy; it is the taxonomy admitting a gap without crashing over it.")
+
+    add_heading(doc, "13B.4 The tool_use_failed recovery path")
+    add_body(doc, "BUG-F012 is the reason this section exists: Groq once rejected a mid-session tool-call payload with `BadRequestError` / `tool_use_failed`, and the pipeline's original response was a hard abort with no attempt to salvage anything. `_handle_bad_request` is the fix — it does not just classify the failure, it reads the error body for a `failed_generation` field Groq includes specifically for this error code, containing the text the model had generated before the tool-call payload broke.")
+    add_code(doc, '''_FUNCTION_SUFFIX_RE = re.compile(r"\\s*<function=\\w+>\\{.*", re.DOTALL)
+
+def _strip_function_suffix(text: str) -> str:
+    return _FUNCTION_SUFFIX_RE.sub("", text).strip()
+
+def _handle_bad_request(exc):
+    error_detail = exc.response.json().get("error", {})
+    if error_detail.get("code") == "tool_use_failed":
+        recovered = _strip_function_suffix(error_detail.get("failed_generation", ""))
+        return LLMResult(ok=False, error_kind=LLMErrorKind.TOOL_USE_FAILED,
+                          error_message="tool_use_failed", recovered_text=recovered)
+    return LLMResult(ok=False, error_kind=LLMErrorKind.BAD_REQUEST, ...)''')
+    add_callout(doc, "Common pitfall", "Treating a malformed tool call as an empty response", "Groq's `failed_generation` field often contains a nearly-complete assistant draft, cut off exactly where the malformed function-call payload begins. Discarding it and returning an empty failure — the original behavior BUG-F012 fixed — throws away real, usable content because the very last part of the response was broken. `_strip_function_suffix` recovers everything before that point instead of nothing.")
+    add_body(doc, "Whether a caller actually uses `recovered_text` is its own decision — a judge prompt might prefer to fail cleanly and retry, while a best-effort answer path might accept the recovered draft rather than return nothing. The wrapper's job stops at making the recovered text available; what to do with it is a policy decision made above `llm_caller.py`, not inside it.")
+
+    add_heading(doc, "13B.5 Custom OpenAI-compatible endpoints")
+    add_body(doc, "`CUSTOM_API_BASE`, `CUSTOM_API_KEY`, and `CUSTOM_API_MODEL_NAME` let `ChatOpenAI` point at any OpenAI-spec server — Together AI, a self-hosted vLLM instance, or a local endpoint — without a code change, the same hot-swap property Chapter 13.2 credited for making the original Groq choice reversible. Getting there took two real, observed bugs.")
+    add_body(doc, "The first was an ordering bug: a module-level constant read `CUSTOM_API_BASE` before `load_dotenv()` had run inside `main()`, so the client silently fell back to `api.openai.com` and every call failed authentication against the wrong provider with the wrong key. The fix moved credential resolution inside `main()`, immediately after `load_dotenv()`, and added a startup log line — `[LLM] endpoint=... model=...` — specifically so a wrong endpoint is visible before the first failed call, not inferred from it.")
+    add_body(doc, "The second was a URL-shape mismatch: `.env` held a full endpoint (`.../v1/chat/completions`), which a raw `requests.post` call needs verbatim, but `ChatOpenAI` treats `base_url` as a root and appends `/chat/completions` itself — producing a doubled path and a 404. `_normalize_openai_base_url` strips the trailing `/chat/completions`, `/completions`, or `/responses` suffix before the value reaches `ChatOpenAI`, and does nothing if the value was already a bare root, so it is safe to apply unconditionally rather than gated behind a check for which shape a given `.env` happens to use.")
+    add_callout(doc, "Common pitfall", "Reading an env var before load_dotenv() has run", "A module-level `os.getenv(...)` executes at import time. If `load_dotenv()` runs later, inside a function, the constant has already captured `None` — and every consumer of that constant is silently wrong for the rest of the process, with no exception to point at the cause. Resolve credentials and endpoints as close as possible to the moment they are used, after configuration is guaranteed loaded, not at module scope.")
+
+    add_heading(doc, "13B.6 The tolerant HTTP client")
+    add_body(doc, "A local TGI (Text Generation Inference) server tested against the custom-endpoint path violated the OpenAI tool-call spec in two ways at once: it returned `function.arguments` as a raw JSON object instead of the spec-required JSON-encoded string, and it returned HTTP 500 on multi-turn conversations where an assistant message had an empty `content` field alongside `tool_calls`. Both violations broke LangChain's response parsing before any application code ran, which ruled out fixing them from inside `llm_caller.py` — by the time an exception reached there, the useful information was already gone.")
+    add_code(doc, '''def build_tolerant_http_client() -> httpx.Client:
+    def _fix_response(response: httpx.Response) -> None:
+        # coerce dict-shaped tool arguments into the spec-required JSON string
+        ...
+    def _fix_request(request: httpx.Request) -> None:
+        # strip empty `content` fields from multi-turn tool-call messages
+        ...
+    client = httpx.Client(event_hooks={"response": [_fix_response], "request": [_fix_request]})
+    return client
+
+llm = ChatOpenAI(..., http_client=build_tolerant_http_client())''')
+    add_body(doc, "The fix intercepts at the transport layer, before LangChain's Pydantic parsing ever sees the payload — invisible to the rest of the codebase, and applied only when `CUSTOM_API_BASE` actually points at a non-compliant server, so Groq and OpenAI traffic pass through untouched. It is the same lesson as Section 13B.4 from the opposite direction: sometimes the fix belongs even earlier than error classification, at the point where a malformed response first enters the system.")
+
+    add_heading(doc, "13B.7 The caller_tag parameter — grep-friendly trace lines")
+    add_body(doc, "Every `llm_invoke` call site supplies a `caller_tag` — `QUERY-SIMPLE`, `NAC-MERGE`, `VALIDATE-REDUNDANCY`, `ANSWER-QUALITY` — and every log line `llm_invoke` emits is prefixed with it. The tag costs nothing to add and answers, on sight, a question a stack trace alone cannot: not just that a call failed, but which of the project's dozen distinct LLM roles it was and what it was trying to do.")
+    add_code(doc, '''logger.warning(f"  [{caller_tag}] 429 received; holding gate, "
+               f"token window resets in {delay:.2f}s — retrying at front…")''')
+    add_body(doc, "A debug log with a thousand lines and no caller tags is a transcript. The same log with tags is an index — `grep NAC-MERGE run.log` isolates one role's entire call history instantly, which is exactly how the HTTP-402 investigation in Section 13B.17 attributed specific failures to specific pipeline stages rather than to \"the LLM\" in general.")
+
+    add_heading(doc, "13B.8 Transient versus permanent errors")
+    add_body(doc, "Not every `LLMErrorKind` deserves the same response. A `RATE_LIMIT` is a timing problem — wait, then the identical request will likely succeed. A `BAD_REQUEST` or `NOT_FOUND` is a correctness problem — the request itself is wrong, and retrying it verbatim will fail identically, forever, while burning latency and retry budget.")
+    add_table(doc, ["LLMErrorKind", "Character", "Retry?"], [
+        ["`RATE_LIMIT`", "Timing — window will refill", "Yes — `llm_invoke` retries automatically"],
+        ["`TIMEOUT` / `CONNECTION` / `SERVER_ERROR`", "Transient infrastructure", "Worth retrying at the caller's discretion"],
+        ["`BAD_REQUEST` / `NOT_FOUND` / `UNPROCESSABLE`", "The request itself is wrong", "No — will fail identically every time"],
+        ["`AUTH` / `PERMISSION`", "Configuration is wrong", "No — needs a human, not a retry"],
+    ], [2.35, 2.05, 2.00])
+    add_body(doc, "In the current implementation, `llm_invoke`'s own retry loop is written specifically for `RATE_LIMIT` — it is the failure mode this project actually hit at scale (Chapter 13.7's 6,000-TPM incident), and it is the one case where the response headers hand back an exact wait time rather than a guess. The other transient kinds return as terminal `LLMResult`s, leaving the retry decision to whichever caller has the context to make it well — a compression stage might retry once and fall back to the original chunk; a one-shot judge call might not retry at all. Centralizing classification does not require centralizing every retry policy behind it.")
+
+    add_heading(doc, "13B.9 Why llm.invoke(...) is never called directly outside llm_caller.py")
+    add_body(doc, "Every benefit in this chapter — the error taxonomy, the FIFO gate, the adaptive cooldown, the `caller_tag` traceability, the header-hook installation that makes rate-limit awareness possible at all — depends on every call passing through the same function. A single stray `llm.invoke(...)` elsewhere in the codebase would bypass all of it silently: no classification, no gate, no cooldown, and a raised exception instead of a typed result the rest of the pipeline knows how to handle.")
+    add_body(doc, "This is enforceable as a convention (a code-review rule: no direct `.invoke()` outside `llm_caller.py`) or as a lint rule (forbid importing the raw client type anywhere else). Either way, the invariant is worth protecting deliberately, because the failure mode of violating it is quiet — the stray call site works fine until the exact provider failure the rest of the system was hardened against reaches it first.")
+
+    add_heading(doc, "13B.10 Multiple LLM roles — one client per job")
+    add_body(doc, "`llm_setup.py` constructs five separate `ChatOpenAI` (or `ChatGroq`) instances rather than one shared client reused everywhere, each tuned to what its job actually needs.")
+    add_table(doc, ["Role", "Model", "Temperature", "Job"], [
+        ["`llm`", "`llama-3.1-8b-instruct`", "0.1", "Primary generation"],
+        ["`merge_llm`", "same as `llm`", "0.0", "Faithful chunk merging — no creativity"],
+        ["`judge_llm`", "`Qwen/Qwen2.5-7B-Instruct`", "0.0", "Deterministic quality judging"],
+        ["`json_fix_llm`", "`Qwen/Qwen2.5-Coder-3B-Instruct`", "0.0", "Structured-output repair"],
+        ["`llm_tool`", "same as `llm`", "0.1", "Tool-calling traffic, kept separate"],
+    ], [1.55, 2.35, 1.15, 1.85])
+    add_body(doc, "Five clients from `llm_setup.py`, one call path through `llm_caller.py` — the roles differ in configuration, never in how their calls are made, classified, or retried. That separation is what let the provider migration in Section 13B.15 move one role at a time without touching the invocation logic at all.")
+
+    add_heading(doc, "13B.11 Why the answer-generation LLM should not be the answer-quality judge")
+    add_body(doc, "`judge_llm` is never the same instance as `llm`, and the separation is not cosmetic. A model asked to grade its own output carries the same reasoning path, the same blind spots, and the same confident phrasing into the grading pass — a bias problem, not just a redundancy. It is also a calibration problem: self-reported confidence from the model that generated an answer is not evidence the answer is correct, only evidence the model is fluent, and Chapter 20 devotes an entire chapter to exactly this failure.")
+    add_body(doc, "A dedicated judge running at temperature 0, on its own model instance, at minimum removes the reasoning-path bias and gives the judgment a chance to be reproducible across runs. It is also cheaper in a way that compounds: `judge_llm` is a smaller model than `llm` in this project's configuration, which Sections 13B.12 and 13B.13 explain is deliberate, not a quality compromise.")
+
+    add_heading(doc, "13B.12 The dedicated json_fix_llm — decoupling repair from the primary model")
+    add_body(doc, "`json_fix_llm` exists because an earlier design flaw made its necessity obvious. The JSON-repair functions originally accepted an `llm` parameter that eight separate call sites dutifully passed — and every one of those values was silently discarded, overwritten by `llm = json_fix_llm` on the very next line. The parameter had been dead code since the dedicated repair model was introduced; every caller believed it was choosing a repair model when none of them were.")
+    add_body(doc, "The fix was not to make the parameter work — no call site had ever needed to diverge from the shared repair model — it was to remove the parameter entirely and make the real architecture visible in the function signature: one dedicated repair model, chosen once, in one place. Decoupling repair calls onto their own instance also protects the primary model's rate-limit budget specifically: a repair call happens only when a structured-output call already failed, which means it is by definition extra load on top of the pipeline's normal traffic, and routing that extra load onto a separate small model keeps a JSON-repair storm from also starving `llm`'s token window.")
+
+    add_heading(doc, "13B.13 Tiered SLM/LLM architecture")
+    add_callout(doc, "Definition", "Tiered SLM/LLM architecture", "Reserving a large, capable language model for the one task that most needs its reasoning quality — final answer generation — while routing high-frequency, narrowly-scoped tasks like judging and repair to a small language model (SLM) chosen for speed and cost instead.")
+    add_body(doc, "`json_fix_llm`'s `Qwen/Qwen2.5-Coder-3B-Instruct` is a fraction of the size of `llm`'s `llama-3.1-8b-instruct` — deliberately. A JSON-repair call does not need broad reasoning; it needs to reliably reshape malformed text into a schema, a narrow, mechanical task a 3B model handles about as well as an 8B one, at a fraction of the latency and rate-limit cost. Reserve the largest, most expensive model for the task that most needs its judgment — user-facing generation — and let every high-volume, low-judgment task run on the cheapest model that reliably clears the bar.")
+
+    add_heading(doc, "13B.14 Provider-routing options")
+    add_body(doc, "Four providers were evaluated for the judge and repair tier specifically, once it became clear Groq had no general-purpose chat model under 8 billion parameters to serve them cheaply.")
+    add_table(doc, ["Provider", "Verdict", "Why"], [
+        ["Groq", "Kept for `llm`/`llm_tool`", "Fastest inference; no small free model for judge/repair tiers"],
+        ["Custom OpenAI-compatible endpoint", "Adopted, then expanded", "Full model control; zero per-call cost once self-hosted"],
+        ["Hugging Face Inference Providers router", "Adopted, later retired", "Free small models; curated catalogue; sustained-load 402s"],
+        ["Google Colab + tunnel", "Rejected before and after adoption", "Free GPU, but ToS risk and no stable endpoint"],
+    ], [2.05, 1.85, 2.50])
+    add_body(doc, "Colab is the instructive rejection: every problem was identified *before* any code was written — Colab's terms of service prohibit unattended server-like processes, sessions die after roughly ninety idle minutes, and free-tier GPU availability is not guaranteed. The project wired it in anyway to test the theory, and every anticipated failure mode reproduced empirically: a hardcoded 60-second client timeout racing a 150-second server budget misclassified slow responses as `UNKNOWN` instead of `TIMEOUT`, the FastAPI endpoint caught its own exceptions and returned HTTP 200 with an embedded error field — defeating `raise_for_status()` entirely — and the tunnel URL itself changed mid-session, requiring a manual config update. A risk analysis that turns out to be entirely correct once tested is still worth having tested; the alternative was carrying the same theoretical objection into a permanent design decision without ever confirming it.")
+
+    add_heading(doc, "13B.15 The provider-consolidation timeline")
+    add_body(doc, "Four architecture decisions, twelve days apart at the extremes, trace a project learning the same lesson twice: split providers to unblock a specific problem, then consolidate once splitting them costs more than it solves.")
+    add_figure(doc, diagram_consolidation_13b(), "Figure 13B.2 — Each retired provider block was commented out, never deleted — reversal stayed one edit away.")
+    add_body(doc, "ADR-004 started with Groq alone. ADR-054 added the Hugging Face router for `judge_llm` and `json_fix_llm` only, once Groq proved to have no small free model for those roles. ADR-060 introduced a self-hosted custom endpoint and moved `llm`, `judge_llm`, and `json_fix_llm` onto it, while `llm_tool` stayed on Groq specifically for its tool-calling reliability. ADR-062 finished the consolidation: `llm_tool` joined the rest on the custom endpoint, and the Groq and Hugging Face client-construction blocks were commented out in place rather than deleted.")
+    add_body(doc, "That last detail in Figure 13B.2 is the timeline's real lesson. A migration is a bet, and every bet made in this sequence was reversible by design — commenting out a `ChatGroq(...)` block costs one line to undo; deleting it and reconstructing it from memory during a later outage does not. When a benchmark later confirmed the Hugging Face router's sustained-load failures (Section 13B.17), reverting `judge_llm` and `json_fix_llm` to it was, briefly, an actual step this project took (ADR-061) before the final consolidation — made trivial by exactly this discipline. Walk a consolidation back the moment measurement, not assumption, says the old configuration was better; keep the old code commented, not deleted, so that measurement can be acted on immediately.")
+
+    add_heading(doc, "13B.16 The ChatGroq + HF-style model path pitfall")
+    add_body(doc, "`GEN_MODEL_NAME` in `.env` was set to `Qwen/Qwen2.5-7B-Instruct` — a valid, correctly-formatted Hugging Face Hub model path — while feeding `ChatGroq(model=GEN_MODEL_NAME, ...)`, a client that only understands Groq's own model catalogue. The result was not a config-validation error; it was a runtime `HTTP 404 model_not_found` surfacing deep inside a chunk-merge call, logged as `[NAC-MERGE] NotFoundError`.")
+    add_callout(doc, "Common pitfall", "A valid model name from the wrong provider's catalogue", "The env value was not malformed — it was a real, working model identifier, just for a different provider's client than the one reading it. Two providers sharing one project inevitably share naming conventions in the developer's head even when their catalogues are disjoint; the fix here was mechanical (set `GEN_MODEL_NAME` back to a real Groq ID, and keep the invalid value as a commented-out reminder rather than deleting it), but the root cause was structural — one env var feeding two semantically incompatible model catalogues. Namespacing environment variables per provider (`GROQ_MODEL_NAME` vs. `CUSTOM_API_MODEL_NAME`, never one shared `MODEL_NAME`) removes the chance to make this mistake at all.")
+
+    add_heading(doc, "13B.17 HF Inference Providers Router under sustained load")
+    add_body(doc, "A five-configuration benchmark — three queries, two runs each, every combination of which roles ran on Groq, the custom endpoint, and the Hugging Face router — surfaced a failure mode invisible in light testing: every setup that routed validator, JSON-fix, or answer-quality traffic through the Hugging Face router logged HTTP 402 responses under sustained load, up to 149 in a single run. The router's free tier returns 402 once request volume or context size exceeds its quota within a rolling window — a distinct failure from the 429 rate-limit path the taxonomy already handled, and one that arrived, at the time, as a generic `APIStatusError` rather than its own classified kind.")
+    add_table(doc, ["Setup", "HF router traffic", "Avg latency (complex query)", "Errors"], [
+        ["Setup 2", "None", "6:10", "Zero — fastest overall"],
+        ["Setup 1", "Judge + JSON-fix + CAQ", "31:22", "402 on every run"],
+        ["Setup 5", "None (all local)", "6:58", "Zero — close second"],
+    ], [1.35, 2.35, 2.10, 1.60])
+    add_body(doc, "The 402s were not merely slow — they were silently corrosive. In the worst-affected log, `validate_lbc` returned a genuine model verdict on zero of fourteen calls, defaulting to `UNKNOWN` every time, which meant a compression stage's safety judge was effectively absent for the entire run without a single explicit failure being raised anywhere a dashboard would show it. This benchmark, not a theoretical objection, is what motivated ADR-062's full consolidation in Section 13B.15 — 402 density under load was measured, compared directly against a zero-error local configuration, and settled the decision with numbers instead of intuition.")
+
+    add_heading(doc, "13B.18 Retry with capped exponential backoff")
+    add_body(doc, "A `RATE_LIMIT` result does not retry blindly — the delay grows exponentially with each attempt, capped, and cross-checked against whatever wait time the provider's own response headers report.")
+    add_code(doc, '''def _rate_limit_delay(result, attempt, *, base_seconds, max_seconds):
+    exponential = min(max_seconds, base_seconds * (2 ** (attempt - 1)))
+    header_hint = _groq_wait_seconds(result)   # Groq's own reset-window headers
+    return max(exponential, header_hint)''')
+    add_table(doc, ["Constant", "Value", "Role"], [
+        ["`LLM_RATE_LIMIT_MAX_ATTEMPTS`", "3", "Total attempts before giving up"],
+        ["`LLM_RATE_LIMIT_BACKOFF_BASE_SECONDS`", "1.0", "First retry's base delay"],
+        ["`LLM_RATE_LIMIT_BACKOFF_MAX_SECONDS`", "30.0", "Ceiling on the exponential curve"],
+        ["`LLM_RATE_LIMIT_MAX_DELAY_SECONDS`", "1800.0", "Abort threshold — Section 13B.19"],
+    ], [2.75, 0.95, 2.70])
+    add_body(doc, "A `LLM_RATE_LIMIT_BACKOFF_JITTER_SECONDS` constant exists in configuration but is deliberately unused in `_rate_limit_delay` — the code comment is explicit about why: jitter exists to desynchronize multiple clients retrying in a collision-prone window, but this project's FIFO gate already guarantees only one thread calls the provider at a time, so there is no collision to desynchronize. An unused constant is not always dead code; sometimes it is a documented decision not to apply a general-purpose technique to a specific case where its precondition doesn't hold.")
+
+    add_heading(doc, "13B.19 The LLMRateLimitAbortError — when to stop retrying")
+    add_callout(doc, "Definition", "LLMRateLimitAbortError", "An exception raised when a computed rate-limit backoff delay exceeds a configured maximum wait, converting an indefinitely-postponed retry into an immediate, visible failure instead of a silent multi-hour hang.")
+    add_body(doc, "A capped exponential backoff still has an edge case: if a provider's own reset window is unusually long — a severe quota exhaustion, not a normal rate-limit blip — the computed delay can exceed any reasonable wait, and retrying anyway just means the pipeline hangs for that entire window before failing regardless. `LLM_RATE_LIMIT_MAX_DELAY_SECONDS` (1800 seconds, thirty minutes) is the line: if the required delay would cross it, `llm_invoke` releases the FIFO gate — so no other waiting thread is blocked behind a doomed call — and raises immediately instead of sleeping.")
+    add_code(doc, '''if delay >= rate_limit_max_delay_seconds:
+    _gate_release_to_next()
+    raise LLMRateLimitAbortError(delay)''')
+    add_body(doc, "This is the same principle as Section 13B.8's transient-versus-permanent distinction, applied one level deeper: even a genuinely transient failure stops being worth waiting for past some threshold, and a system that never defines that threshold will eventually wait the full length of a provider's worst day instead of failing fast and letting a caller — or a human — decide what to do next.")
+
+    add_body(doc, "Every mechanism in this chapter exists because a simpler version of `llm_caller.py` broke first — a hard abort on a recoverable error, a silently discarded parameter, a config value read one line too early, a free provider's quota limit nobody had classified yet. None of it was designed in advance; all of it was hardened in response to a specific, logged failure. That is the pattern worth carrying forward more than any individual constant or exception class: build the simple wrapper first, and let its real failures — not hypothetical ones — tell you what it needs to become. Chapter 15 leaves single-shot generation behind entirely and asks a harder question: not how to make one LLM call reliable, but how to let a model decide, on its own, when to make another one.")
+
+    path = OUT_DIR / "Chapter_13B_Centralized_LLM_Invocation_and_Error_Handling.docx"
+    doc.core_properties.title = f"Chapter 13B — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
 BUILDERS = {
+    11: build_chapter_11,
+    12: build_chapter_12,
+    13: build_chapter_13,
+    "13B": build_chapter_13b,
+    14: build_chapter_14,
     15: build_chapter_15,
     16: build_chapter_16,
     17: build_chapter_17,

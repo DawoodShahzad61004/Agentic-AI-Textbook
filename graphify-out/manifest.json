@@ -430,14 +430,14 @@
     "semantic_hash": "113bfc4c46f9f0d65cf1196cba3b54bc"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\chapter_build\\audit_chapters.py": {
-    "mtime": 1783852172.9993975,
-    "ast_hash": "e09e69bc4d5987c2e82030ab153ef480",
-    "semantic_hash": "e09e69bc4d5987c2e82030ab153ef480"
+    "mtime": 1785025893.414741,
+    "ast_hash": "1b0bf6233e30fcb929bc5a72fe3f1c97",
+    "semantic_hash": "1b0bf6233e30fcb929bc5a72fe3f1c97"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\chapter_build\\build_chapters.py": {
-    "mtime": 1783852257.6895452,
-    "ast_hash": "7acfab22b2757fbc3d2f9ab0fee0a2ce",
-    "semantic_hash": "7acfab22b2757fbc3d2f9ab0fee0a2ce"
+    "mtime": 1785026080.3773842,
+    "ast_hash": "38c51ad2aaf6e24ca600bc9dab0fa1c5",
+    "semantic_hash": "38c51ad2aaf6e24ca600bc9dab0fa1c5"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\AGENTS.md": {
     "mtime": 1783815199.914268,
@@ -445,9 +445,9 @@
     "semantic_hash": "b6a5eb3c99972137c2e79b5ef65a1ace"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Book_Index.md": {
-    "mtime": 1784614403.1878707,
-    "ast_hash": "7711702425a12088e1bfc589c1c43804",
-    "semantic_hash": "7711702425a12088e1bfc589c1c43804"
+    "mtime": 1785019514.873022,
+    "ast_hash": "8d84ee5348c5975da81a30794004c510",
+    "semantic_hash": "8d84ee5348c5975da81a30794004c510"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\CLAUDE.md": {
     "mtime": 1783815209.5662606,
@@ -1565,38 +1565,223 @@
     "semantic_hash": "0af8afe5b7d76a376d1bcb5cb696f554"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\README.md": {
-    "mtime": 1784876472.721143,
-    "ast_hash": "3e027b32fa1a2690a9a5ff0b9c75d070",
-    "semantic_hash": "3e027b32fa1a2690a9a5ff0b9c75d070"
+    "mtime": 1785162299.6654663,
+    "ast_hash": "caf549d66861db3d7c1d7d4cee60f97d",
+    "semantic_hash": "caf549d66861db3d7c1d7d4cee60f97d"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\docs\\Architecture.md": {
-    "mtime": 1784876419.6542895,
-    "ast_hash": "1f85a4ad90b7c4a372a8dcd3593b4619",
-    "semantic_hash": "1f85a4ad90b7c4a372a8dcd3593b4619"
+    "mtime": 1785162337.3757129,
+    "ast_hash": "b87bf7292464e8cf700ce2bf17376eeb",
+    "semantic_hash": "b87bf7292464e8cf700ce2bf17376eeb"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\docs\\Bugs.md": {
-    "mtime": 1784876318.1176865,
-    "ast_hash": "b07f1111e4d2eb97c7715af6fcda7d6d",
-    "semantic_hash": "b07f1111e4d2eb97c7715af6fcda7d6d"
+    "mtime": 1785162372.8940094,
+    "ast_hash": "21d88560f51bb0bb39745fadd958ad7f",
+    "semantic_hash": "21d88560f51bb0bb39745fadd958ad7f"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\docs\\Decisions.md": {
-    "mtime": 1784876357.5510206,
-    "ast_hash": "05da6cad3d635855d98d6fcf632d492a",
-    "semantic_hash": "05da6cad3d635855d98d6fcf632d492a"
+    "mtime": 1785162372.7467597,
+    "ast_hash": "1624af34f214bfec2488cfcf42ae57d2",
+    "semantic_hash": "1624af34f214bfec2488cfcf42ae57d2"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\docs\\Research.md": {
-    "mtime": 1784876391.2291205,
-    "ast_hash": "b2551809c5fd2e0da63845ddbebe0cde",
-    "semantic_hash": "b2551809c5fd2e0da63845ddbebe0cde"
+    "mtime": 1785162300.1732109,
+    "ast_hash": "dfdf278625278b4bf32bdc1e6ff2135b",
+    "semantic_hash": "dfdf278625278b4bf32bdc1e6ff2135b"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\docs\\Status.md": {
-    "mtime": 1784876445.2646487,
-    "ast_hash": "c61ae9c6ecb3f041f877e75a52ac24c4",
-    "semantic_hash": "c61ae9c6ecb3f041f877e75a52ac24c4"
+    "mtime": 1785162337.2126715,
+    "ast_hash": "3a5add78f0fe2ac3cfe72d15807105e8",
+    "semantic_hash": "3a5add78f0fe2ac3cfe72d15807105e8"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Memora\\app_workflow\\requirements.txt": {
     "mtime": 1784892749.558597,
     "ast_hash": "405d85a7965ad01f36108b90b5d91043",
     "semantic_hash": "405d85a7965ad01f36108b90b5d91043"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\flows\\1.json": {
+    "mtime": 1785156414.8696125,
+    "ast_hash": "07ea12698786a987339e5c5af7c11300",
+    "semantic_hash": "07ea12698786a987339e5c5af7c11300"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\flows\\2.json": {
+    "mtime": 1785156420.187572,
+    "ast_hash": "f3f9cab3ca01664743917759726a3b6b",
+    "semantic_hash": "f3f9cab3ca01664743917759726a3b6b"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\flows\\3.json": {
+    "mtime": 1785156826.3170846,
+    "ast_hash": "0ac4ff2ad72af1af30e0bdef205a23b7",
+    "semantic_hash": "0ac4ff2ad72af1af30e0bdef205a23b7"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\flows\\4.json": {
+    "mtime": 1785156839.275398,
+    "ast_hash": "d0fc152c443f963248a32b822b98d1a6",
+    "semantic_hash": "d0fc152c443f963248a32b822b98d1a6"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\flows\\5.json": {
+    "mtime": 1785156845.4726763,
+    "ast_hash": "997f2573afcb3be8f09a448a5bc65140",
+    "semantic_hash": "997f2573afcb3be8f09a448a5bc65140"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\flows\\6.json": {
+    "mtime": 1785156850.3870692,
+    "ast_hash": "c412078092c83e3f3e400acd907abf1a",
+    "semantic_hash": "c412078092c83e3f3e400acd907abf1a"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\flows\\7.json": {
+    "mtime": 1785156744.8756073,
+    "ast_hash": "7755645f92fdd610639b9acd5a9bc483",
+    "semantic_hash": "7755645f92fdd610639b9acd5a9bc483"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\flows\\8.json": {
+    "mtime": 1785156858.0945995,
+    "ast_hash": "720a2141028d3b6159d8f2240cd2961c",
+    "semantic_hash": "720a2141028d3b6159d8f2240cd2961c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\flows\\9.json": {
+    "mtime": 1785156757.4480922,
+    "ast_hash": "78e356ce283266194d03c222dff0c51d",
+    "semantic_hash": "78e356ce283266194d03c222dff0c51d"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\flows\\LangGraph RAG Pipeline.json": {
+    "mtime": 1785161508.1021867,
+    "ast_hash": "b33aa1cc0e49b36be1a79b410b2ae446",
+    "semantic_hash": "b33aa1cc0e49b36be1a79b410b2ae446"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Langflow-learning-project\\flows\\Vector Store RAG.json": {
+    "mtime": 1785156959.3001654,
+    "ast_hash": "6dd7e63ee3c05c64751d3f2e715f262b",
+    "semantic_hash": "6dd7e63ee3c05c64751d3f2e715f262b"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 33 (July 27).txt": {
+    "mtime": 1785156392.5079947,
+    "ast_hash": "4e51e093a57a546e07083a10309abf4c",
+    "semantic_hash": "4e51e093a57a546e07083a10309abf4c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 33 (July 28).txt": {
+    "mtime": 1785307349.3603828,
+    "ast_hash": "f1f6c0520c5b41c120e7897489dfa1c1",
+    "semantic_hash": "f1f6c0520c5b41c120e7897489dfa1c1"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 33 (July 29).txt": {
+    "mtime": 1785395282.7419038,
+    "ast_hash": "c4e9622e425dc18e5323fe61b9da1ed6",
+    "semantic_hash": "c4e9622e425dc18e5323fe61b9da1ed6"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 34 (July 30).txt": {
+    "mtime": 1785410816.7908714,
+    "ast_hash": "a1d3cb4d35d841c5acf197d4a5cace1e",
+    "semantic_hash": "a1d3cb4d35d841c5acf197d4a5cace1e"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 34 (July 31).txt": {
+    "mtime": 1785504669.8848934,
+    "ast_hash": "48cfbe87f60192624527a73fb5635be8",
+    "semantic_hash": "48cfbe87f60192624527a73fb5635be8"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\README.md": {
+    "mtime": 1785506859.9617505,
+    "ast_hash": "2bf604fbdda4e1ea88bf0d16a6b402ae",
+    "semantic_hash": "2bf604fbdda4e1ea88bf0d16a6b402ae"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\docs\\Architecture.md": {
+    "mtime": 1785506794.740971,
+    "ast_hash": "b27189b41efb8b42644d95a976ed4a6f",
+    "semantic_hash": "b27189b41efb8b42644d95a976ed4a6f"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\docs\\Bugs.md": {
+    "mtime": 1785506798.2480097,
+    "ast_hash": "2bd9ae4707ad34261ca71c7d2a274fd7",
+    "semantic_hash": "2bd9ae4707ad34261ca71c7d2a274fd7"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\docs\\Decisions.md": {
+    "mtime": 1785506763.0763915,
+    "ast_hash": "d74c9d0f8f1e270f7cba252e2408f4e9",
+    "semantic_hash": "d74c9d0f8f1e270f7cba252e2408f4e9"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\docs\\Research.md": {
+    "mtime": 1785506736.9258003,
+    "ast_hash": "99e47101289c55c9a7ffc406e79db068",
+    "semantic_hash": "99e47101289c55c9a7ffc406e79db068"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\docs\\Status.md": {
+    "mtime": 1785506813.344154,
+    "ast_hash": "3dc7bbe5fe0179a09896012330c59ec1",
+    "semantic_hash": "3dc7bbe5fe0179a09896012330c59ec1"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\langsmith-masterclass\\docs\\LangSmith Transcript - English.md": {
+    "mtime": 1783508695.8265183,
+    "ast_hash": "d2f74c1de48f743c41567a35efceb1d6",
+    "semantic_hash": "d2f74c1de48f743c41567a35efceb1d6"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\langsmith-masterclass\\docs\\Markdown-Tracking-Guide.md": {
+    "mtime": 1783582960.0604165,
+    "ast_hash": "574e14c2cc52e528e141c80a7740527c",
+    "semantic_hash": "574e14c2cc52e528e141c80a7740527c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_15_What_Agentic_Really_Means.pdf": {
+    "mtime": 1785024800.4535556,
+    "ast_hash": "dc4bd516596692016829e12214785bce",
+    "semantic_hash": "dc4bd516596692016829e12214785bce"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_16_Designing_the_Agent_Loop.pdf": {
+    "mtime": 1785024808.120798,
+    "ast_hash": "000d59fd1bdb61db17500124edc048d0",
+    "semantic_hash": "000d59fd1bdb61db17500124edc048d0"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_17_Tool_Use_and_Function_Calling.pdf": {
+    "mtime": 1785024818.8591506,
+    "ast_hash": "75cdbacc1c96825707b5fdd008d585dc",
+    "semantic_hash": "75cdbacc1c96825707b5fdd008d585dc"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_28_What_Self_Learning_Actually_Means.pdf": {
+    "mtime": 1785024826.4572642,
+    "ast_hash": "56f956b19fdb3c0708ef6ea1dd1d63d9",
+    "semantic_hash": "56f956b19fdb3c0708ef6ea1dd1d63d9"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_40_Security_and_Safety.pdf": {
+    "mtime": 1785024837.6388268,
+    "ast_hash": "5e8ba6e34df197e18af94aadf9cec794",
+    "semantic_hash": "5e8ba6e34df197e18af94aadf9cec794"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\chapter_build\\assets\\chapter5b_acceptance_gate.png": {
+    "mtime": 1785026089.91472,
+    "ast_hash": "80c012df95d80f8e9d38b466e428afaf",
+    "semantic_hash": "80c012df95d80f8e9d38b466e428afaf"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\chapter_build\\assets\\chapter5b_acceptance_gate.svg": {
+    "mtime": 1785026089.8694625,
+    "ast_hash": "6c96443b06d72cb19ca9996dae50de70",
+    "semantic_hash": "6c96443b06d72cb19ca9996dae50de70"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\chapter_build\\assets\\chapter5b_loader_harness.png": {
+    "mtime": 1785026089.7885978,
+    "ast_hash": "d2b2305d3bf4650884ea7fd59885e4e5",
+    "semantic_hash": "d2b2305d3bf4650884ea7fd59885e4e5"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\chapter_build\\assets\\chapter5b_loader_harness.svg": {
+    "mtime": 1785026089.744784,
+    "ast_hash": "3eb16a0fb32c0e2654537aa54a0bb0e6",
+    "semantic_hash": "3eb16a0fb32c0e2654537aa54a0bb0e6"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\chapter_build\\assets\\chapter7b_ground_truth_loop.png": {
+    "mtime": 1785026090.7160194,
+    "ast_hash": "bc0e173a0d9dfa76f7051e978d0fc2f3",
+    "semantic_hash": "bc0e173a0d9dfa76f7051e978d0fc2f3"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\chapter_build\\assets\\chapter7b_ground_truth_loop.svg": {
+    "mtime": 1785026090.6715698,
+    "ast_hash": "3aa7f0cbc56a81d973c9c67dbb48d303",
+    "semantic_hash": "3aa7f0cbc56a81d973c9c67dbb48d303"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\chapter_build\\assets\\chapter7b_in_memory_repair.png": {
+    "mtime": 1785026090.6223238,
+    "ast_hash": "4840e5c77b0f7bebbde986d72b46f024",
+    "semantic_hash": "4840e5c77b0f7bebbde986d72b46f024"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\chapter_build\\assets\\chapter7b_in_memory_repair.svg": {
+    "mtime": 1785026090.5744884,
+    "ast_hash": "8064428dcab8fcda9946e1eb2b07097c",
+    "semantic_hash": "8064428dcab8fcda9946e1eb2b07097c"
   }
 }

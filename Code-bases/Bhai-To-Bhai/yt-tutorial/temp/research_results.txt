@@ -1,0 +1,17 @@
+Open Source Tools for Building a Document Writing Assistant
+
+1. LanguageTool
+Free open-source writing assistant and grammar checker supporting more than 25 languages. Works across browsers and word processors.
+Source: https://opensource.com/life/14/5/seven-open-source-tools-writing
+
+2. WritingTools (theJayTea)
+System-wide, completely free and open-source grammar assistant that lets you select text and invoke Proofread, Rewrite, Friendly, Professional, Concise, or custom instructions. Works on Windows, Linux, and macOS, using the Gemini API or local LLMs.
+Source: https://github.com/theJayTea/WritingTools
+
+3. Etherpad
+Free, open-source (Apache License 2.0) real-time collaborative document editor hosted on GitHub.
+Source: https://medevel.com/18-open-source-tools-for-writers/
+
+4. Scribus
+Open source desktop publishing tool with professional-level support for typesetting, document presentation, layout, and color management.
+Source: https://medevel.com/18-open-source-tools-for-writers/

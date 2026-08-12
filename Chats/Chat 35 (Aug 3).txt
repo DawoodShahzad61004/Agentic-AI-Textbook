@@ -1,0 +1,1884 @@
+Write a neat, detailed, organized, and 10-sentence summary for this project. Do not add the names of the existing tools/packages because I havent decided yet which I m going to use. So, just talk about the project
+Worked for 11s
+This project is an open-source orchestration platform that coordinates multiple existing coding agents to complete complex software-engineering tasks from initial planning through final verification.
+It dynamically selects the most suitable agent for each stage based on the task type, repository context, required capabilities, previous performance, availability, cost, and configurable routing policies.
+During a single task, the platform can switch between agents and follow structured workflows such as planner → implementer → reviewer → fixer.
+A canonical task context preserves the objective, requirements, constraints, acceptance criteria, architectural decisions, completed work, remaining work, and unsuccessful attempts across all agent handoffs.
+Each agent’s resumable session reference and relevant conversation history are retained so that an earlier agent can continue its work when control returns to it.
+Agents operate on shared project information—including source files, isolated workspaces, changes, commits, test results, and review feedback—while supporting both sequential and parallel execution.
+Deterministic verification commands run tests, linting, type checking, security scanning, and project-specific acceptance checks instead of relying solely on an agent’s claim that the task is complete.
+Failed checks and review findings are routed to the most appropriate agent for correction, followed by repeated verification and independent review before the changes are accepted.
+Persistent workflow state, timeouts, retries, cancellation, recovery mechanisms, human approval gates, normalized events, logs, traces, cost records, and audit history make long-running tasks reliable, observable, and resumable after interruptions.
+The system is designed for local and containerized deployment, supports extensible external-agent adapters, and transfers only explicit context and session information without claiming to move hidden model state between different providers.
+
+
+I m in OpenHands right now and I need to add a LLM profile. For my local server (on another device, used using API base and key) what LLM Provider should I mention?
+Worked for 24s
+
+If your local server exposes an OpenAI-compatible API, set:
+
+LLM Provider: OpenAI
+Model: openai/<exact-model-id>
+Base URL: http://<server-device-IP>:<port>/v1
+API key: Your server key, or any placeholder such as local-llm if authentication is disabled.
+
+Example:
+
+LLM Provider: OpenAI
+Model: openai/mistral-7b-instruct
+Base URL: http://192.168.1.14:3001/v1
+API Key: your-key
+
+Use the Advanced tab. The model ID should exactly match the ID returned by:
+
+http://192.168.1.14:3001/v1/models
+
+Also ensure the other device’s firewall allows connections to port 3001. OpenHands documentation
+
+
+
+Worked for 38s
+
+Yes, OpenHands supports persistent session/conversation storage. My earlier wording was too vague.
+
+The key distinction is between three different things:
+
+Capability	Meaning	OpenHands
+Persistent conversation	Saves messages, events, files, and task state so you can reopen the work	Yes
+Persistent native agent session	Saves the internal Claude Code/Codex/Gemini session ID and resumes that exact CLI session	Depends on the ACP agent/integration
+Cross-agent handoff	Claude stops, then Codex automatically continues the same task with all necessary context	Not built in as a complete automatic workflow
+
+OpenHands can persist conversations locally when its backend storage is persistent. For Docker, VM, or cloud deployment, the relevant data directory/volume must also be persisted. Its Canvas is specifically designed to let users return to conversations and ongoing work. OpenHands Agent Canvas overview
+
+“Multi-engine” simply means supporting multiple coding-agent engines, such as:
+
+Claude Code
+Codex
+Gemini CLI
+OpenHands’ own agent
+Other ACP-compatible agents
+
+OpenHands does have this capability through Agent Client Protocol (ACP). It can launch and communicate with Claude Code, Codex, Gemini CLI, and custom ACP agents. OpenHands ACP Agents
+
+However, multi-engine support does not automatically mean multi-engine orchestration.
+
+OpenHands can:
+
+Store several agent profiles
+Run different coding agents
+Preserve OpenHands conversations
+Share a workspace with the selected agent
+Switch LLM models during an OpenHands-agent conversation
+Use different agents for different conversations
+
+But your project additionally requires:
+
+Monitor the current agent’s remaining token budget.
+Detect when that agent stops or exhausts its allowance.
+Select another coding agent automatically.
+Construct a handoff containing progress, decisions, changed files, failures, and remaining work.
+Start or resume the replacement agent.
+Continue until deterministic completion checks pass.
+
+That automatic sequence is not a ready-made OpenHands feature. You would still implement it using Langflow or another workflow layer.
+
+Also, switching a model is not the same as switching a coding agent. OpenHands explicitly supports changing LLM profiles while preserving conversation history and task state, but Claude Code → Codex is a change of agent runtime, not merely a model change. OpenHands LLM profiles
+
+So the corrected comparison is:
+
+OpenHands does provide persistent conversations and multi-engine access. Claw’s advantage is not that OpenHands lacks these features; Claw exposes more focused primitives for programmatically controlling multiple external coding-agent sessions. Neither one automatically implements your token-aware cross-agent handoff system.
+
+OpenHands may actually be a valid foundation for your project. It would simply require custom orchestration around its ACP agents, conversation persistence, and workspace state.
+
+All these things that I would have to "implement" if i use OpenHands, I would have to implement them with Claw Orchestrator as well. GIve me a distinct difference
+Worked for 42s
+
+You are correct: the core project-specific features—token-budget routing, automatic failover, shared skills, and cross-agent handoffs—must be implemented with either platform.
+
+The distinct difference is what each platform already provides underneath that custom logic:
+
+Distinct difference	Claw Orchestrator	OpenHands
+Main abstraction	A coordinated group of external coding-agent sessions	A complete environment for running development agents
+Built-in multi-agent workflow	Fan-out, mixed-agent councils, consensus rounds, and Planner–Coder–Reviewer loops	Primarily agent conversations and execution backends; cross-agent teamwork must be orchestrated
+Parallel-agent file isolation	Git worktrees and branches integrated into Council workflows	Isolated sandboxes/backends, but you coordinate how agents collaborate
+External agent control	Direct, detailed control over supported coding CLIs and their sessions	Standardized external-agent access mainly through ACP
+Product scope	Focused orchestration runtime	Full agent platform with UI, conversations, secrets, integrations, automations, and deployment backends
+
+The clearest practical difference is:
+
+Claw already understands several agents as members of one coordinated coding workflow. OpenHands mainly understands each agent as something it can run inside a managed development environment.
+
+For example, if Claude, Codex, and Gemini must independently propose solutions, work in separate branches, merge their work, review the result, and vote on completion:
+
+Claw already provides much of that through Council.
+In OpenHands, you would construct that coordination yourself around separate agents, conversations, or automations.
+
+However, your specific workflow is different: one agent works until its token allowance is low or it stops, and another continues. Neither platform provides this complete behavior. With both, you still need to implement:
+
+Token-allowance tracking
+Agent selection
+Failure and limit detection
+Standardized handoff packets
+Cross-agent skill sharing
+Context synchronization
+Completion checks
+
+Therefore, the honest conclusion is:
+
+Choose Claw if multi-agent coordination primitives and direct CLI session control are the most important foundation.
+Choose OpenHands if persistent conversations, sandbox infrastructure, UI, integrations, and deployment management are more valuable.
+If you will implement all orchestration yourself in Langflow and will not use Claw’s Council, fan-out, Autoloop, or worktree features, then Claw’s advantage becomes much smaller. In that case, OpenHands may be equally valid—or better if its broader platform features save you work.
+
+So Claw is not distinctly better because it eliminates your custom implementation. It is better only because its existing abstractions are closer to multi-agent coding coordination, while OpenHands’ abstractions are closer to agent execution and development-environment management.
+
+Why use OpenHands? Whats the benefit of using it if we have to construct it ourselves? Why not directly use Langflow/LangGraph? Whats the benefit of using it?
+Worked for 44s
+
+You are right to question it. If you intend to build the orchestration logic yourself, OpenHands is optional—not automatically beneficial.
+
+The three tools solve different problems:
+
+Tool	Primary job
+LangGraph	Define workflow state, routing, retries, handoffs, and completion logic
+Langflow	Visually build and run LangGraph-style workflows faster
+OpenHands	Provide a ready-made environment in which coding agents can modify repositories and execute commands
+What OpenHands gives you
+
+OpenHands saves you from building the lower-level coding-agent infrastructure:
+
+Secure execution environments and sandboxes
+File editing and shell-command execution
+Repository integration
+Persistent conversations
+Agent event streaming
+Docker, VM, Kubernetes, local, and remote execution backends
+Secrets and credential handling
+A user interface for monitoring work
+Its own software-development agent
+External-agent integration through ACP
+Scheduled and event-driven automations
+
+Therefore, OpenHands is useful when you want a mostly complete coding-agent platform and plan to customize it.
+
+What it does not give your project automatically
+
+You would still need to implement your distinctive orchestration behavior:
+
+Select Claude Code, Codex, Gemini, or DeepSeek based on token allowance
+Detect exhausted or unavailable agents
+Transfer unfinished work to another agent
+Construct cross-agent handoff context
+Share skills consistently between different agent runtimes
+Decide when the overall task is complete
+
+These are precisely the central features of your project.
+
+Why not use Langflow/LangGraph directly?
+
+You can—and this may be the better choice.
+
+However, Langflow and LangGraph are workflow engines, not complete coding-agent execution platforms. They can decide:
+
+“Codex should work next.”
+
+But you must create the component that actually:
+
+Starts Codex.
+Supplies its credentials and working directory.
+Streams and records its events.
+Tracks its session ID.
+Interrupts or resumes it.
+Handles crashes and timeouts.
+Captures changed files and execution results.
+
+OpenHands or Claw can provide much of this execution layer. Without either, you must build custom adapters and process/session management for every coding agent.
+
+The real decision
+Invalid or unsupported diagram.
+
+My honest recommendation for your project is:
+
+Use Langflow directly with custom components if the purpose is to build and demonstrate your own multi-agent orchestration system.
+Use OpenHands if execution infrastructure, sandboxing, UI, integrations, and deployment are not part of what you want to build.
+Use Claw if you want ready-made control over external coding-agent sessions without adopting an entire development platform.
+
+So, OpenHands’ benefit is not superior orchestration. Its benefit is avoiding the construction of the surrounding development-agent platform. If you do not need that platform—or want to build the relevant parts yourself—then using Langflow/LangGraph directly is cleaner and gives your project a more distinct contribution.
+
+
+Pasted text(1).txt
+Document
+At UI:
+litellm.InternalServerError: InternalServerError: OpenAIException - Connection error.
+
+
+
+Terminal's most recent outputs are attached
+Worked for 19s
+
+We’ll build a Python SDK automation: task → edit code → run tests → report result.
+
+Please send these three details:
+
+Repository path OpenHands should modify, e.g. C:\projects\my-app
+Verification command, e.g. pytest, npm test, or ruff check .
+First coding task, e.g. “Add input validation to the /query endpoint.”
+
+Once provided, I’ll create the exact runnable Python automation using your local OpenAI-compatible LLM profile:
+
+http://192.168.1.14:3001/v1
+
+The automation will independently rerun the verification command, so success is determined by its exit code—not merely by the agent claiming completion. The implementation will follow the current OpenHands SDK.
+
+PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai> 
+I dont have any verification command
+Create a sample-data corpus on Autism
+Worked for 17s
+
+Use these values for the small OpenHands automation:
+
+Repository path
+
+C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai
+
+First coding task
+
+Create a sample Autism Spectrum Disorder corpus inside data_files/autism_corpus/.
+
+Create 12 well-structured Markdown documents covering:
+1. ASD overview
+2. Core characteristics
+3. DSM-5 diagnostic criteria
+4. Early signs
+5. Screening and diagnosis
+6. Communication differences
+7. Sensory processing
+8. Education and classroom support
+9. Evidence-based interventions
+10. Family and caregiver support
+11. Common myths and misconceptions
+12. A synthetic ASD patient dataset data dictionary
+
+Each document must:
+- Contain at least 300 words
+- Use clear headings
+- Include a title, summary, key facts, and source-note section
+- Use respectful, neurodiversity-aware language
+- Avoid presenting medical information as personalized medical advice
+- Contain no real patient information
+
+Also create data_files/autism_corpus/manifest.json listing every document with its title, filename, topic, and document type.
+
+Do not modify existing application code or existing corpus files.
+
+Because you have no project verification command, use this standalone command:
+
+python -c "from pathlib import Path; import json; p=Path('data_files/autism_corpus'); files=list(p.glob('*.md')); m=json.loads((p/'manifest.json').read_text(encoding='utf-8')); assert len(files)==12, f'Expected 12 Markdown files, found {len(files)}'; assert len(m)==12, f'Expected 12 manifest entries, found {len(m)}'; assert all(len(f.read_text(encoding='utf-8').split())>=300 for f in files), 'A document contains fewer than 300 words'; print('PASS: Autism corpus contains 12 valid documents')"
+
+The success output should be:
+
+PASS: Autism corpus contains 12 valid documents
+
+This is a good first OpenHands automation because it involves file creation, structured output, and deterministic verification without requiring MongoDB, ChromaDB, or your LLM application to be running.
+
+Software Agent SDK: Lets you build coding agents and multi-agent workflows.
+
+Find me a youtube tutorial for multi-agents using Software Agent SDK
+Worked for 38s
+
+The most relevant tutorial is:
+
+Dynamic Workflows using OpenHands SDK
+
+It demonstrates how the OpenHands Software Agent SDK creates dynamic workflows where an agent can delegate work through tools instead of relying on a completely hard-coded orchestration loop. This is the closest match to your goal of learning multi-agent workflows.
+
+Also useful:
+
+OpenHands: Anatomy of an AI Turn & Event Loop — explains delegated subagent workflows and the underlying event loop.
+OpenHands Roadmap Reveal: Plugins, Sub-Agents & More — covers SDK and subagent capabilities, but it is more of a community presentation than a step-by-step tutorial.
+
+Start with Dynamic Workflows using OpenHands SDK. Note that it teaches multi-agent workflows using OpenHands agents/subagents; it may not specifically orchestrate Claude Code, Codex, and Gemini CLI as separate external agents.
+
+
+PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai> irm https://claude.ai/install.ps1 | iex
+Setting up Claude Code...
+
+✔ Claude Code successfully installed!
+
+  Version: 2.1.220
+
+  Location: C:\Users\LOQ\.local\bin\claude.exe
+
+
+  Next: Run claude --help to get started
+
+⚠ Setup notes:
+  ● Native installation exists but C:\Users\LOQ\.local\bin is not in your PATH. Add it by opening: System Properties → Environment Variables → Edit User PATH → New → Add the path above. Then restart
+    your terminal.
+
+
+✅ Installation complete!
+
+PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai> claude                                 
+claude : The term 'claude' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is 
+correct and try again.
+At line:1 char:1
++ claude
++ ~~~~~~
+    + CategoryInfo          : ObjectNotFound: (claude:String) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai>
+Show less
+PowerShell Check claude.exe exists and read user PATH
+IN
+Test-Path "C:\Users\LOQ\.local\bin\claude.exe"; "--- User PATH ---"; [Environment]::GetEnvironmentVariable("Path","User")
+
+OUT
+True
+--- User PATH ---
+C:\Users\LOQ\.unsloth\studio\bin;C:\Users\LOQ\AppData\Local\Microsoft\WindowsApps;C:\Users\LOQ\AppData\Local\Programs\cursor\resources\app\bin;C:\Users\LOQ\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\LOQ\AppData\Roaming\npm;C:\Users\LOQ\AppData\Local\Python\bin;C:\Users\LOQ\AppData\Local\Microsoft\WinGet\Packages\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe;;C:\Users\LOQ\AppData\Local\Programs\Ollama;C:\Users\LOQ\AppData\Local\Programs\mongosh\;C:\Users\LOQ\AppData\Local\llama.cpp;C:\Users\LOQ\AppData\Local\Programs\DockerDesktop\resources\bin
+PowerShell Append .local\bin to user PATH
+IN
+$p = [Environment]::GetEnvironmentVariable("Path","User"); if ($p -notmatch [regex]::Escape("C:\Users\LOQ\.local\bin")) { [Environment]::SetEnvironmentVariable("Path", ($p.TrimEnd(';') + ";C:\Users\LOQ\.local\bin"), "User"); "Added." } else { "Already present." }; "--- New User PATH ---"; [Environment]::GetEnvironmentVariable("Path","User")
+
+OUT
+Added.
+--- New User PATH ---
+C:\Users\LOQ\.unsloth\studio\bin;C:\Users\LOQ\AppData\Local\Microsoft\WindowsApps;C:\Users\LOQ\AppData\Local\Programs\cursor\resources\app\bin;C:\Users\LOQ\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\LOQ\AppData\Roaming\npm;C:\Users\LOQ\AppData\Local\Python\bin;C:\Users\LOQ\AppData\Local\Microsoft\WinGet\Packages\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe;;C:\Users\LOQ\AppData\Local\Programs\Ollama;C:\Users\LOQ\AppData\Local\Programs\mongosh\;C:\Users\LOQ\AppData\Local\llama.cpp;C:\Users\LOQ\AppData\Local\Programs\DockerDesktop\resources\bin;C:\Users\LOQ\.local\bin
+PowerShell Verify claude binary runs
+IN
+& "C:\Users\LOQ\.local\bin\claude.exe" --version
+
+OUT
+2.1.220 (Claude Code)
+The install worked — claude.exe is there and runs (v2.1.220). The only problem was PATH, which I've now fixed permanently in your user environment variables.
+
+Your existing terminal still has the old PATH, so claude won't work in it until you either:
+
+Restart the terminal (close and reopen PowerShell / VS Code), or patch the current session without restarting:
+
+
+$env:Path += ";C:\Users\LOQ\.local\bin"
+Then claude will resolve normally.
+
+
+In this project of multiagent orchestration system, the system will have Claude-code, codex, gemini, and deepseek as agents and an orchestrator that decides which agent to use based on the token budgets of the coding agents. The context and skills (like graphify, caveman etc) will be shared between the agents. If one tasks unexpectedly takes too many tokens and the coding agent's limit is reached or for any other reason the coding agent stops, the other coding agent would resume the work. The sessions will be stored persistently on the device. 
+Temporarily, the following stack is chosen:
+| Component                 | Responsibility                                                                   |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| **Langflow**              | Decide which agent works next and control the workflow                           |
+| **Claw Orchestrator**     | Start, resume, steer, interrupt, and monitor coding agents                       |
+| **MongoDB**               | Store authoritative task context, decisions, progress, failures, and session IDs |
+| **Git worktrees**         | Isolate agents working in parallel                                               |
+| **Check runner**          | Run tests, linting, type checks, security checks, and acceptance criteria        |
+| **Phoenix/OpenTelemetry** | Trace agent activity, latency, errors, and routing decisions                     |
+
+I have not built a multi-agent system before, write a guide for me and help me with this project.
+I dont need you to complete the project by urself. Just guide me for now
+I'll look at what's already in the repo before writing the guide.
+
+Bash List repo contents
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && ls -la && echo "--- tree ---" && find . -type f -not -path "./.git/*" | head -100
+
+OUT
+total 28
+drwxr-xr-x 1 LOQ 197121    0 Jul 31 19:07 .
+drwxr-xr-x 1 LOQ 197121    0 Aug  2 02:43 ..
+drwxr-xr-x 1 LOQ 197121    0 Jul 31 19:19 .git
+-rw-r--r-- 1 LOQ 197121 5256 Jul 26 19:13 CLAUDE.md
+-rw-r--r-- 1 LOQ 197121 3026 Jul 31 19:07 README.md
+drwxr-xr-x 1 LOQ 197121    0 Jul 31 19:06 docs
+--- tree ---
+./CLAUDE.md
+./docs/Architecture.md
+./docs/Bugs.md
+./docs/Decisions.md
+./docs/Research.md
+./docs/Status.md
+./README.md
+Bash Read README and docs files
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && for f in README.md docs/Architecture.md docs/Bugs.md docs/Decisions.md docs/Research.md docs/Status.md; do echo "===== $f ====="; cat "$f"; echo; done
+
+OUT
+<persisted-output>
+Output too large (29.8KB). Full output saved to: C:\Users\LOQ\.claude\projects\c--Users-LOQ-Desktop-Projects-Bhai-To-Bhai\b2d37385-682b-4408-a8e2-d939f244bb73\tool-results\bd40fwoxp.txt
+
+Preview (first 2KB):
+===== README.md =====
+# Bhai-To-Bhai
+
+An open-source, locally deployable orchestration platform that coordinates multiple *existing* coding agents (Claude Code, Codex, Gemini CLI, OpenCode/Aider, and other adapters) to complete software-engineering tasks end-to-end — from initial planning through final verification — instead of implementing its own coding agent.
+
+## What it does
+
+- Dynamically selects the most suitable agent for each stage of a task based on task type, repository context, required capabilities, prior performance, availability, cost, and configurable routing policies.
+- Switches between agents *during* a single task, following structured workflows such as planner → implementer → reviewer → fixer.
+- Maintains one canonical task context (objective, requirements, constraints, acceptance criteria, decisions, completed/remaining work, failed attempts) across every agent handoff.
+- Tracks each agent's native resumable session reference so a previously used agent can pick up where it left off when control returns to it.
+- Runs deterministic verification (tests, linting, type checks, security scans, project-specific acceptance checks) instead of trusting an agent's own claim of completion.
+- Routes failed checks and review findings to the most appropriate agent for correction, then re-verifies and independently reviews before accepting changes.
+- Persists workflow state, logs, traces, costs, and audit history so long-running tasks are observable, resumable, and recoverable after interruption — including optional human approval gates.
+- Deploys locally or in containers, with an adapter model for adding new coding-agent CLIs, and never claims to transfer hidden model state between vendors — only explicit context and session references.
+
+## Status
+
+...
+</persisted-output>
+Read C:\Users\LOQ\.claude\projects\c--Users-LOQ-Desktop-Projects-Bhai-To-Bhai\b2d37385-682b-4408-a8e2-d939f244bb73\tool-results\bd40fwoxp.txt
+Repo read. You've got a solid research/ADR base already — I'll build on it rather than restate it. Writing the guide to docs/Build-Guide.md.
+
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\docs\Build-Guide.md
+295 lines
+# Build Guide — Multi-Agent Orchestration for Bhai-To-Bhai
+
+Written 2026-08-03. Audience: someone building their first multi-agent system.
+Complements `Architecture.md` (target shape) and `Decisions.md` (why). This file is about **how to actually build it, and in what order.**
+
+---
+
+## 0. The mental model (read this first)
+
+The instinct is to think of this as an AI problem. It isn't. **It's a job scheduler with unreliable, expensive, non-deterministic workers.**
+
+Swap the vocabulary and it becomes familiar:
+
+| Your term | What it really is |
+|---|---|
+| Coding agent | A worker process that may die at any moment |
+| Token budget | A per-worker resource quota with a refill window |
+| Handoff | Task migration between workers after preemption |
+| Canonical task context | The durable job record — the only thing that survives a worker death |
+| Check runner | The acceptance test that decides "done", because workers lie |
+| Git worktree | The worker's scratch space |
+
+Every hard problem in this project is a distributed-systems problem: crash recovery, idempotency, resource accounting, state reconciliation, deadlock/livelock. The LLM part — writing a prompt, shelling out to `claude -p` — is genuinely the easy part and will take maybe 5% of your effort.
+
+**Consequence:** if you find yourself deep in prompt engineering in week one, you're working on the wrong layer.
+
+---
+
+## 1. The one design decision everything else hangs on
+
+> "If one task unexpectedly takes too many tokens and the coding agent's limit is reached, the other coding agent would resume the work."
+
+Here is the naive design, which almost everyone builds first:
+
+```
+agent runs ──▶ finishes ──▶ writes a handoff summary ──▶ next agent reads it
+```
+
+**This fails at exactly the moment you built it for.** An agent killed by a rate limit never reaches "finishes." It never writes the summary. You get nothing.
+
+The fix is to invert it:
+
+> **Never summarize on exit. Always reconstruct on entry.**
+
+The handoff packet must be *derivable at any instant* from durable artifacts that are written continuously during the run — not produced by the dying agent as its last act. Concretely, four things must be durable-by-construction:
+
+1. **The worktree** — commits are the ground truth of what physically got done. Instruct the agent to commit after every logical step; additionally have the orchestrator auto-commit on a timer (`git add -A && git commit -m "wip: auto"`). A `SIGKILL`ed agent still leaves you a diff.
+2. **The plan** — the task is decomposed into ordered steps *before* execution, stored in Mongo, each marked `pending`/`in_progress`/`done`. Death at step 4 means the next agent starts at step 4, not step 1.
+3. **The event stream** — run the CLI with streaming JSON output and persist each event to Mongo **as it arrives**, not after process exit. A killed process still leaves its full transcript.
+4. **The check results** — last known pass/fail state, tied to a commit SHA.
+
+If those four are durable, "agent A died, agent B resumes" is just: build a packet from (1)+(2)+(3)+(4), hand it to B. It works identically whether A exited cleanly, was rate-limited, timed out, or you closed your laptop.
+
+**Build this first. Everything else is decoration on top of it.**
+
+---
+
+## 2. Token budgets: your abstraction is wrong (and that's fine)
+
+You said routing is driven by "token budgets of the coding agents." The complication: the four agents don't have comparable budgets, and none of them exposes "tokens remaining" as a number you can query.
+
+| Agent | What actually limits you | Queryable? |
+|---|---|---|
+| Claude Code | Rolling usage windows (subscription) or $/token (API key) | No — usage is reported *per call*, remaining is not exposed |
+| Codex | Rate-limit windows (ChatGPT plan) or $/token (API key) | No |
+| Gemini CLI | Free tier is **request-count** limited (per-minute and per-day), not token limited | No |
+| DeepSeek | Pure $/token, effectively unbounded until money runs out | Balance only |
+
+So don't model "tokens remaining." Model a **Budget Ledger** with a normalized state per agent:
+
+```python
+{
+  "agent": "claude",
+  "limit_type": "rolling_window",   # rolling_window | daily_requests | monetary | none
+  "window": "5h",
+  "limits":   {"tokens": 1_500_000, "requests": None, "usd": None},   # YOU configure these
+  "consumed": {"tokens": 812_003,   "requests": 47,   "usd": 0.0},    # derived from runs
+  "state": "available",             # available | degraded | exhausted | cooldown
+  "cooldown_until": None,           # ISO timestamp, set on reactive detection
+}
+```
+
+Update it two ways, and understand which one is authoritative:
+
+- **Proactive (an estimate):** parse `usage` out of each call's JSON result, accumulate. Used for *pre-emptive* routing — "don't start a job I estimate at 200k tokens on an agent I think has 40k of headroom."
+- **Reactive (the truth):** the agent exits non-zero with a rate-limit message. Mark `exhausted`, set `cooldown_until`, fail over. **This is the signal you trust.** Your proactive estimate will drift; vendors count tokens in ways you can't fully replicate.
+
+Two rules that will save you real money:
+
+- **Reserve headroom.** Route to an agent only if `estimated_cost × 1.5 < remaining`. A mid-task death is expensive twice over: you lose the partial work *and* you pay a cold-start handoff on the next agent.
+- **Switching is not free — the router must price it in.** Returning to an agent that already has a native session is cheap (it resumes with its own context). Switching vendors means a cold start plus a full context packet. Prefer to *wait or return* over switching, unless the agent is genuinely exhausted.
+
+Keep the rate-limit detection patterns in **config, not code** — vendors reword their error messages and you don't want a code change every time.
+
+```yaml
+# config/limit_signals.yaml
+claude:
+  exit_codes: [1]
+  stderr_patterns: ["rate limit", "usage limit reached", "quota exceeded"]
+  cooldown: "5h"
+gemini:
+  stderr_patterns: ["RESOURCE_EXHAUSTED", "quota"]
+  cooldown: "24h"
+```
+
+**One caveat on DeepSeek:** it's a *model*, not an agentic coding CLI. To use it as a coding agent you must pair it with a harness that accepts a custom OpenAI-compatible endpoint (Aider, OpenCode, and similar). Verify this in the spike phase before designing it into your router — or scope it to non-agentic roles (reviewer, summarizer, planner) where a plain API call is sufficient. Its low cost makes it the natural **fallback of last resort** when everything else is in cooldown.
+
+---
+
+## 3. Langflow vs. LangGraph — flagging a contradiction
+
+Your stack table says **Langflow**. Your own **ADR-002 chose LangGraph**. These are different tools and the difference matters here:
+
+- **Langflow** is a visual, drag-and-drop builder over LangChain. Excellent for prototyping and for showing someone a flow diagram.
+- **LangGraph** is a durable state-machine runtime: cycles, conditional edges, checkpointers, interrupts, resume-from-checkpoint.
+
+What this project needs from that layer is: cycles (fix → recheck → fix), conditional routing on agent state, checkpoint/resume after crash, mid-run interruption, and nodes that block for minutes on a subprocess. That's LangGraph's exact feature list and outside Langflow's comfort zone — and once every node is custom Python wrapping a subprocess, the visual layer stops paying rent.
+
+**My recommendation:** LangGraph as the engine. If you want the visual surface, add Langflow later as an authoring/monitoring UI over it — optional chrome, not the runtime.
+
+**My stronger recommendation for v0:** use *neither* yet. The workflow you've described is a linear pipeline with a retry loop. That's ~200 lines of plain Python around a Mongo state document, and you will understand every line of it. Frameworks don't help with the three things that are actually hard here — the adapter layer, the handoff packet, and the budget ledger — and a framework you adopted before you understood the problem becomes a cage. Introduce LangGraph in Phase 4 when you add real branching and parallelism, and you'll adopt it knowing exactly which of its features you need.
+
+Either way: this contradicts ADR-002, so it needs a new ADR recording the change and the reasoning.
+
+**Similarly on Claw Orchestrator:** ADR-003 already has it unresolved pending hands-on evaluation. Don't resolve it from documentation. For v0 you don't need an execution-layer dependency at all — `subprocess.run` gets you through Phase 3. Adopt one only when you can name the specific problem it solves that your own code doesn't.
+
+---
+
+## 4. The adapter interface
+
+This is the most important interface in the system. Keep it small; every agent must fit behind it.
+
+```python
+from typing import Protocol, Literal
+from dataclasses import dataclass
+from pathlib import Path
+
+StoppedReason = Literal[
+    "completed",          # agent finished on its own
+    "budget_exhausted",   # rate/quota limit hit  → failover
+    "timeout",            # wall-clock exceeded   → failover or retry
+    "no_output",          # watchdog fired, hung  → kill, failover
+    "crashed",            # non-zero, not a limit → retry same agent once
+    "interrupted",        # human or orchestrator stop
+]
+
+@dataclass
+class AgentResult:
+    stopped_reason: StoppedReason
+    session_id: str | None      # native resumable id, for same-agent resumption
+    usage: dict                 # {input_tokens, output_tokens, cache_read, usd}
+    events_path: str            # where the streamed transcript landed
+    exit_code: int
+    stderr_tail: str
+
+class AgentAdapter(Protocol):
+    name: str
+    def run(
+        self,
+        prompt: str,
+        worktree: Path,
+        session_id: str | None,   # resume this native session if provided
+        timeout_s: int,
+    ) -> AgentResult: ...
+```
+
+`stopped_reason` is the entire basis of your routing logic. Get its taxonomy right and the router is a small, readable function. Get it wrong — e.g. collapsing `timeout` and `budget_exhausted` — and you'll fail over when you should retry, and burn quota.
+
+Note what is *not* in the interface: nothing about "did the agent succeed at the task." The adapter reports how the **process** ended. Whether the **work** is correct is the check runner's job, and only the check runner's.
+
+---
+
+## 5. The handoff packet
+
+Assembled fresh on every agent entry, in this order. Order matters — put stable content first (prompt caching works on prefixes) and the most salient content last (recency).
+
+1. **Objective + acceptance criteria** — verbatim from Mongo, never paraphrased by an agent.
+2. **Constraints, non-goals, and decisions already made** — so agent B doesn't relitigate agent A's architecture choices.
+3. **Injected skills** (per ADR-001) — but see the filtering note below.
+4. **Plan with step status** — done / in progress / remaining.
+5. **Current git state** — `git log --oneline` since task base, plus the diff.
+6. **Dead ends** — "X was tried and fails because Y; do not retry." Wildly underrated. Without it, agent B confidently reattempts exactly what killed agent A. This alone prevents most cross-agent thrash.
+7. **Latest check failures** — verbatim error text, never summarized. The exact stack trace is the highest-signal content in the whole packet.
+8. **The next step, as an imperative** — one clear instruction, not a menu.
+
+Two disciplines:
+
+**Budget the packet itself.** Every handoff costs tokens on the receiving agent — the very resource you're managing. Measure packet size and cap it. If the diff exceeds ~500 lines, send `git diff --stat` plus the full diff of only the files relevant to the current step.
+
+**Filter skills by stage.** ADR-001 (inject explicitly, don't rely on auto-discovery) is the right call, but "inject all skills always" will quietly become your largest recurring cost. A reviewer doesn't need the graphify indexing skill. Map stage → skill set in config.
+
+Structuring the packet as *static prefix (1–3) then dynamic suffix (4–8)* also makes vendor prompt caching effective on repeat calls to the same agent — a real, measurable cost reduction, not a micro-optimization.
+
+---
+
+## 6. Data model (MongoDB)
+
+```
+tasks           _id, objective, acceptance_criteria[], constraints[],
+                status, base_commit, worktree_path, created_at
+
+plans           task_id, steps[{idx, description, status, owner_agent,
+                attempts, acceptance}]
+
+runs            _id, task_id, step_idx, agent, stage, session_id,
+                prompt_ref, started_at, ended_at, usage{}, stopped_reason,
+                exit_code                      ← the ledger's source of truth
+
+events          run_id, seq, ts, type, payload  ← append-only, written DURING run
+
+checks          task_id, commit_sha, command, exit_code, stdout_tail,
+                stderr_tail, ts
+
+dead_ends       task_id, description, why_it_failed, discovered_by, ts
+
+locks           worktree_path, holder_run_id, acquired_at   ← one agent per worktree
+```
+
+Design notes:
+
+- **Derive the budget ledger from `runs`; don't maintain a separate mutable counter.** Aggregating `runs` inside the current window is crash-safe, auditable, and reconstructible after any failure. Cache it in memory if it gets slow, but the collection stays the source of truth.
+- **Idempotency on restart:** any `run` with `started_at` but no `ended_at` is an orphan from a crash. On boot, mark it `stopped_reason: "unknown"` and force plan reconciliation from git state. Never assume an interrupted run did nothing — it probably wrote files.
+- **`events` is append-only and written during the run.** If you buffer and write at the end, you've rebuilt the failure mode from §1.
+- **`locks` is not optional.** Two agents in one worktree corrupts it. One worktree, one active agent, enforced by a lock document with a holder and a heartbeat.
+
+---
+
+## 7. Build order
+
+Do not build the architecture diagram top-down. Build a thin working spine, then thicken it.
+
+### Phase 0 — Spikes (one day, before any design work)
+
+Four questions whose answers determine whether the design is even buildable. Answer them with your hands, not with documentation.
+
+- **S1 · Headless invocation.** Run each of the four agents once, non-interactively, capturing structured output. Confirm you can extract: session id, token usage, exit code. Record the exact flags in `Research.md`. *(For DeepSeek: confirm which harness you'll wrap it in.)*
+- **S2 · Resumption.** Resume a prior session with each CLI. Confirm it actually retains context.
+- **S3 · Limit detection.** Deliberately exhaust a quota — or force the error — and record the exact exit code and stderr text. This is your reactive detector's ground truth, and you cannot guess it.
+- **S4 · Worktree containment.** Run an agent inside a git worktree and confirm it doesn't write outside it.
+
+If S1 or S3 fails for an agent, that agent cannot be a first-class citizen in this system. Better to learn that on day one.
+
+### Phase 1 — One agent, one task, end to end
+Task in Mongo → create worktree → run Claude Code → run check runner → record pass/fail. No routing, no failover, no second agent. **This is the spine.** Nothing else works until this does.
+
+### Phase 2 — Adapter interface + a second agent
+Now the abstraction gets a real test. Add Codex behind the same `AgentAdapter`. Anything that only fits one agent is a leak — fix it now, at two agents, not later at four.
+
+### Phase 3 — Budget ledger + failover
+Reactive limit detection, cooldowns, ledger derived from `runs`, and the resume-with-another-agent path from §1. **At the end of this phase your headline feature works.** Test it by setting an artificially tiny budget and watching the handoff happen on a real task.
+
+### Phase 4 — Multi-stage workflow
+planner → implementer → reviewer → fixer, with routing policy and the reviewer≠implementer constraint. This is where LangGraph earns its place, if you want it.
+
+### Phase 5 — Parallelism, observability, human gates
+Multiple worktrees running concurrently (this is where worktrees actually pay off), Phoenix/OTel tracing, approval checkpoints.
+
+Phases 1–3 are the project. Phases 4–5 are what make it pleasant.
+
+---
+
+## 8. Pitfalls
+
+Ordered roughly by how likely they are to bite you.
+
+- **Summarize-on-exit** — covered in §1. The single most common fatal design.
+- **Infinite fix loops** — implementer → checks fail → fixer → checks fail → forever, burning every budget you have. Cap attempts per step (3), then escalate to a *different* agent, then to a human. Non-negotiable; add it in Phase 1, not later.
+- **Trusting the agent's "done"** — never parse completion from prose. Exit codes only. Your architecture already says this; it will be tempting to compromise when the check runner is annoying to configure. Don't.
+- **Two agents, one worktree** — corruption. Use the lock.
+- **Flaky tests** — nondeterministic checks trigger fixer loops on code that was already correct, and the agent will "fix" working code to satisfy a test that was going to pass anyway. Quarantine flaky tests before onboarding a repo.
+- **Hung vs. slow** — indistinguishable without instrumentation. Two watchdogs: wall-clock timeout per run, and a no-output timeout (no events for N minutes → kill).
+- **Handoff bloat** — packets grow silently until handoffs cost more than the work. Log packet token count on every handoff and watch the trend.
+- **Agent escapes the worktree** — edits global config, `~/.gitconfig`, other repos. Restrict tool permissions per agent; consider containers for anything unattended.
+- **Windows friction** — you're on Windows 11, and git worktrees plus long paths plus CRLF plus POSIX-assuming agent CLIs will cost you days. **Run the orchestrator in WSL2.** This is the highest-leverage environment decision available to you.
+- **Secrets** — each CLI has its own auth. Keys live in the environment, never in a prompt, never in Mongo. Agents read prompts; assume anything in a prompt is logged somewhere.
+
+---
+
+## 9. What "done" looks like for v0
+
+A single acceptance test worth building toward:
+
+> Give the system a real task in a real repo. Set Claude Code's budget artificially low so it will be exhausted partway through. The system should: plan the task, start implementing with Claude Code, detect the limit hit, fail over to Codex mid-task, have Codex continue from the existing partial work (not restart), pass the check runner, and record a complete audit trail of the whole thing in Mongo.
+
+If that passes, you have built the system. Everything after is scale, polish, and additional agents.
+
+---
+
+## 10. Open items needing ADRs
+
+- **ADR-004 · Langflow vs. LangGraph vs. hand-rolled** — the stack table now says Langflow, which contradicts ADR-002. Record the change and the reasoning either way.
+- **ADR-005 · DeepSeek's role** — first-class agent behind a harness, or non-agentic reviewer/fallback only? Depends on S1.
+- **ADR-006 · Budget model** — per-agent limits are user-configured, since no vendor exposes remaining quota. Record that this is an *estimate with a reactive override*, so future-you doesn't mistake the ledger for ground truth.
+- **ADR-003 update** — resolve Claw Orchestrator vs. OpenHands vs. neither, after Phase 3 tells you whether you need an execution layer at all.
+Guide written to docs/Build-Guide.md. Here's the digest, and three things I'd push back on.
+
+The reframe that matters most: this is not an AI problem, it's a job scheduler with unreliable, expensive workers. Crash recovery, idempotency, resource accounting, livelock prevention. The claude -p part is ~5% of the work. If you're deep in prompt engineering in week one, you're on the wrong layer.
+
+The one design trap that would sink this. Your headline feature is "agent A hits its limit, agent B resumes." The naive build is: agent runs → writes a handoff summary → next agent reads it. That fails at exactly the moment you built it for, because a rate-limited agent never reaches "finishes" and never writes the summary. Invert it: never summarize on exit, always reconstruct on entry. Four things must be durable-by-construction during the run — worktree commits (auto-commit on a timer), plan step status, the event stream written as events arrive, and last check results. Then handoff is just "build a packet from durable artifacts," and it works identically whether the agent exited cleanly or got SIGKILLed. Build this first.
+
+Your budget abstraction is wrong. The four agents aren't comparable: Claude and Codex are rolling windows, Gemini's free tier is request-count limited, DeepSeek is pure $/token. None of them exposes "tokens remaining." So model a ledger with a normalized state per agent, updated two ways — proactive accumulation from each call's usage (an estimate, for pre-emptive routing) and reactive detection from exit code + stderr (the truth). Keep the error patterns in config; vendors reword them. Also: switching agents isn't free — returning to an agent with a live session is cheap, cold-starting a different vendor costs a full context packet. Your router has to price that in, or it'll thrash.
+
+Three flags:
+
+Langflow contradicts your own ADR-002, which chose LangGraph. They're different tools — Langflow is a visual builder, LangGraph is a durable state-machine runtime with checkpointing and interrupts, which is the exact feature list you need. I'd go further: for v0 use neither. Your workflow is a linear pipeline with a retry loop — ~200 lines of Python around a Mongo doc. Frameworks don't help with the three genuinely hard parts (adapter layer, handoff packet, budget ledger), and one adopted before you understand the problem becomes a cage. Add LangGraph in Phase 4.
+Same for Claw Orchestrator. ADR-003 already has it unresolved. Don't resolve it from docs — subprocess.run carries you through Phase 3, and by then you'll know what you actually need.
+DeepSeek is a model, not an agent harness. It has no first-party agentic coding CLI in the class of Claude Code or Codex. Either pair it with a harness that takes a custom OpenAI-compatible endpoint, or scope it to non-agentic roles. Verify before designing it into the router — its cheapness makes it the ideal last-resort fallback either way.
+Start here, today: four spikes, one day, before any more design. Headless invocation per agent (can you get session id + usage + exit code?), session resumption, deliberately hitting a rate limit to record the exact exit code and stderr text (you cannot guess this, and your failover depends on it), and worktree containment. If S1 or S3 fails for an agent, it can't be first-class — better to know on day one.
+
+One environment note: run the orchestrator in WSL2. Git worktrees + long paths + CRLF + POSIX-assuming agent CLIs on native Windows will cost you days.
+
+The guide has the full adapter interface, Mongo schema, handoff packet ordering, a pitfalls list, and a concrete v0 acceptance test. Want me to draft ADR-004 (the Langflow/LangGraph call) once you've decided, or set up the Phase 0 spike scripts?
+
+c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\requirements.txt
+Write a list of all the core dependencies
+Bash Check requirements.txt and environment
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && ls -la requirements.txt 2>/dev/null && echo "--- content ---" && cat requirements.txt; echo "[end]"; echo "--- python ---"; python --version 2>&1; echo "--- other manifests ---"; ls pyproject.toml setup.py package.json 2>/dev/null || echo "none"
+
+OUT
+-rw-r--r-- 1 LOQ 197121 0 Aug  3 14:15 requirements.txt
+--- content ---
+[end]
+--- python ---
+Python 3.14.2
+--- other manifests ---
+none
+Empty file, and you're on Python 3.14. Writing a phase-scoped list — installing only what Phases 1–3 actually need, with the later/heavier things present but commented.
+
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\requirements.txt
+Write failed
+# Bhai-To-Bhai — core runtime dependencies
+#
+# Scope: everything needed for Phases 1-3 of docs/Build-Guide.md
+#   (single-agent spine -> adapter interface -> budget ledger + failover).
+# Later-phase and optional packages are listed but commented out; uncomment
+# when the phase that needs them actually starts.
+#
+#   pip install -r requirements.txt
+#   pip install -r requirements-dev.txt   # tests, lint, types
+#
+# Python: 3.12 or 3.13 recommended. See "Interpreter" note at the bottom.
+
+# --- Persistence -------------------------------------------------------------
+# Canonical task context, runs, events, checks, locks (see Build-Guide §6).
+# 4.9+ ships AsyncMongoClient natively; do NOT add motor, it is superseded.
+pymongo>=4.9,<5
+
+# --- Schema & config ---------------------------------------------------------
+# Task context, AgentResult, handoff packets, budget ledger entries.
+# Validation at every boundary matters here: agent output is untrusted input.
+pydantic>=2.9,<3
+pydantic-settings>=2.6,<3
+
+# Agent profiles, routing policy, and limit_signals.yaml (Build-Guide §2) —
+# rate-limit patterns live in config so vendor rewording is not a code change.
+PyYAML>=6.0
+
+# --- Observability (start now, it is cheap) ----------------------------------
+# Structured logging from day one. Every run/handoff/limit-hit is an event you
+# will need to correlate later; unstructured logs make Phase 3 debugging brutal.
+structlog>=24.4
+
+# --- Orchestrator CLI --------------------------------------------------------
+# `bhai run <task>`, `bhai status`, `bhai resume <task-id>`.
+# Bundles rich for readable multi-agent progress output.
+typer>=0.15
+
+# --- Reliability -------------------------------------------------------------
+# Retry/backoff around Mongo writes and transient agent-process failures.
+# NOT for rate limits — those are a routing decision, not a retry (Build-Guide §2).
+tenacity>=9.0
+
+# --- Token estimation --------------------------------------------------------
+# Proactive side of the budget ledger: rough pre-flight cost estimate so the
+# router can reserve headroom. A heuristic proxy only — vendors count
+# differently, and the reactive limit signal remains authoritative.
+tiktoken>=0.8
+
+# --- Non-CLI agents ----------------------------------------------------------
+# DeepSeek exposes an OpenAI-compatible API, so the openai SDK covers it via
+# base_url. Needed only if DeepSeek runs as a direct API call (reviewer /
+# planner / fallback). If you instead wrap it in an agent harness, drop this.
+openai>=1.60
+
+# Optional: accurate Claude token counting via count_tokens, better than the
+# tiktoken proxy for Claude-bound estimates. Not needed to invoke Claude Code
+# itself — that is a subprocess call, not an SDK call.
+# anthropic>=0.40
+
+
+# =============================================================================
+# PHASE 4 — workflow engine. Do not install yet.
+# =============================================================================
+# Build-Guide §3: v0 is a linear pipeline with a retry loop (~200 lines of
+# plain Python over a Mongo doc). Adopt LangGraph when Phase 4 adds real
+# branching and parallelism, so you adopt it knowing which features you need.
+#
+# langgraph>=0.2
+# langgraph-checkpoint-mongodb>=0.1     # checkpointer backed by your existing Mongo
+#
+# Langflow is a visual builder, not a durable runtime, and pulls a very large
+# dependency tree that will constrain every other pin in this file. If you want
+# the visual surface, run it as a separate service against its own environment
+# — do not put it in the orchestrator's dependency set.
+# langflow
+
+
+# =============================================================================
+# PHASE 5 — tracing. Do not install yet.
+# =============================================================================
+# opentelemetry-api>=1.29
+# opentelemetry-sdk>=1.29
+# opentelemetry-exporter-otlp-proto-http>=1.29
+# arize-phoenix>=7.0                    # local trace UI; run as a service
+# openinference-instrumentation>=0.1
+
+
+# =============================================================================
+# DELIBERATELY NOT DEPENDENCIES
+# =============================================================================
+# GitPython        — worktree support is thin and it hides git's exit codes,
+#                    which are exactly what you need. Use subprocess + porcelain
+#                    flags; `git worktree add/list/remove` is a handful of calls.
+# motor            — superseded by pymongo's AsyncMongoClient (see above).
+# langchain        — you are not composing LLM chains; you are supervising
+#                    subprocesses. Nothing in the core loop needs it.
+# docker (SDK)     — Phase 5 at the earliest, and only if containerising agents.
+# mongomock        — test against a real MongoDB (see requirements-dev.txt);
+#                    mongomock diverges on exactly the aggregation/index
+#                    behaviour the budget ledger relies on.
+
+
+# =============================================================================
+# SYSTEM DEPENDENCIES (not pip-installable — install separately)
+# =============================================================================
+# git >= 2.5                 worktree support
+# MongoDB >= 7.0             or run via Docker
+# Node.js >= 18              runtime for the agent CLIs below
+#
+# Agent CLIs — each authenticates independently; keys stay in the environment,
+# never in a prompt and never in Mongo (Build-Guide §8):
+#   @anthropic-ai/claude-code
+#   @openai/codex
+#   @google/gemini-cli
+#   DeepSeek — API only; needs a harness (Aider/OpenCode) or a direct API role.
+#             Resolve in spike S1 before designing it into the router.
+#
+# WSL2 strongly recommended on Windows. Worktrees + long paths + CRLF +
+# POSIX-assuming agent CLIs on native Windows will cost you days.
+#
+# NOT dependencies of this project: pytest/ruff/mypy/bandit as *check runner
+# targets*. Those belong to whichever repo the agents are working on and are
+# invoked by exit code (Build-Guide §5) — never import them here.
+#
+# =============================================================================
+# INTERPRETER
+# =============================================================================
+# Detected locally: Python 3.14.2. Pin the project to 3.12 or 3.13 instead.
+# The agent/LLM ecosystem lags new interpreter releases, and packages here
+# (tiktoken, arize-phoenix, and the Phase 4 tree especially) are the kind that
+# ship compiled wheels or heavy transitive pins. Debugging wheel availability
+# is not how you want to spend Phase 0. Verify before committing to 3.14.
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\requirements.txt
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\requirements.txt
+133 lines
+# Bhai-To-Bhai — core runtime dependencies
+#
+# Scope: everything needed for Phases 1-3 of docs/Build-Guide.md
+#   (single-agent spine -> adapter interface -> budget ledger + failover).
+# Later-phase and optional packages are listed but commented out; uncomment
+# when the phase that needs them actually starts.
+#
+#   pip install -r requirements.txt
+#   pip install -r requirements-dev.txt   # tests, lint, types
+#
+# Python: 3.12 or 3.13 recommended. See "Interpreter" note at the bottom.
+
+# --- Persistence -------------------------------------------------------------
+# Canonical task context, runs, events, checks, locks (see Build-Guide §6).
+# 4.9+ ships AsyncMongoClient natively; do NOT add motor, it is superseded.
+pymongo>=4.9,<5
+
+# --- Schema & config ---------------------------------------------------------
+# Task context, AgentResult, handoff packets, budget ledger entries.
+# Validation at every boundary matters here: agent output is untrusted input.
+pydantic>=2.9,<3
+pydantic-settings>=2.6,<3
+
+# Agent profiles, routing policy, and limit_signals.yaml (Build-Guide §2) —
+# rate-limit patterns live in config so vendor rewording is not a code change.
+PyYAML>=6.0
+
+# --- Observability (start now, it is cheap) ----------------------------------
+# Structured logging from day one. Every run/handoff/limit-hit is an event you
+# will need to correlate later; unstructured logs make Phase 3 debugging brutal.
+structlog>=24.4
+
+# --- Orchestrator CLI --------------------------------------------------------
+# `bhai run <task>`, `bhai status`, `bhai resume <task-id>`.
+# Bundles rich for readable multi-agent progress output.
+typer>=0.15
+
+# --- Reliability -------------------------------------------------------------
+# Retry/backoff around Mongo writes and transient agent-process failures.
+# NOT for rate limits — those are a routing decision, not a retry (Build-Guide §2).
+tenacity>=9.0
+
+# --- Token estimation --------------------------------------------------------
+# Proactive side of the budget ledger: rough pre-flight cost estimate so the
+# router can reserve headroom. A heuristic proxy only — vendors count
+# differently, and the reactive limit signal remains authoritative.
+tiktoken>=0.8
+
+# --- Non-CLI agents ----------------------------------------------------------
+# DeepSeek exposes an OpenAI-compatible API, so the openai SDK covers it via
+# base_url. Needed only if DeepSeek runs as a direct API call (reviewer /
+# planner / fallback). If you instead wrap it in an agent harness, drop this.
+openai>=1.60
+
+# Optional: accurate Claude token counting via count_tokens, better than the
+# tiktoken proxy for Claude-bound estimates. Not needed to invoke Claude Code
+# itself — that is a subprocess call, not an SDK call.
+# anthropic>=0.40
+
+
+# =============================================================================
+# PHASE 4 — workflow engine. Do not install yet.
+# =============================================================================
+# Build-Guide §3: v0 is a linear pipeline with a retry loop (~200 lines of
+# plain Python over a Mongo doc). Adopt LangGraph when Phase 4 adds real
+# branching and parallelism, so you adopt it knowing which features you need.
+#
+# langgraph>=0.2
+# langgraph-checkpoint-mongodb>=0.1     # checkpointer backed by your existing Mongo
+#
+# Langflow is a visual builder, not a durable runtime, and pulls a very large
+# dependency tree that will constrain every other pin in this file. If you want
+# the visual surface, run it as a separate service against its own environment
+# — do not put it in the orchestrator's dependency set.
+# langflow
+
+
+# =============================================================================
+# PHASE 5 — tracing. Do not install yet.
+# =============================================================================
+# opentelemetry-api>=1.29
+# opentelemetry-sdk>=1.29
+# opentelemetry-exporter-otlp-proto-http>=1.29
+# arize-phoenix>=7.0                    # local trace UI; run as a service
+# openinference-instrumentation>=0.1
+
+
+# =============================================================================
+# DELIBERATELY NOT DEPENDENCIES
+# =============================================================================
+# GitPython        — worktree support is thin and it hides git's exit codes,
+#                    which are exactly what you need. Use subprocess + porcelain
+#                    flags; `git worktree add/list/remove` is a handful of calls.
+# motor            — superseded by pymongo's AsyncMongoClient (see above).
+# langchain        — you are not composing LLM chains; you are supervising
+#                    subprocesses. Nothing in the core loop needs it.
+# docker (SDK)     — Phase 5 at the earliest, and only if containerising agents.
+# mongomock        — test against a real MongoDB (see requirements-dev.txt);
+#                    mongomock diverges on exactly the aggregation/index
+#                    behaviour the budget ledger relies on.
+
+
+# =============================================================================
+# SYSTEM DEPENDENCIES (not pip-installable — install separately)
+# =============================================================================
+# git >= 2.5                 worktree support
+# MongoDB >= 7.0             or run via Docker
+# Node.js >= 18              runtime for the agent CLIs below
+#
+# Agent CLIs — each authenticates independently; keys stay in the environment,
+# never in a prompt and never in Mongo (Build-Guide §8):
+#   @anthropic-ai/claude-code
+#   @openai/codex
+#   @google/gemini-cli
+#   DeepSeek — API only; needs a harness (Aider/OpenCode) or a direct API role.
+#             Resolve in spike S1 before designing it into the router.
+#
+# WSL2 strongly recommended on Windows. Worktrees + long paths + CRLF +
+# POSIX-assuming agent CLIs on native Windows will cost you days.
+#
+# NOT dependencies of this project: pytest/ruff/mypy/bandit as *check runner
+# targets*. Those belong to whichever repo the agents are working on and are
+# invoked by exit code (Build-Guide §5) — never import them here.
+#
+# =============================================================================
+# INTERPRETER
+# =============================================================================
+# Detected locally: Python 3.14.2. Pin the project to 3.12 or 3.13 instead.
+# The agent/LLM ecosystem lags new interpreter releases, and packages here
+# (tiktoken, arize-phoenix, and the Phase 4 tree especially) are the kind that
+# ship compiled wheels or heavy transitive pins. Debugging wheel availability
+# is not how you want to spend Phase 0. Verify before committing to 3.14.
+Now the dev set, which the core file references:
+
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\requirements-dev.txt
+33 lines
+# Bhai-To-Bhai — development dependencies
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+
+-r requirements.txt
+
+# --- Testing -----------------------------------------------------------------
+pytest>=8.3
+pytest-asyncio>=0.24          # the run loop and event streaming are async
+pytest-cov>=6.0
+pytest-mock>=3.14
+
+# Real MongoDB in a container for tests. Worth the slower suite: the budget
+# ledger is an aggregation over `runs` within a time window, and fakes diverge
+# from real server behaviour exactly there (see the mongomock note in
+# requirements.txt). Crash-recovery tests also need real durability semantics.
+testcontainers[mongodb]>=4.9
+
+# Deterministic clocks. Cooldown windows, rolling budget windows, and watchdog
+# timeouts are all time-dependent — you cannot test Phase 3 by waiting 5 hours.
+time-machine>=2.16
+
+# --- Lint & types ------------------------------------------------------------
+ruff>=0.8                     # lint + format, replaces black/isort/flake8
+mypy>=1.13
+types-PyYAML
+
+# --- Local services ----------------------------------------------------------
+# MongoDB and (later) Phoenix run as containers, not pip packages. See the
+# system-dependencies section of requirements.txt.
+#
+#   docker run -d -p 27017:27017 --name bhai-mongo mongo:7
+Written requirements.txt and requirements-dev.txt.
+
+Core install is deliberately small — eight packages: pymongo, pydantic, pydantic-settings, PyYAML, structlog, typer, tenacity, tiktoken, plus openai only if DeepSeek runs as a direct API call. That's the entire Phase 1–3 spine. LangGraph and the Phoenix/OTel set are in the file but commented, tagged with the phase that unlocks them.
+
+The non-obvious calls:
+
+pymongo, not motor. PyMongo ships AsyncMongoClient natively now and motor is superseded — don't add a second driver.
+No GitPython. Its worktree support is thin and it wraps away git's exit codes, which are precisely the signal your check runner and crash-recovery logic read. git worktree add/list/remove via subprocess is a handful of calls.
+No langchain. You're supervising subprocesses, not composing LLM chains. Nothing in the core loop touches it.
+tenacity is not for rate limits. Retry/backoff covers transient Mongo writes and crashed processes. A budget exhaustion is a routing decision — retrying it just burns the next window too.
+Real Mongo in tests, not mongomock. Your budget ledger is a time-windowed aggregation over runs, and fakes diverge from server behaviour exactly there. Hence testcontainers[mongodb], plus time-machine — cooldowns and rolling windows are time-dependent and you can't test Phase 3 by waiting five hours.
+Langflow shouldn't live in this file at all. Its dependency tree is large enough to constrain every other pin here. If you want the visual surface, run it as a separate service with its own environment.
+Two things pip can't give you, both listed in the file's system-dependencies block: the four agent CLIs (Node-based, each authenticating independently) and MongoDB itself. Also worth internalising — pytest/ruff/mypy/bandit are check-runner targets belonging to whatever repo the agents work on, invoked by exit code. They never get imported into the orchestrator.
+
+One flag: you're on Python 3.14.2. I'd pin the project to 3.12 or 3.13. The agent/LLM ecosystem lags interpreter releases, and several packages here are the compiled-wheel or heavy-transitive-pin kind — tiktoken, arize-phoenix, and the Phase 4 tree especially. Verify wheel availability before committing to 3.14; chasing build failures is a bad way to spend Phase 0.
+
+Want me to add a pyproject.toml with the ruff/mypy/pytest config, or scaffold the Phase 0 spike scripts against these deps?
+
+
+In this project of multiagent orchestration system, the system will have Claude-code, codex, gemini, and deepseek as agents and an orchestrator that decides which agent to use based on the token budgets of the coding agents. The context and skills (like graphify, caveman etc) will be shared between the agents. If one tasks unexpectedly takes too many tokens and the coding agent's limit is reached or for any other reason the coding agent stops, the other coding agent would resume the work. The sessions will be stored persistently on the device. 
+Temporarily, the following stack is chosen:
+| Component                 | Responsibility                                                                   |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| **Langflow**              | Decide which agent works next and control the workflow                           |
+| **Claw Orchestrator**     | Start, resume, steer, interrupt, and monitor coding agents                       |
+| **MongoDB**               | Store authoritative task context, decisions, progress, failures, and session IDs |
+| **Git worktrees**         | Isolate agents working in parallel                                               |
+| **Check runner**          | Run tests, linting, type checks, security checks, and acceptance criteria        |
+| **Phoenix/OpenTelemetry** | Trace agent activity, latency, errors, and routing decisions                     |
+
+I have not built a multi-agent system before, write a guide for me and help me with this project.
+I dont need you to complete the project by urself. Just guide me for now
+I'll look at what's already in the repo before writing the guide.
+
+Bash List repo contents
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && ls -la && echo "--- tree ---" && find . -type f -not -path "./.git/*" | head -100
+
+OUT
+total 28
+drwxr-xr-x 1 LOQ 197121    0 Jul 31 19:07 .
+drwxr-xr-x 1 LOQ 197121    0 Aug  2 02:43 ..
+drwxr-xr-x 1 LOQ 197121    0 Jul 31 19:19 .git
+-rw-r--r-- 1 LOQ 197121 5256 Jul 26 19:13 CLAUDE.md
+-rw-r--r-- 1 LOQ 197121 3026 Jul 31 19:07 README.md
+drwxr-xr-x 1 LOQ 197121    0 Jul 31 19:06 docs
+--- tree ---
+./CLAUDE.md
+./docs/Architecture.md
+./docs/Bugs.md
+./docs/Decisions.md
+./docs/Research.md
+./docs/Status.md
+./README.md
+Bash Read README and docs files
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && for f in README.md docs/Architecture.md docs/Bugs.md docs/Decisions.md docs/Research.md docs/Status.md; do echo "===== $f ====="; cat "$f"; echo; done
+
+OUT
+<persisted-output>
+Output too large (29.8KB). Full output saved to: C:\Users\LOQ\.claude\projects\c--Users-LOQ-Desktop-Projects-Bhai-To-Bhai\b2d37385-682b-4408-a8e2-d939f244bb73\tool-results\bd40fwoxp.txt
+
+Preview (first 2KB):
+===== README.md =====
+# Bhai-To-Bhai
+
+An open-source, locally deployable orchestration platform that coordinates multiple *existing* coding agents (Claude Code, Codex, Gemini CLI, OpenCode/Aider, and other adapters) to complete software-engineering tasks end-to-end — from initial planning through final verification — instead of implementing its own coding agent.
+
+## What it does
+
+- Dynamically selects the most suitable agent for each stage of a task based on task type, repository context, required capabilities, prior performance, availability, cost, and configurable routing policies.
+- Switches between agents *during* a single task, following structured workflows such as planner → implementer → reviewer → fixer.
+- Maintains one canonical task context (objective, requirements, constraints, acceptance criteria, decisions, completed/remaining work, failed attempts) across every agent handoff.
+- Tracks each agent's native resumable session reference so a previously used agent can pick up where it left off when control returns to it.
+- Runs deterministic verification (tests, linting, type checks, security scans, project-specific acceptance checks) instead of trusting an agent's own claim of completion.
+- Routes failed checks and review findings to the most appropriate agent for correction, then re-verifies and independently reviews before accepting changes.
+- Persists workflow state, logs, traces, costs, and audit history so long-running tasks are observable, resumable, and recoverable after interruption — including optional human approval gates.
+- Deploys locally or in containers, with an adapter model for adding new coding-agent CLIs, and never claims to transfer hidden model state between vendors — only explicit context and session references.
+
+## Status
+
+...
+</persisted-output>
+Read C:\Users\LOQ\.claude\projects\c--Users-LOQ-Desktop-Projects-Bhai-To-Bhai\b2d37385-682b-4408-a8e2-d939f244bb73\tool-results\bd40fwoxp.txt
+Repo read. You've got a solid research/ADR base already — I'll build on it rather than restate it. Writing the guide to docs/Build-Guide.md.
+
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\docs\Build-Guide.md
+295 lines
+# Build Guide — Multi-Agent Orchestration for Bhai-To-Bhai
+
+Written 2026-08-03. Audience: someone building their first multi-agent system.
+Complements `Architecture.md` (target shape) and `Decisions.md` (why). This file is about **how to actually build it, and in what order.**
+
+---
+
+## 0. The mental model (read this first)
+
+The instinct is to think of this as an AI problem. It isn't. **It's a job scheduler with unreliable, expensive, non-deterministic workers.**
+
+Swap the vocabulary and it becomes familiar:
+
+| Your term | What it really is |
+|---|---|
+| Coding agent | A worker process that may die at any moment |
+| Token budget | A per-worker resource quota with a refill window |
+| Handoff | Task migration between workers after preemption |
+| Canonical task context | The durable job record — the only thing that survives a worker death |
+| Check runner | The acceptance test that decides "done", because workers lie |
+| Git worktree | The worker's scratch space |
+
+Every hard problem in this project is a distributed-systems problem: crash recovery, idempotency, resource accounting, state reconciliation, deadlock/livelock. The LLM part — writing a prompt, shelling out to `claude -p` — is genuinely the easy part and will take maybe 5% of your effort.
+
+**Consequence:** if you find yourself deep in prompt engineering in week one, you're working on the wrong layer.
+
+---
+
+## 1. The one design decision everything else hangs on
+
+> "If one task unexpectedly takes too many tokens and the coding agent's limit is reached, the other coding agent would resume the work."
+
+Here is the naive design, which almost everyone builds first:
+
+```
+agent runs ──▶ finishes ──▶ writes a handoff summary ──▶ next agent reads it
+```
+
+**This fails at exactly the moment you built it for.** An agent killed by a rate limit never reaches "finishes." It never writes the summary. You get nothing.
+
+The fix is to invert it:
+
+> **Never summarize on exit. Always reconstruct on entry.**
+
+The handoff packet must be *derivable at any instant* from durable artifacts that are written continuously during the run — not produced by the dying agent as its last act. Concretely, four things must be durable-by-construction:
+
+1. **The worktree** — commits are the ground truth of what physically got done. Instruct the agent to commit after every logical step; additionally have the orchestrator auto-commit on a timer (`git add -A && git commit -m "wip: auto"`). A `SIGKILL`ed agent still leaves you a diff.
+2. **The plan** — the task is decomposed into ordered steps *before* execution, stored in Mongo, each marked `pending`/`in_progress`/`done`. Death at step 4 means the next agent starts at step 4, not step 1.
+3. **The event stream** — run the CLI with streaming JSON output and persist each event to Mongo **as it arrives**, not after process exit. A killed process still leaves its full transcript.
+4. **The check results** — last known pass/fail state, tied to a commit SHA.
+
+If those four are durable, "agent A died, agent B resumes" is just: build a packet from (1)+(2)+(3)+(4), hand it to B. It works identically whether A exited cleanly, was rate-limited, timed out, or you closed your laptop.
+
+**Build this first. Everything else is decoration on top of it.**
+
+---
+
+## 2. Token budgets: your abstraction is wrong (and that's fine)
+
+You said routing is driven by "token budgets of the coding agents." The complication: the four agents don't have comparable budgets, and none of them exposes "tokens remaining" as a number you can query.
+
+| Agent | What actually limits you | Queryable? |
+|---|---|---|
+| Claude Code | Rolling usage windows (subscription) or $/token (API key) | No — usage is reported *per call*, remaining is not exposed |
+| Codex | Rate-limit windows (ChatGPT plan) or $/token (API key) | No |
+| Gemini CLI | Free tier is **request-count** limited (per-minute and per-day), not token limited | No |
+| DeepSeek | Pure $/token, effectively unbounded until money runs out | Balance only |
+
+So don't model "tokens remaining." Model a **Budget Ledger** with a normalized state per agent:
+
+```python
+{
+  "agent": "claude",
+  "limit_type": "rolling_window",   # rolling_window | daily_requests | monetary | none
+  "window": "5h",
+  "limits":   {"tokens": 1_500_000, "requests": None, "usd": None},   # YOU configure these
+  "consumed": {"tokens": 812_003,   "requests": 47,   "usd": 0.0},    # derived from runs
+  "state": "available",             # available | degraded | exhausted | cooldown
+  "cooldown_until": None,           # ISO timestamp, set on reactive detection
+}
+```
+
+Update it two ways, and understand which one is authoritative:
+
+- **Proactive (an estimate):** parse `usage` out of each call's JSON result, accumulate. Used for *pre-emptive* routing — "don't start a job I estimate at 200k tokens on an agent I think has 40k of headroom."
+- **Reactive (the truth):** the agent exits non-zero with a rate-limit message. Mark `exhausted`, set `cooldown_until`, fail over. **This is the signal you trust.** Your proactive estimate will drift; vendors count tokens in ways you can't fully replicate.
+
+Two rules that will save you real money:
+
+- **Reserve headroom.** Route to an agent only if `estimated_cost × 1.5 < remaining`. A mid-task death is expensive twice over: you lose the partial work *and* you pay a cold-start handoff on the next agent.
+- **Switching is not free — the router must price it in.** Returning to an agent that already has a native session is cheap (it resumes with its own context). Switching vendors means a cold start plus a full context packet. Prefer to *wait or return* over switching, unless the agent is genuinely exhausted.
+
+Keep the rate-limit detection patterns in **config, not code** — vendors reword their error messages and you don't want a code change every time.
+
+```yaml
+# config/limit_signals.yaml
+claude:
+  exit_codes: [1]
+  stderr_patterns: ["rate limit", "usage limit reached", "quota exceeded"]
+  cooldown: "5h"
+gemini:
+  stderr_patterns: ["RESOURCE_EXHAUSTED", "quota"]
+  cooldown: "24h"
+```
+
+**One caveat on DeepSeek:** it's a *model*, not an agentic coding CLI. To use it as a coding agent you must pair it with a harness that accepts a custom OpenAI-compatible endpoint (Aider, OpenCode, and similar). Verify this in the spike phase before designing it into your router — or scope it to non-agentic roles (reviewer, summarizer, planner) where a plain API call is sufficient. Its low cost makes it the natural **fallback of last resort** when everything else is in cooldown.
+
+---
+
+## 3. Langflow vs. LangGraph — flagging a contradiction
+
+Your stack table says **Langflow**. Your own **ADR-002 chose LangGraph**. These are different tools and the difference matters here:
+
+- **Langflow** is a visual, drag-and-drop builder over LangChain. Excellent for prototyping and for showing someone a flow diagram.
+- **LangGraph** is a durable state-machine runtime: cycles, conditional edges, checkpointers, interrupts, resume-from-checkpoint.
+
+What this project needs from that layer is: cycles (fix → recheck → fix), conditional routing on agent state, checkpoint/resume after crash, mid-run interruption, and nodes that block for minutes on a subprocess. That's LangGraph's exact feature list and outside Langflow's comfort zone — and once every node is custom Python wrapping a subprocess, the visual layer stops paying rent.
+
+**My recommendation:** LangGraph as the engine. If you want the visual surface, add Langflow later as an authoring/monitoring UI over it — optional chrome, not the runtime.
+
+**My stronger recommendation for v0:** use *neither* yet. The workflow you've described is a linear pipeline with a retry loop. That's ~200 lines of plain Python around a Mongo state document, and you will understand every line of it. Frameworks don't help with the three things that are actually hard here — the adapter layer, the handoff packet, and the budget ledger — and a framework you adopted before you understood the problem becomes a cage. Introduce LangGraph in Phase 4 when you add real branching and parallelism, and you'll adopt it knowing exactly which of its features you need.
+
+Either way: this contradicts ADR-002, so it needs a new ADR recording the change and the reasoning.
+
+**Similarly on Claw Orchestrator:** ADR-003 already has it unresolved pending hands-on evaluation. Don't resolve it from documentation. For v0 you don't need an execution-layer dependency at all — `subprocess.run` gets you through Phase 3. Adopt one only when you can name the specific problem it solves that your own code doesn't.
+
+---
+
+## 4. The adapter interface
+
+This is the most important interface in the system. Keep it small; every agent must fit behind it.
+
+```python
+from typing import Protocol, Literal
+from dataclasses import dataclass
+from pathlib import Path
+
+StoppedReason = Literal[
+    "completed",          # agent finished on its own
+    "budget_exhausted",   # rate/quota limit hit  → failover
+    "timeout",            # wall-clock exceeded   → failover or retry
+    "no_output",          # watchdog fired, hung  → kill, failover
+    "crashed",            # non-zero, not a limit → retry same agent once
+    "interrupted",        # human or orchestrator stop
+]
+
+@dataclass
+class AgentResult:
+    stopped_reason: StoppedReason
+    session_id: str | None      # native resumable id, for same-agent resumption
+    usage: dict                 # {input_tokens, output_tokens, cache_read, usd}
+    events_path: str            # where the streamed transcript landed
+    exit_code: int
+    stderr_tail: str
+
+class AgentAdapter(Protocol):
+    name: str
+    def run(
+        self,
+        prompt: str,
+        worktree: Path,
+        session_id: str | None,   # resume this native session if provided
+        timeout_s: int,
+    ) -> AgentResult: ...
+```
+
+`stopped_reason` is the entire basis of your routing logic. Get its taxonomy right and the router is a small, readable function. Get it wrong — e.g. collapsing `timeout` and `budget_exhausted` — and you'll fail over when you should retry, and burn quota.
+
+Note what is *not* in the interface: nothing about "did the agent succeed at the task." The adapter reports how the **process** ended. Whether the **work** is correct is the check runner's job, and only the check runner's.
+
+---
+
+## 5. The handoff packet
+
+Assembled fresh on every agent entry, in this order. Order matters — put stable content first (prompt caching works on prefixes) and the most salient content last (recency).
+
+1. **Objective + acceptance criteria** — verbatim from Mongo, never paraphrased by an agent.
+2. **Constraints, non-goals, and decisions already made** — so agent B doesn't relitigate agent A's architecture choices.
+3. **Injected skills** (per ADR-001) — but see the filtering note below.
+4. **Plan with step status** — done / in progress / remaining.
+5. **Current git state** — `git log --oneline` since task base, plus the diff.
+6. **Dead ends** — "X was tried and fails because Y; do not retry." Wildly underrated. Without it, agent B confidently reattempts exactly what killed agent A. This alone prevents most cross-agent thrash.
+7. **Latest check failures** — verbatim error text, never summarized. The exact stack trace is the highest-signal content in the whole packet.
+8. **The next step, as an imperative** — one clear instruction, not a menu.
+
+Two disciplines:
+
+**Budget the packet itself.** Every handoff costs tokens on the receiving agent — the very resource you're managing. Measure packet size and cap it. If the diff exceeds ~500 lines, send `git diff --stat` plus the full diff of only the files relevant to the current step.
+
+**Filter skills by stage.** ADR-001 (inject explicitly, don't rely on auto-discovery) is the right call, but "inject all skills always" will quietly become your largest recurring cost. A reviewer doesn't need the graphify indexing skill. Map stage → skill set in config.
+
+Structuring the packet as *static prefix (1–3) then dynamic suffix (4–8)* also makes vendor prompt caching effective on repeat calls to the same agent — a real, measurable cost reduction, not a micro-optimization.
+
+---
+
+## 6. Data model (MongoDB)
+
+```
+tasks           _id, objective, acceptance_criteria[], constraints[],
+                status, base_commit, worktree_path, created_at
+
+plans           task_id, steps[{idx, description, status, owner_agent,
+                attempts, acceptance}]
+
+runs            _id, task_id, step_idx, agent, stage, session_id,
+                prompt_ref, started_at, ended_at, usage{}, stopped_reason,
+                exit_code                      ← the ledger's source of truth
+
+events          run_id, seq, ts, type, payload  ← append-only, written DURING run
+
+checks          task_id, commit_sha, command, exit_code, stdout_tail,
+                stderr_tail, ts
+
+dead_ends       task_id, description, why_it_failed, discovered_by, ts
+
+locks           worktree_path, holder_run_id, acquired_at   ← one agent per worktree
+```
+
+Design notes:
+
+- **Derive the budget ledger from `runs`; don't maintain a separate mutable counter.** Aggregating `runs` inside the current window is crash-safe, auditable, and reconstructible after any failure. Cache it in memory if it gets slow, but the collection stays the source of truth.
+- **Idempotency on restart:** any `run` with `started_at` but no `ended_at` is an orphan from a crash. On boot, mark it `stopped_reason: "unknown"` and force plan reconciliation from git state. Never assume an interrupted run did nothing — it probably wrote files.
+- **`events` is append-only and written during the run.** If you buffer and write at the end, you've rebuilt the failure mode from §1.
+- **`locks` is not optional.** Two agents in one worktree corrupts it. One worktree, one active agent, enforced by a lock document with a holder and a heartbeat.
+
+---
+
+## 7. Build order
+
+Do not build the architecture diagram top-down. Build a thin working spine, then thicken it.
+
+### Phase 0 — Spikes (one day, before any design work)
+
+Four questions whose answers determine whether the design is even buildable. Answer them with your hands, not with documentation.
+
+- **S1 · Headless invocation.** Run each of the four agents once, non-interactively, capturing structured output. Confirm you can extract: session id, token usage, exit code. Record the exact flags in `Research.md`. *(For DeepSeek: confirm which harness you'll wrap it in.)*
+- **S2 · Resumption.** Resume a prior session with each CLI. Confirm it actually retains context.
+- **S3 · Limit detection.** Deliberately exhaust a quota — or force the error — and record the exact exit code and stderr text. This is your reactive detector's ground truth, and you cannot guess it.
+- **S4 · Worktree containment.** Run an agent inside a git worktree and confirm it doesn't write outside it.
+
+If S1 or S3 fails for an agent, that agent cannot be a first-class citizen in this system. Better to learn that on day one.
+
+### Phase 1 — One agent, one task, end to end
+Task in Mongo → create worktree → run Claude Code → run check runner → record pass/fail. No routing, no failover, no second agent. **This is the spine.** Nothing else works until this does.
+
+### Phase 2 — Adapter interface + a second agent
+Now the abstraction gets a real test. Add Codex behind the same `AgentAdapter`. Anything that only fits one agent is a leak — fix it now, at two agents, not later at four.
+
+### Phase 3 — Budget ledger + failover
+Reactive limit detection, cooldowns, ledger derived from `runs`, and the resume-with-another-agent path from §1. **At the end of this phase your headline feature works.** Test it by setting an artificially tiny budget and watching the handoff happen on a real task.
+
+### Phase 4 — Multi-stage workflow
+planner → implementer → reviewer → fixer, with routing policy and the reviewer≠implementer constraint. This is where LangGraph earns its place, if you want it.
+
+### Phase 5 — Parallelism, observability, human gates
+Multiple worktrees running concurrently (this is where worktrees actually pay off), Phoenix/OTel tracing, approval checkpoints.
+
+Phases 1–3 are the project. Phases 4–5 are what make it pleasant.
+
+---
+
+## 8. Pitfalls
+
+Ordered roughly by how likely they are to bite you.
+
+- **Summarize-on-exit** — covered in §1. The single most common fatal design.
+- **Infinite fix loops** — implementer → checks fail → fixer → checks fail → forever, burning every budget you have. Cap attempts per step (3), then escalate to a *different* agent, then to a human. Non-negotiable; add it in Phase 1, not later.
+- **Trusting the agent's "done"** — never parse completion from prose. Exit codes only. Your architecture already says this; it will be tempting to compromise when the check runner is annoying to configure. Don't.
+- **Two agents, one worktree** — corruption. Use the lock.
+- **Flaky tests** — nondeterministic checks trigger fixer loops on code that was already correct, and the agent will "fix" working code to satisfy a test that was going to pass anyway. Quarantine flaky tests before onboarding a repo.
+- **Hung vs. slow** — indistinguishable without instrumentation. Two watchdogs: wall-clock timeout per run, and a no-output timeout (no events for N minutes → kill).
+- **Handoff bloat** — packets grow silently until handoffs cost more than the work. Log packet token count on every handoff and watch the trend.
+- **Agent escapes the worktree** — edits global config, `~/.gitconfig`, other repos. Restrict tool permissions per agent; consider containers for anything unattended.
+- **Windows friction** — you're on Windows 11, and git worktrees plus long paths plus CRLF plus POSIX-assuming agent CLIs will cost you days. **Run the orchestrator in WSL2.** This is the highest-leverage environment decision available to you.
+- **Secrets** — each CLI has its own auth. Keys live in the environment, never in a prompt, never in Mongo. Agents read prompts; assume anything in a prompt is logged somewhere.
+
+---
+
+## 9. What "done" looks like for v0
+
+A single acceptance test worth building toward:
+
+> Give the system a real task in a real repo. Set Claude Code's budget artificially low so it will be exhausted partway through. The system should: plan the task, start implementing with Claude Code, detect the limit hit, fail over to Codex mid-task, have Codex continue from the existing partial work (not restart), pass the check runner, and record a complete audit trail of the whole thing in Mongo.
+
+If that passes, you have built the system. Everything after is scale, polish, and additional agents.
+
+---
+
+## 10. Open items needing ADRs
+
+- **ADR-004 · Langflow vs. LangGraph vs. hand-rolled** — the stack table now says Langflow, which contradicts ADR-002. Record the change and the reasoning either way.
+- **ADR-005 · DeepSeek's role** — first-class agent behind a harness, or non-agentic reviewer/fallback only? Depends on S1.
+- **ADR-006 · Budget model** — per-agent limits are user-configured, since no vendor exposes remaining quota. Record that this is an *estimate with a reactive override*, so future-you doesn't mistake the ledger for ground truth.
+- **ADR-003 update** — resolve Claw Orchestrator vs. OpenHands vs. neither, after Phase 3 tells you whether you need an execution layer at all.
+Guide written to docs/Build-Guide.md. Here's the digest, and three things I'd push back on.
+
+The reframe that matters most: this is not an AI problem, it's a job scheduler with unreliable, expensive workers. Crash recovery, idempotency, resource accounting, livelock prevention. The claude -p part is ~5% of the work. If you're deep in prompt engineering in week one, you're on the wrong layer.
+
+The one design trap that would sink this. Your headline feature is "agent A hits its limit, agent B resumes." The naive build is: agent runs → writes a handoff summary → next agent reads it. That fails at exactly the moment you built it for, because a rate-limited agent never reaches "finishes" and never writes the summary. Invert it: never summarize on exit, always reconstruct on entry. Four things must be durable-by-construction during the run — worktree commits (auto-commit on a timer), plan step status, the event stream written as events arrive, and last check results. Then handoff is just "build a packet from durable artifacts," and it works identically whether the agent exited cleanly or got SIGKILLed. Build this first.
+
+Your budget abstraction is wrong. The four agents aren't comparable: Claude and Codex are rolling windows, Gemini's free tier is request-count limited, DeepSeek is pure $/token. None of them exposes "tokens remaining." So model a ledger with a normalized state per agent, updated two ways — proactive accumulation from each call's usage (an estimate, for pre-emptive routing) and reactive detection from exit code + stderr (the truth). Keep the error patterns in config; vendors reword them. Also: switching agents isn't free — returning to an agent with a live session is cheap, cold-starting a different vendor costs a full context packet. Your router has to price that in, or it'll thrash.
+
+Three flags:
+
+Langflow contradicts your own ADR-002, which chose LangGraph. They're different tools — Langflow is a visual builder, LangGraph is a durable state-machine runtime with checkpointing and interrupts, which is the exact feature list you need. I'd go further: for v0 use neither. Your workflow is a linear pipeline with a retry loop — ~200 lines of Python around a Mongo doc. Frameworks don't help with the three genuinely hard parts (adapter layer, handoff packet, budget ledger), and one adopted before you understand the problem becomes a cage. Add LangGraph in Phase 4.
+Same for Claw Orchestrator. ADR-003 already has it unresolved. Don't resolve it from docs — subprocess.run carries you through Phase 3, and by then you'll know what you actually need.
+DeepSeek is a model, not an agent harness. It has no first-party agentic coding CLI in the class of Claude Code or Codex. Either pair it with a harness that takes a custom OpenAI-compatible endpoint, or scope it to non-agentic roles. Verify before designing it into the router — its cheapness makes it the ideal last-resort fallback either way.
+Start here, today: four spikes, one day, before any more design. Headless invocation per agent (can you get session id + usage + exit code?), session resumption, deliberately hitting a rate limit to record the exact exit code and stderr text (you cannot guess this, and your failover depends on it), and worktree containment. If S1 or S3 fails for an agent, it can't be first-class — better to know on day one.
+
+One environment note: run the orchestrator in WSL2. Git worktrees + long paths + CRLF + POSIX-assuming agent CLIs on native Windows will cost you days.
+
+The guide has the full adapter interface, Mongo schema, handoff packet ordering, a pitfalls list, and a concrete v0 acceptance test. Want me to draft ADR-004 (the Langflow/LangGraph call) once you've decided, or set up the Phase 0 spike scripts?
+
+c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\requirements.txt
+Write a list of all the core dependencies
+Bash Check requirements.txt and environment
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && ls -la requirements.txt 2>/dev/null && echo "--- content ---" && cat requirements.txt; echo "[end]"; echo "--- python ---"; python --version 2>&1; echo "--- other manifests ---"; ls pyproject.toml setup.py package.json 2>/dev/null || echo "none"
+
+OUT
+-rw-r--r-- 1 LOQ 197121 0 Aug  3 14:15 requirements.txt
+--- content ---
+[end]
+--- python ---
+Python 3.14.2
+--- other manifests ---
+none
+Empty file, and you're on Python 3.14. Writing a phase-scoped list — installing only what Phases 1–3 actually need, with the later/heavier things present but commented.
+
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\requirements.txt
+Write failed
+# Bhai-To-Bhai — core runtime dependencies
+#
+# Scope: everything needed for Phases 1-3 of docs/Build-Guide.md
+#   (single-agent spine -> adapter interface -> budget ledger + failover).
+# Later-phase and optional packages are listed but commented out; uncomment
+# when the phase that needs them actually starts.
+#
+#   pip install -r requirements.txt
+#   pip install -r requirements-dev.txt   # tests, lint, types
+#
+# Python: 3.12 or 3.13 recommended. See "Interpreter" note at the bottom.
+
+# --- Persistence -------------------------------------------------------------
+# Canonical task context, runs, events, checks, locks (see Build-Guide §6).
+# 4.9+ ships AsyncMongoClient natively; do NOT add motor, it is superseded.
+pymongo>=4.9,<5
+
+# --- Schema & config ---------------------------------------------------------
+# Task context, AgentResult, handoff packets, budget ledger entries.
+# Validation at every boundary matters here: agent output is untrusted input.
+pydantic>=2.9,<3
+pydantic-settings>=2.6,<3
+
+# Agent profiles, routing policy, and limit_signals.yaml (Build-Guide §2) —
+# rate-limit patterns live in config so vendor rewording is not a code change.
+PyYAML>=6.0
+
+# --- Observability (start now, it is cheap) ----------------------------------
+# Structured logging from day one. Every run/handoff/limit-hit is an event you
+# will need to correlate later; unstructured logs make Phase 3 debugging brutal.
+structlog>=24.4
+
+# --- Orchestrator CLI --------------------------------------------------------
+# `bhai run <task>`, `bhai status`, `bhai resume <task-id>`.
+# Bundles rich for readable multi-agent progress output.
+typer>=0.15
+
+# --- Reliability -------------------------------------------------------------
+# Retry/backoff around Mongo writes and transient agent-process failures.
+# NOT for rate limits — those are a routing decision, not a retry (Build-Guide §2).
+tenacity>=9.0
+
+# --- Token estimation --------------------------------------------------------
+# Proactive side of the budget ledger: rough pre-flight cost estimate so the
+# router can reserve headroom. A heuristic proxy only — vendors count
+# differently, and the reactive limit signal remains authoritative.
+tiktoken>=0.8
+
+# --- Non-CLI agents ----------------------------------------------------------
+# DeepSeek exposes an OpenAI-compatible API, so the openai SDK covers it via
+# base_url. Needed only if DeepSeek runs as a direct API call (reviewer /
+# planner / fallback). If you instead wrap it in an agent harness, drop this.
+openai>=1.60
+
+# Optional: accurate Claude token counting via count_tokens, better than the
+# tiktoken proxy for Claude-bound estimates. Not needed to invoke Claude Code
+# itself — that is a subprocess call, not an SDK call.
+# anthropic>=0.40
+
+
+# =============================================================================
+# PHASE 4 — workflow engine. Do not install yet.
+# =============================================================================
+# Build-Guide §3: v0 is a linear pipeline with a retry loop (~200 lines of
+# plain Python over a Mongo doc). Adopt LangGraph when Phase 4 adds real
+# branching and parallelism, so you adopt it knowing which features you need.
+#
+# langgraph>=0.2
+# langgraph-checkpoint-mongodb>=0.1     # checkpointer backed by your existing Mongo
+#
+# Langflow is a visual builder, not a durable runtime, and pulls a very large
+# dependency tree that will constrain every other pin in this file. If you want
+# the visual surface, run it as a separate service against its own environment
+# — do not put it in the orchestrator's dependency set.
+# langflow
+
+
+# =============================================================================
+# PHASE 5 — tracing. Do not install yet.
+# =============================================================================
+# opentelemetry-api>=1.29
+# opentelemetry-sdk>=1.29
+# opentelemetry-exporter-otlp-proto-http>=1.29
+# arize-phoenix>=7.0                    # local trace UI; run as a service
+# openinference-instrumentation>=0.1
+
+
+# =============================================================================
+# DELIBERATELY NOT DEPENDENCIES
+# =============================================================================
+# GitPython        — worktree support is thin and it hides git's exit codes,
+#                    which are exactly what you need. Use subprocess + porcelain
+#                    flags; `git worktree add/list/remove` is a handful of calls.
+# motor            — superseded by pymongo's AsyncMongoClient (see above).
+# langchain        — you are not composing LLM chains; you are supervising
+#                    subprocesses. Nothing in the core loop needs it.
+# docker (SDK)     — Phase 5 at the earliest, and only if containerising agents.
+# mongomock        — test against a real MongoDB (see requirements-dev.txt);
+#                    mongomock diverges on exactly the aggregation/index
+#                    behaviour the budget ledger relies on.
+
+
+# =============================================================================
+# SYSTEM DEPENDENCIES (not pip-installable — install separately)
+# =============================================================================
+# git >= 2.5                 worktree support
+# MongoDB >= 7.0             or run via Docker
+# Node.js >= 18              runtime for the agent CLIs below
+#
+# Agent CLIs — each authenticates independently; keys stay in the environment,
+# never in a prompt and never in Mongo (Build-Guide §8):
+#   @anthropic-ai/claude-code
+#   @openai/codex
+#   @google/gemini-cli
+#   DeepSeek — API only; needs a harness (Aider/OpenCode) or a direct API role.
+#             Resolve in spike S1 before designing it into the router.
+#
+# WSL2 strongly recommended on Windows. Worktrees + long paths + CRLF +
+# POSIX-assuming agent CLIs on native Windows will cost you days.
+#
+# NOT dependencies of this project: pytest/ruff/mypy/bandit as *check runner
+# targets*. Those belong to whichever repo the agents are working on and are
+# invoked by exit code (Build-Guide §5) — never import them here.
+#
+# =============================================================================
+# INTERPRETER
+# =============================================================================
+# Detected locally: Python 3.14.2. Pin the project to 3.12 or 3.13 instead.
+# The agent/LLM ecosystem lags new interpreter releases, and packages here
+# (tiktoken, arize-phoenix, and the Phase 4 tree especially) are the kind that
+# ship compiled wheels or heavy transitive pins. Debugging wheel availability
+# is not how you want to spend Phase 0. Verify before committing to 3.14.
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\requirements.txt
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\requirements.txt
+133 lines
+# Bhai-To-Bhai — core runtime dependencies
+#
+# Scope: everything needed for Phases 1-3 of docs/Build-Guide.md
+#   (single-agent spine -> adapter interface -> budget ledger + failover).
+# Later-phase and optional packages are listed but commented out; uncomment
+# when the phase that needs them actually starts.
+#
+#   pip install -r requirements.txt
+#   pip install -r requirements-dev.txt   # tests, lint, types
+#
+# Python: 3.12 or 3.13 recommended. See "Interpreter" note at the bottom.
+
+# --- Persistence -------------------------------------------------------------
+# Canonical task context, runs, events, checks, locks (see Build-Guide §6).
+# 4.9+ ships AsyncMongoClient natively; do NOT add motor, it is superseded.
+pymongo>=4.9,<5
+
+# --- Schema & config ---------------------------------------------------------
+# Task context, AgentResult, handoff packets, budget ledger entries.
+# Validation at every boundary matters here: agent output is untrusted input.
+pydantic>=2.9,<3
+pydantic-settings>=2.6,<3
+
+# Agent profiles, routing policy, and limit_signals.yaml (Build-Guide §2) —
+# rate-limit patterns live in config so vendor rewording is not a code change.
+PyYAML>=6.0
+
+# --- Observability (start now, it is cheap) ----------------------------------
+# Structured logging from day one. Every run/handoff/limit-hit is an event you
+# will need to correlate later; unstructured logs make Phase 3 debugging brutal.
+structlog>=24.4
+
+# --- Orchestrator CLI --------------------------------------------------------
+# `bhai run <task>`, `bhai status`, `bhai resume <task-id>`.
+# Bundles rich for readable multi-agent progress output.
+typer>=0.15
+
+# --- Reliability -------------------------------------------------------------
+# Retry/backoff around Mongo writes and transient agent-process failures.
+# NOT for rate limits — those are a routing decision, not a retry (Build-Guide §2).
+tenacity>=9.0
+
+# --- Token estimation --------------------------------------------------------
+# Proactive side of the budget ledger: rough pre-flight cost estimate so the
+# router can reserve headroom. A heuristic proxy only — vendors count
+# differently, and the reactive limit signal remains authoritative.
+tiktoken>=0.8
+
+# --- Non-CLI agents ----------------------------------------------------------
+# DeepSeek exposes an OpenAI-compatible API, so the openai SDK covers it via
+# base_url. Needed only if DeepSeek runs as a direct API call (reviewer /
+# planner / fallback). If you instead wrap it in an agent harness, drop this.
+openai>=1.60
+
+# Optional: accurate Claude token counting via count_tokens, better than the
+# tiktoken proxy for Claude-bound estimates. Not needed to invoke Claude Code
+# itself — that is a subprocess call, not an SDK call.
+# anthropic>=0.40
+
+
+# =============================================================================
+# PHASE 4 — workflow engine. Do not install yet.
+# =============================================================================
+# Build-Guide §3: v0 is a linear pipeline with a retry loop (~200 lines of
+# plain Python over a Mongo doc). Adopt LangGraph when Phase 4 adds real
+# branching and parallelism, so you adopt it knowing which features you need.
+#
+# langgraph>=0.2
+# langgraph-checkpoint-mongodb>=0.1     # checkpointer backed by your existing Mongo
+#
+# Langflow is a visual builder, not a durable runtime, and pulls a very large
+# dependency tree that will constrain every other pin in this file. If you want
+# the visual surface, run it as a separate service against its own environment
+# — do not put it in the orchestrator's dependency set.
+# langflow
+
+
+# =============================================================================
+# PHASE 5 — tracing. Do not install yet.
+# =============================================================================
+# opentelemetry-api>=1.29
+# opentelemetry-sdk>=1.29
+# opentelemetry-exporter-otlp-proto-http>=1.29
+# arize-phoenix>=7.0                    # local trace UI; run as a service
+# openinference-instrumentation>=0.1
+
+
+# =============================================================================
+# DELIBERATELY NOT DEPENDENCIES
+# =============================================================================
+# GitPython        — worktree support is thin and it hides git's exit codes,
+#                    which are exactly what you need. Use subprocess + porcelain
+#                    flags; `git worktree add/list/remove` is a handful of calls.
+# motor            — superseded by pymongo's AsyncMongoClient (see above).
+# langchain        — you are not composing LLM chains; you are supervising
+#                    subprocesses. Nothing in the core loop needs it.
+# docker (SDK)     — Phase 5 at the earliest, and only if containerising agents.
+# mongomock        — test against a real MongoDB (see requirements-dev.txt);
+#                    mongomock diverges on exactly the aggregation/index
+#                    behaviour the budget ledger relies on.
+
+
+# =============================================================================
+# SYSTEM DEPENDENCIES (not pip-installable — install separately)
+# =============================================================================
+# git >= 2.5                 worktree support
+# MongoDB >= 7.0             or run via Docker
+# Node.js >= 18              runtime for the agent CLIs below
+#
+# Agent CLIs — each authenticates independently; keys stay in the environment,
+# never in a prompt and never in Mongo (Build-Guide §8):
+#   @anthropic-ai/claude-code
+#   @openai/codex
+#   @google/gemini-cli
+#   DeepSeek — API only; needs a harness (Aider/OpenCode) or a direct API role.
+#             Resolve in spike S1 before designing it into the router.
+#
+# WSL2 strongly recommended on Windows. Worktrees + long paths + CRLF +
+# POSIX-assuming agent CLIs on native Windows will cost you days.
+#
+# NOT dependencies of this project: pytest/ruff/mypy/bandit as *check runner
+# targets*. Those belong to whichever repo the agents are working on and are
+# invoked by exit code (Build-Guide §5) — never import them here.
+#
+# =============================================================================
+# INTERPRETER
+# =============================================================================
+# Detected locally: Python 3.14.2. Pin the project to 3.12 or 3.13 instead.
+# The agent/LLM ecosystem lags new interpreter releases, and packages here
+# (tiktoken, arize-phoenix, and the Phase 4 tree especially) are the kind that
+# ship compiled wheels or heavy transitive pins. Debugging wheel availability
+# is not how you want to spend Phase 0. Verify before committing to 3.14.
+Now the dev set, which the core file references:
+
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\requirements-dev.txt
+33 lines
+# Bhai-To-Bhai — development dependencies
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+
+-r requirements.txt
+
+# --- Testing -----------------------------------------------------------------
+pytest>=8.3
+pytest-asyncio>=0.24          # the run loop and event streaming are async
+pytest-cov>=6.0
+pytest-mock>=3.14
+
+# Real MongoDB in a container for tests. Worth the slower suite: the budget
+# ledger is an aggregation over `runs` within a time window, and fakes diverge
+# from real server behaviour exactly there (see the mongomock note in
+# requirements.txt). Crash-recovery tests also need real durability semantics.
+testcontainers[mongodb]>=4.9
+
+# Deterministic clocks. Cooldown windows, rolling budget windows, and watchdog
+# timeouts are all time-dependent — you cannot test Phase 3 by waiting 5 hours.
+time-machine>=2.16
+
+# --- Lint & types ------------------------------------------------------------
+ruff>=0.8                     # lint + format, replaces black/isort/flake8
+mypy>=1.13
+types-PyYAML
+
+# --- Local services ----------------------------------------------------------
+# MongoDB and (later) Phoenix run as containers, not pip packages. See the
+# system-dependencies section of requirements.txt.
+#
+#   docker run -d -p 27017:27017 --name bhai-mongo mongo:7
+Written requirements.txt and requirements-dev.txt.
+
+Core install is deliberately small — eight packages: pymongo, pydantic, pydantic-settings, PyYAML, structlog, typer, tenacity, tiktoken, plus openai only if DeepSeek runs as a direct API call. That's the entire Phase 1–3 spine. LangGraph and the Phoenix/OTel set are in the file but commented, tagged with the phase that unlocks them.
+
+The non-obvious calls:
+
+pymongo, not motor. PyMongo ships AsyncMongoClient natively now and motor is superseded — don't add a second driver.
+No GitPython. Its worktree support is thin and it wraps away git's exit codes, which are precisely the signal your check runner and crash-recovery logic read. git worktree add/list/remove via subprocess is a handful of calls.
+No langchain. You're supervising subprocesses, not composing LLM chains. Nothing in the core loop touches it.
+tenacity is not for rate limits. Retry/backoff covers transient Mongo writes and crashed processes. A budget exhaustion is a routing decision — retrying it just burns the next window too.
+Real Mongo in tests, not mongomock. Your budget ledger is a time-windowed aggregation over runs, and fakes diverge from server behaviour exactly there. Hence testcontainers[mongodb], plus time-machine — cooldowns and rolling windows are time-dependent and you can't test Phase 3 by waiting five hours.
+Langflow shouldn't live in this file at all. Its dependency tree is large enough to constrain every other pin here. If you want the visual surface, run it as a separate service with its own environment.
+Two things pip can't give you, both listed in the file's system-dependencies block: the four agent CLIs (Node-based, each authenticating independently) and MongoDB itself. Also worth internalising — pytest/ruff/mypy/bandit are check-runner targets belonging to whatever repo the agents work on, invoked by exit code. They never get imported into the orchestrator.
+
+One flag: you're on Python 3.14.2. I'd pin the project to 3.12 or 3.13. The agent/LLM ecosystem lags interpreter releases, and several packages here are the compiled-wheel or heavy-transitive-pin kind — tiktoken, arize-phoenix, and the Phase 4 tree especially. Verify wheel availability before committing to 3.14; chasing build failures is a bad way to spend Phase 0.
+
+Want me to add a pyproject.toml with the ruff/mypy/pytest config, or scaffold the Phase 0 spike scripts against these deps?
+
+
+This project is a persistent multi-agent coding system that coordinates Claude Code, Codex, Gemini, and DeepSeek to complete software-development tasks. It selects agents according to their available token budgets and transfers unfinished work to another agent whenever the current agent reaches its limit, fails, or stops unexpectedly. All agents share the same task context, project files, progress, and reusable skills, allowing work to continue without restarting. The system preserves agent sessions on the device, supports parallel or sequential collaboration, and validates completed work against defined requirements. Its goal is to complete coding tasks reliably while making efficient use of multiple agents and their available token allowances.
+Based on this, compare the use of Claw Orchestrator and OpenHands for this project.
+
+
+Investigated agent-switching capabilities and CLI delegation mechanisms
+Investigated agent-switching capabilities and CLI delegation mechanisms
+Yes — Ralph supports this natively, though not automatically for a plain "check my plan" request. It's built into the architecture but you need to trigger it. Here's how it actually works based on that guide.
+
+The mechanism: three node types
+The doc defines three node types, and this is the key: skill runs synchronously as an actual command execution (plan, execute, verify — these run in your host CLI, i.e. Claude Code), cli runs via maestro delegate as a background CLI delegate execution — this is the agent-switching mechanism, and decision is Ralph re-evaluating results to decide whether to continue or insert a fix loop.
+
+So a Ralph chain isn't locked to one agent. Individual steps in the chain can be typed cli, which hands that step off to a different backend CLI (Codex, Gemini, etc.) via maestro delegate, running in the background while the rest of the session continues. You can see this directly in the session schema — the example status.json shows steps with "type": "skill" and lists "cli" as a valid alternative type alongside "decision".
+
+How your plan → codex-review → implement → codex-review sequence would look
+Ralph's own quality pipeline already has a review stage baked into the lifecycle — plan → execute → verify → ◆post-verify → business-test → ◆post-business-test → review → ◆post-review → test-gen+test — but by default that review step runs as a skill (i.e., in Claude Code), not necessarily delegated to Codex. To get Codex specifically as the reviewer, you have two paths:
+
+1. Use quick mode's CLI-review stage, which is explicitly designed to call out to a different CLI: quick mode is verify → CLI-review, skipping business-test, test-gen, test. That "CLI-review" step is the cli node type — a delegate call, not an in-host skill. This is the fastest way to get an external-agent check without writing custom config.
+
+2. Insert your own cli delegate steps at the plan and implementation checkpoints via maestro delegate, targeting Codex explicitly. The delegate-async guide (which I referenced earlier but haven't fully verified the exact flag syntax for) covers this — the general shape is something like:
+
+maestro delegate --agent codex --task "review this plan for gaps" --input <plan-artifact>
+Ralph's decision nodes (the ◆ checkpoints) then read that delegate's output file the same way they read verification.json or review.json for its own skills, and decide pass/fail/retry from it.
+
+What this gets you, concretely
+Run it in quick mode so the review stage delegates out:
+
+/maestro-ralph "implement OAuth2 refresh tokens" --quality quick
+Chain becomes: plan (Claude, skill) → execute (Claude, skill) → verify (Claude, skill) → ◆post-verify → CLI-review (delegated to Codex, cli type) → ◆post-review (Ralph reads Codex's verdict, inserts fix loop if BLOCK).
+
+That gives you implementation checked by Codex automatically. To also get the plan checked by Codex before execution starts, you'd need to manually insert a cli delegate step between plan and execute — this isn't one of Ralph's built-in decision nodes (post-verify, post-review, post-test, post-milestone all sit after execution, not after planning), so plan-level cross-model review looks like something you'd configure yourself via maestro delegate, rather than get for free from Ralph's default chain.
+
+Bottom line vs. flow-next
+Ralph's cli node type proves maestro-flow's architecture supports mid-task agent switching — it's not bolted on. But the built-in decision gates are oriented around post-implementation quality (verify/review/test), not a plan-review gate before execution. Flow-next's plan-review and impl-review are explicit, named commands for exactly the two checkpoints you want, with Codex as the configured backend from setup — Ralph gets you there but requires assembling the plan-side check yourself via maestro delegate, since it isn't one of the five built-in decision nodes.
+
+
+excerpt_from_previous_claude_message.txt
+24 lines
+
+txt
+
+Is the flow customizable?
+
+
+Synthesized routing capabilities to address customization comprehensively
+Synthesized routing capabilities to address customization comprehensively
+Yes — customizability is actually one of flow-next's named pillars: ⇶ Model routing — Any model, any role — just ask. It's not a fixed two-agent script; the plan/implement/review split you asked about is just the default configuration, and several layers are adjustable.
+
+What you can customize
+1. Which model reviews. Review backend is a config key, and it's not locked to Codex:
+
+flowctl config set review.backend codex        # or: repoprompt, copilot, cursor
+The README lists the review backends interchangeably — RepoPrompt, Codex, Copilot, or Cursor as second opinion — so you swap the reviewer per project, or per review type. plan-review and impl-review can theoretically point at different backends if you want, say, Codex to review implementation but a different tool to review plans.
+
+2. Who implements. Default is host-only (Claude Code writes the code), but this is explicitly toggleable:
+
+flowctl config set work.delegate codex
+or invoked ad hoc with delegate:codex for a single work run — Opt-in: offload implementation to a local codex exec with delegate:codex (or work.delegate=codex config) — OFF by default, consent-gated, host keeps all judgment. So the four-way split you originally described (Claude plans, Codex checks, Claude implements, Codex checks) is one point on a spectrum — you could also do Codex-implements/Claude-reviews, or alternate per task.
+
+3. Per-task / per-role overrides, not just global config. The feature list explicitly separates this out: Orchestration & model routing — tiered subagents, per-task reviewer routing, opt-in codex exec implementation offload, promptable overrides. "Per-task reviewer routing" means a single epic can route task A's review to Codex and task B's review to a different backend, rather than one global setting for the whole project. "Promptable overrides" means you can just ask in natural language for a one-off change without touching config — the model-routing tenet literally says "any model, any role — just ask."
+
+4. Review timing granularity. You control whether review happens after every single task or once at the end of a batch:
+
+/flow-next:work fn-1.1     # one task, review after it
+/flow-next:work fn-1       # whole epic, one review at the end
+This trades review tightness against overhead — Work task-by-task with review after each, or run an entire epic at once. Same guarantees either way.
+
+5. Depth of the pipeline itself. You're not locked into plan→work→review. The full command surface includes interview (extra Q&A pass before planning), qa (opt-in live-app QA after work, before PR), spec-completion-review (a final gate checking the whole implementation against the original spec), and pilot/land/ralph-init for different levels of autonomy. You pick which stages actually run for a given task.
+
+6. Autonomy level. Same gates, three different drivers: manual (/flow-next:work, you type each command), pilot (one pipeline stage per tick, driven by /loop 10m /flow-next:pilot), or Ralph (a fully autonomous overnight loop with hook-enforced guardrails). The plan-check-implement-check sequence stays identical across all three — you're just choosing how much you sit at the keyboard.
+
+7. Platform, not just model. Since it's first-class on Claude Code, Codex, and Factory Droid (and works via compatibility on Grok Build and Cursor), you could flip which CLI is the host running the orchestration entirely — e.g., Codex as host, Claude Code as the reviewer — rather than only swapping the reviewer while Claude Code stays the driver.
+
+Where the config actually lives
+All of this is flowctl config keys plus optional per-invocation flags/phrases — no code changes, no forking the plugin. The authoritative reference for every knob is docs/orchestration.md in the repo (Steering all of it — model routing, review backends, delegation, loop chaining: docs/orchestration.md), which I haven't pulled the full contents of — if you want the exact list of config keys and their defaults rather than what's summarized in the README, that file is worth fetching directly before you commit to a setup.
+
+

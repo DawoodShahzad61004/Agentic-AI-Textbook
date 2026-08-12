@@ -1,0 +1,4437 @@
+
+Read all files inside `maestro-flow documentation` folder
+Many of these documents have texts written in them in Chinese. Convert all of them to English
+I'll start by exploring the documentation folder.
+
+Bash List all files in documentation folder
+IN
+find "maestro-flow documentation" -type f | head -200
+
+OUT
+maestro-flow documentation/command-usage-guide.en.md
+maestro-flow documentation/delegate-async-guide.md
+maestro-flow documentation/install-guide.md
+maestro-flow documentation/issue-discover-guide.md
+maestro-flow documentation/knowledge-management-guide.md
+maestro-flow documentation/learn-tools-guide.md
+maestro-flow documentation/maestro-coordinator-guide.en.md
+maestro-flow documentation/OpenL-2608041124.md
+maestro-flow documentation/quality-pipeline-guide.md
+maestro-flow documentation/README.en.md
+maestro-flow documentation/search-system-guide.md
+Bash Count files
+IN
+find "maestro-flow documentation" -type f | wc -l
+
+OUT
+11
+Bash Check file sizes and Chinese character counts
+IN
+cd "maestro-flow documentation" && for f in *.md; do lines=$(wc -l < "$f"); chars=$(wc -c < "$f"); cn=$(grep -o -P '[\x{4e00}-\x{9fff}]' "$f" 2>/dev/null | wc -l); echo "$f | lines=$lines | bytes=$chars | cjk_chars=$cn"; done
+
+OUT
+OpenL-2608041124.md | lines=41 | bytes=2566 | cjk_chars=0
+README.en.md | lines=235 | bytes=10623 | cjk_chars=0
+command-usage-guide.en.md | lines=680 | bytes=32235 | cjk_chars=0
+delegate-async-guide.md | lines=283 | bytes=9696 | cjk_chars=0
+install-guide.md | lines=493 | bytes=15958 | cjk_chars=0
+issue-discover-guide.md | lines=316 | bytes=10874 | cjk_chars=0
+knowledge-management-guide.md | lines=541 | bytes=21406 | cjk_chars=0
+learn-tools-guide.md | lines=260 | bytes=11694 | cjk_chars=0
+maestro-coordinator-guide.en.md | lines=199 | bytes=6670 | cjk_chars=0
+quality-pipeline-guide.md | lines=257 | bytes=9862 | cjk_chars=0
+search-system-guide.md | lines=484 | bytes=16382 | cjk_chars=0
+Bash Detect non-ASCII lines per file
+IN
+cd "maestro-flow documentation" && grep -c '[^\x00-\x7F]' *.md 2>/dev/null; echo "---perl test---"; echo "测试" | grep -P '[\x{4e00}-\x{9fff}]' && echo "PCRE_OK" || echo "PCRE_FAIL"
+
+OUT
+/usr/bin/bash: line 1: cd: maestro-flow documentation: No such file or directory
+---perl test---
+grep: -P supports only unibyte and UTF-8 locales
+PCRE_FAIL
+Bash Count non-ASCII lines per file
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai/maestro-flow documentation" && grep -c '[^\x00-\x7F]' *.md 2>/dev/null
+
+OUT
+OpenL-2608041124.md:35
+README.en.md:164
+command-usage-guide.en.md:507
+delegate-async-guide.md:212
+install-guide.md:361
+issue-discover-guide.md:225
+knowledge-management-guide.md:384
+learn-tools-guide.md:181
+maestro-coordinator-guide.en.md:152
+quality-pipeline-guide.md:196
+search-system-guide.md:333
+Now let me read all the files.
+
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\OpenL-2608041124.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\README.en.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\maestro-coordinator-guide.en.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\delegate-async-guide.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\quality-pipeline-guide.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\install-guide.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\issue-discover-guide.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\learn-tools-guide.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\search-system-guide.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\knowledge-management-guide.md
+Bash Detect CJK characters precisely per file
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai/maestro-flow documentation" && node -e "
+const fs=require('fs');
+for (const f of fs.readdirSync('.')) {
+  if(!f.endsWith('.md')) continue;
+  const t=fs.readFileSync(f,'utf8');
+  const lines=t.split(/\r?\n/);
+  let n=0; const samples=[];
+  lines.forEach((l,i)=>{ if(/[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef]/.test(l)){n++; if(samples.length<6) samples.push((i+1)+': '+l.slice(0,90));} });
+  console.log('=== '+f+' -> '+n+' lines with CJK');
+  samples.forEach(s=>console.log('    '+s));
+}
+"
+
+OUT
+=== command-usage-guide.en.md -> 0 lines with CJK
+=== delegate-async-guide.md -> 129 lines with CJK
+    2: title: "Delegate 异步执行指南"
+    5: 通过独立 worker 进程进行异步任务委托，支持 broker 管理的生命周期、消息注入和 MCP 通知。
+    9: ## 快速开始
+    11: ### 通过 Claude Code MCP 启动
+    17: MCP server 注册 9 个内置工具（`edit_file`、`write_file`、`read_file`、`read_many_files`、`team_msg`、`t
+    19: 异步 delegate 完成时，通知通过 MCP channel 推送到 Claude Code（`<channel source="maestro" ...>`），无需手动查询。
+=== install-guide.md -> 236 lines with CJK
+    2: title: "安装指南"
+    5: Maestro-Flow 安装分为全局 CLI 安装和项目初始化两步。
+    9: ## 快速安装
+    12: # 1. 安装全局 CLI
+    15: # 2. 初始化项目（在项目根目录执行）
+    19: **前置要求**：
+=== issue-discover-guide.md -> 130 lines with CJK
+    2: title: "问题发现指南"
+    5: Maestro Issue 系统的完整使用手册，涵盖问题发现、管理、闭环全流程。
+    9: ## 一、概述
+    11: Maestro Issue 系统是独立于 Phase 管线的问题追踪机制。Phase 管线（analyze -> plan -> execute -> verify）推进预定义开发
+    13: 两者可以独立运行，也可以联动：
+    15: - **独立运行**：直接发现和管理 Issue，不影响 Phase 进度
+=== knowledge-management-guide.md -> 243 lines with CJK
+    2: title: "知识沉淀管理系统"
+    5: Maestro 知识沉淀分两种：**约束**和**积累**。约束是编码规范、架构决策、质量规则——规定"不能做什么"。积累是操作步骤、设计资产、调试经验——记录"怎么做过"。前者需
+    7: > 系统权威设计见 [Maestro 知识系统架构](../docs/knowledge-system-architecture.md)。本文聚焦日常操作；身份模型、Run led
+    10: <summary>产物目录结构</summary>
+    14: ├── specs/                          # 约束层：基于 category 的规则索引
+    20: │   └── learnings.md                # category: learning（经验教训）
+=== learn-tools-guide.md -> 134 lines with CJK
+    2: title: "学习工具集指南"
+    5: Maestro 学习工具集的完整使用手册，涵盖 `/maestro-learn` 的 4 个子命令（`follow` / `investigate` / `decompose` /
+    9: ## 一、概述
+    11: 学习工具集是 Maestro 的**交互式深度学习**模块，专注于从代码、文档、决策历史中提取结构化知识。每个命令都遵循科学方法——假设、证据、验证、沉淀——将隐性的工程经验转化为
+    13: ### 与 `/maestro-knowhow` 的区别
+    15: | 维度 | `/maestro-learn` 工具集 | `/maestro-knowhow` |
+=== maestro-coordinator-guide.en.md -> 0 lines with CJK
+=== OpenL-2608041124.md -> 0 lines with CJK
+=== quality-pipeline-guide.md -> 118 lines with CJK
+    2: title: "质量管线指南"
+    5: Maestro 质量管线完整参考：七个环节围绕 **「审查 → 测试 → 调试 → 重构 → 复盘」** 闭环组织。其中 `review` / `test` / `auto-tes
+    9: ## 命令总览
+    11: | 命令 | 定位 | 核心问题 | 产物 ID |
+    13: | `review` | 分层代码审查 | 代码质量是否达标？ | `REV-{NNN}` |
+    14: | `test` | 会话式 UAT | 用户视角是否正常？ | `TST-{NNN}` |
+=== README.en.md -> 2 lines with CJK
+    17: [简体中文](README.md)&nbsp;&nbsp;|&nbsp;&nbsp;[English](README.en.md)
+    229: [Linux DO：学AI，上L站！](https://linux.do/)
+=== search-system-guide.md -> 221 lines with CJK
+    2: title: "搜索系统指南"
+    5: Maestro 搜索系统基于 BM25F 算法，提供统一的知识搜索能力，支持 spec、knowhow、issue、domain 等多种数据源。
+    7: 检索在完整知识闭环中的职责、canonical identity 和防集中策略见
+    8: [Maestro 知识系统架构](../docs/knowledge-system-architecture.md)。
+    12: ## 概述
+    14: `maestro search` 是知识系统的统一搜索入口，整合了：
+Update Todos
+
+Translate delegate-async-guide.md to English
+
+Translate quality-pipeline-guide.md to English
+
+Translate issue-discover-guide.md to English
+
+Translate learn-tools-guide.md to English
+
+Translate install-guide.md to English
+
+Translate search-system-guide.md to English
+
+Translate knowledge-management-guide.md to English
+
+Fix 2 residual Chinese lines in README.en.md
+
+Verify no CJK remains across all files
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\delegate-async-guide.md
+284 lines
+---
+title: "Delegate Async Execution Guide"
+---
+
+Asynchronous task delegation through independent worker processes, with broker-managed lifecycles, message injection, and MCP notifications.
+
+---
+
+## Quick Start
+
+### Launching via Claude Code MCP
+
+```bash
+claude --dangerously-load-development-channels server:maestro --dangerously-skip-permissions
+```
+
+The MCP server registers 9 built-in tools (`edit_file`, `write_file`, `read_file`, `read_many_files`, `team_msg`, `team_mailbox`, `store_knowhow`, `team_tasks_mcp`, `team_agents`) — **the delegate family is not included**. Delegate subcommands (`message`, `status`, `output`, `tail`, `cancel`) are available only through the CLI and are not registered as MCP tools.
+
+When an async delegate finishes, the notification is pushed to Claude Code over the MCP channel (`<channel source="maestro" ...>`) — no manual polling required. For detailed results, run `maestro delegate status <exec_id>` or `maestro delegate output <exec_id>` in a shell.
+
+### Launching via CLI
+
+```bash
+# Async (background) — returns an execId immediately
+maestro delegate "Analyze security vulnerabilities in the auth module" --to gemini --async
+
+# Sync (foreground) — blocks until completion
+maestro delegate "say hello" --to claude
+```
+
+---
+
+## Command Reference
+
+### Main Command
+
+```bash
+maestro delegate "<PROMPT>" [options]
+```
+
+| Option | Description | Default |
+|------|------|--------|
+| `--to <tool>` | Agent: gemini, agy, codex, claude, opencode | First enabled tool in the config |
+| `--role <role>` | Capability role (analyze, explore, review, implement, plan, brainstorm, research) | — |
+| `--mode <mode>` | `analysis` (read-only) or `write` (create/modify/delete) | `analysis` |
+| `--effort <level>` | Reasoning effort (low, medium, high, max) | The tool's `reasoningEffort` setting |
+| `--model <model>` | Model override | The tool's `primaryModel` |
+| `--cd <dir>` | Working directory | Current directory |
+| `--rule <template>` | Load protocol + prompt template | — |
+| `--id <id>` | Execution ID | Auto: `{prefix}-{HHmmss}-{rand4}` |
+| `--resume [id]` | Resume a previous session | — |
+| `--includeDirs <dirs>` | Additional directories (comma-separated) | — |
+| `--session <id>` | MCP session ID, used for notifications | Auto-detected |
+| `--backend <type>` | `direct` or `terminal` | `direct` |
+| `--timeout <ms>` | Idle timeout (ms) — force-terminates when the CLI produces no output for longer than this | 600000 (10 minutes) |
+| `--async` | Run in the background, return immediately | Foreground |
+
+### Subcommands
+
+```bash
+maestro delegate show                              # 20 most recent executions
+maestro delegate show --all                        # Up to 100
+maestro delegate status <id>                       # Broker + history status
+maestro delegate status <id> --events 10           # With more broker events
+maestro delegate output <id>                       # Assistant output (final reply only)
+maestro delegate output <id> --full                # Full output (all entries, including tool calls)
+maestro delegate output <id> --verbose             # With metadata and timestamps
+maestro delegate output <id> --all                 # Include thinking/reasoning entries
+maestro delegate output <id> --offset <n>          # Character offset
+maestro delegate output <id> --limit <n>           # Maximum character count
+maestro delegate tail <id>                         # Recent events + history
+maestro delegate tail <id> --events 20 --history 20
+maestro delegate cancel <id>                       # Request cancellation
+maestro delegate message <id> "text"               # Inject a follow-up message
+maestro delegate message <id> "text" --delivery after_complete
+maestro delegate messages <id>                     # List queued messages
+```
+
+### Built-in MCP Tools
+
+The MCP server registers the following 9 built-in tools (via `registerBuiltinTools()`) — **the delegate family is not included**:
+
+| MCP Tool | Description |
+|---------|------|
+| `edit_file` | Edit a file (text replacement / line operations) |
+| `write_file` | Write a file |
+| `read_file` | Read a single file |
+| `read_many_files` | Batch reads / directory traversal / content search |
+| `team_msg` | Agent team message bus (JSONL) |
+| `team_mailbox` | Team mailbox reads |
+| `store_knowhow` | Knowledge entry storage and search |
+| `team_tasks_mcp` | Team task management |
+| `team_agents` | Team agent management |
+
+> **Note**: Delegate subcommands (`message`, `status`, `output`, `tail`, `cancel`, `messages`) are invoked only through the CLI shell and are not registered as MCP tools. Async completion notifications are pushed over the MCP channel.
+
+---
+
+## Task Lifecycle
+
+```
+queued → running → completed
+                 → failed
+                 → cancelled
+              ↗
+         input_required
+```
+
+**Execution ID**: `{prefix}-{HHmmss}-{rand4}` (e.g. `gem-143022-a7f2`)
+Prefixes: gemini→`gem`, agy→`agy`, codex→`cdx`, claude→`cld`, opencode→`opc`
+
+<details>
+<summary>Delegate vs CLI feature comparison</summary>
+
+| Feature | `maestro cli` | `maestro delegate` |
+|------|:---:|:---:|
+| Synchronous execution | ✓ | ✓ |
+| Asynchronous execution | — | ✓ `--async` |
+| Prompt input | `-p "..."` | Positional argument `"..."` |
+| Tool selection | `--tool` | `--to` |
+| Mode (analysis/write) | ✓ | ✓ |
+| Model override | ✓ | ✓ |
+| Working directory | `--cd` | `--cd` |
+| Rule template | `--rule` | `--rule` |
+| Custom execution ID | `--id` | `--id` |
+| Session resume | `--resume` | `--resume` |
+| Backend selection | — | `--backend` |
+| MCP session binding | — | `--session` |
+| show (list executions) | ✓ | ✓ |
+| output (fetch results) | ✓ | ✓ |
+| output --verbose | ✓ | ✓ |
+| watch (live stream) | ✓ | — |
+| status (broker + history) | — | ✓ |
+| tail (recent events) | — | ✓ |
+| cancel | — | ✓ |
+| message injection | — | ✓ |
+| message after_complete | — | ✓ |
+| MCP channel notifications | — | ✓ |
+| Snapshot (latest output preview) | — | ✓ |
+
+**Delegate is a complete replacement for CLI.** The CLI-only features (`watch`, `output --tail`) are convenience shortcuts.
+
+</details>
+
+---
+
+## Message Delivery
+
+| Mode | Behavior | Use For |
+|------|------|------|
+| `inject` | Routed to the running worker via stdin | Supplementary context, course correction |
+| `after_complete` | Queues the message; relaunches after completion | Chained tasks, post-processing |
+
+```bash
+# Inject context into a running delegate
+maestro delegate message gem-143022-a7f2 "Also check src/utils/sanitize.ts"
+
+# Chaining: analyze → auto-fix
+maestro delegate "Analyze auth security vulnerabilities" --to gemini --async
+maestro delegate message gem-143022-a7f2 "Fix all critical vulnerabilities" --delivery after_complete
+```
+
+---
+
+## Prompt Construction
+
+Assembly order: **Mode protocol** → **User prompt** → **Rule template** (if specified)
+
+### Prompt Template (6 fields)
+
+```
+PURPOSE: [goal] + [reason] + [success criteria]
+TASK: [step 1] | [step 2] | [step 3]
+MODE: analysis|write
+CONTEXT: @[file patterns] | Memory: [context from prior work]
+EXPECTED: [output format] + [quality standard]
+CONSTRAINTS: [scope limits] | [special requirements]
+```
+
+### Rule Templates
+
+**Analysis**: `analysis-trace-code-execution`, `analysis-diagnose-bug-root-cause`, `analysis-analyze-code-patterns`, `analysis-review-architecture`, `analysis-review-code-quality`, `analysis-analyze-performance`, `analysis-assess-security-risks`
+
+**Planning**: `planning-plan-architecture-design`, `planning-breakdown-task-steps`, `planning-design-component-spec`, `planning-plan-migration-strategy`
+
+**Development**: `development-implement-feature`, `development-refactor-codebase`, `development-generate-tests`, `development-implement-component-ui`, `development-debug-runtime-issues`
+
+---
+
+## Notification System
+
+Dual channel: **MCP channel** (primary, push-based) + **Hook fallback** (JSONL file)
+
+Throttling: `status_update` every 10s, `snapshot` every 15s.
+
+---
+
+## Stale-Stream Timeout
+
+When a CLI process produces no output at all (stdout/stderr) within the specified time, the delegate broker force-terminates the process and marks it `failed`.
+
+- **Default timeout**: 600000ms (10 minutes)
+- **CLI override**: `delegate --timeout <ms>`
+- **Config override**: the per-tool `streamTimeoutMs` field in `cli-tools.json`
+
+Precedence: the `--timeout` CLI option > the `streamTimeoutMs` config > the 600000ms default.
+
+---
+
+## Proxy Configuration
+
+`cli-tools.json` supports a global proxy configuration. Delegate injects the proxy environment variables into the child process environment before launching the CLI subprocess.
+
+```json
+{
+  "proxy": {
+    "enabled": true,
+    "httpProxy": "http://127.0.0.1:7890",
+    "noProxy": "127.0.0.1,localhost"
+  },
+  "tools": {
+    "gemini": {
+      "enabled": true,
+      "primaryModel": "gemini-3.1-pro-preview"
+    },
+    "agy": {
+      "enabled": true,
+      "primaryModel": ""
+    },
+    "claude": {
+      "enabled": true,
+      "primaryModel": "claude-sonnet-4-6"
+    }
+  }
+}
+```
+
+| Field | Description |
+|------|------|
+| `proxy.enabled` | Enable the global proxy |
+| `proxy.httpProxy` | HTTP proxy URL |
+| `proxy.noProxy` | Comma-separated bypass list |
+| `tools.<name>.enabled` | Enable/disable a tool |
+| `tools.<name>.primaryModel` | Default model |
+
+At startup, Delegate TCP-probes the proxy for reachability; if it is unreachable, the proxy is skipped with a warning.
+
+---
+
+## Workflows
+
+### Launch → Monitor → Fetch
+
+```bash
+maestro delegate "Analyze the auth module" --to gemini --async
+# → execId: gem-143022-a7f2
+
+maestro delegate status gem-143022-a7f2
+# → status: running
+
+maestro delegate output gem-143022-a7f2
+# → Full analysis result
+```
+
+### Chaining: analyze → auto-fix
+
+```bash
+maestro delegate "Find all SQL injection vulnerabilities" --to gemini --async
+maestro delegate message gem-143022-a7f2 "Fix all critical vulnerabilities" --delivery after_complete
+```
+
+### Cancel → Redirect
+
+```bash
+maestro delegate cancel gem-143022-a7f2
+maestro delegate "Analyze only the payment module" --to gemini --async
+```
+
+---
+
+## Related Documentation
+
+- [Role Routing Guide](role-routing-guide.md) — the `--role` mapping mechanism and custom configuration
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\quality-pipeline-guide.md
+258 lines
+---
+title: "Quality Pipeline Guide"
+---
+
+A complete reference for the Maestro quality pipeline: seven stages organized around the **"review → test → debug → refactor → retrospective"** closed loop. Of these, `review` / `test` / `auto-test` / `debug` / `retrospective` are **first-tier steps** dispatched by the orchestrator through the session chain (they are not standalone slash commands — you cannot type `/quality-*` directly). `refactor` has been folded into `/maestro-odyssey --mode improve`, and `sync` is handled by `maestro kg index`. The user-facing entry points are `/maestro "<intent>"` (the coordinator classifies the intent and builds a chain) or `/maestro-next`. The parameter blocks for each stage below describe its step interface, for reference when passing arguments through during chain construction.
+
+---
+
+## Command Overview
+
+| Command | Role | Core Question | Artifact ID |
+|------|------|---------|---------|
+| `review` | Layered code review | Does the code meet quality standards? | `REV-{NNN}` |
+| `test` | Conversational UAT | Does it work from the user's perspective? | `TST-{NNN}` |
+| `auto-test` | Unified automated testing | Do coverage and regression pass? | `TST-{NNN}` |
+| `debug` | Hypothesis-driven debugging | What is the root cause? | `DBG-{NNN}` |
+| `/maestro-odyssey --mode improve` | Reflection-driven refactoring | Is technical debt converging? | `WBR-{NNN}` |
+| `maestro kg index` | Documentation sync | Are the docs consistent with the code? | — |
+| `retrospective` | Phase retrospective | What are the reusable insights? | `INS-{8hex}` |
+
+---
+
+## review — Layered Code Review
+
+```bash
+review <phase> [--level quick|standard|deep] [--dimensions security,architecture,...] [--skip-specs]
+```
+
+| Parameter | Description |
+|------|------|
+| `<phase>` | Required. Phase number or slug |
+| `--level` | Review level: `quick` / `standard` / `deep`. Auto-detected by default |
+| `--dimensions` | Comma-separated review dimensions; overrides the level's defaults |
+
+**Three review levels**: Quick (inline review for small changes) → Standard (parallel agents reviewing by dimension, with automatic deep-dive) → Deep (multi-round aggregation)
+
+Artifact path: `scratch/{YYYYMMDD}-review-P{N}-{slug}/review.json`
+
+| Verdict | Meaning | Next Step |
+|---------|------|--------|
+| `PASS` | All dimensions passed | `test {phase}` |
+| `WARN` | Non-critical issues; safe to continue | `test {phase}` |
+| `BLOCK` | Critical issues; must be fixed | `plan {phase} --gaps` |
+
+---
+
+## test — Conversational UAT
+
+```bash
+test [phase] [--smoke] [--auto-fix]
+```
+
+| Parameter | Description |
+|------|------|
+| `--smoke` | Inject a smoke test before UAT |
+| `--auto-fix` | Automatic gap-fix loop (verify → plan --gaps → execute → re-verify, up to 2 rounds) |
+
+**Flow**: Extract scenarios from `verification.json` → walk through each scenario interactively → automatically infer severity (blocker/major/minor/cosmetic) → debug issues in parallel by gap cluster
+
+Artifact path: `scratch/{YYYYMMDD}-test-P{N}-{slug}/` (uat.md, test-plan.json, test-results.json)
+
+| Condition | Next Step |
+|------|--------|
+| Everything passed | `/maestro-session-seal` |
+| `--auto-fix` succeeded | `review {phase}` |
+| Issues remain | `debug --from-uat {phase}` |
+| Insufficient coverage | `auto-test {phase}` |
+
+---
+
+## auto-test — Unified Automated Testing
+
+```bash
+auto-test <phase> [--max-iter N] [--layer L0-L3] [--strategy name] [--dry-run] [--re-run] [-y]
+```
+
+| Parameter | Description |
+|------|------|
+| `--max-iter N` | Maximum iterations (default 5) |
+| `--layer L` | Target a specific layer (L0/L1/L2/L3) |
+| `--dry-run` | Generate the plan only; do not execute |
+| `--re-run` | Re-run only the failed scenarios |
+
+**Smart routing**:
+
+| Priority | Condition | Route |
+|--------|------|------|
+| 1 | An active session exists | Resume the session |
+| 2 | `--re-run` + prior failures | Re-run failures |
+| 3 | REQ-*.md files exist | spec route |
+| 4 | Coverage gaps exist | gap route |
+| 5 | Default | code route |
+
+**Layer waves**: L0→L1→L2→L3 executed in order, with parallel CSV writes + parallel CSV diagnosis
+
+Artifact path: `scratch/{YYYYMMDD}-auto-test-P{N}-{slug}/` (test-plan.json, scenarios.csv, report.json)
+
+| Condition | Next Step |
+|------|--------|
+| Converged (≥95%) | `test {phase}` |
+| Bugs found | `debug --from-uat {phase}` |
+| Max iterations, >80% | `test {phase}` |
+| Max iterations, <80% | `debug {phase}` |
+
+---
+
+## debug — Hypothesis-Driven Debugging
+
+```bash
+debug [issue description] [--from-uat <phase>] [--parallel]
+```
+
+| Mode | Trigger | Symptom Source |
+|------|---------|---------|
+| Standalone | Provide the issue description directly | Collected interactively |
+| UAT handoff | `--from-uat` | Loaded from `uat.md` |
+| Parallel | `--parallel` | A dedicated agent per gap cluster |
+
+**Debug loop**: symptom collection → hypothesis generation → isolation and verification → root cause confirmation → readiness gate → stress testing
+
+Artifact path: `scratch/{YYYYMMDD}-debug-P{N}-{slug}/` (understanding.md, evidence.ndjson)
+
+| Condition | Next Step |
+|------|--------|
+| Root cause found | `plan {phase} --gaps` |
+| UAT handoff + auto-fix | `test {phase} --auto-fix` |
+| Conclusion unclear | Resume the debug session |
+
+---
+
+## /maestro-odyssey --mode improve — Reflection-Driven Refactoring
+
+```bash
+/maestro-odyssey --mode improve [<scope>]    # scope: module path | feature area | all
+```
+
+Each round: **analyze** (identify impact) → **plan** (execute after confirmation) → **reflect** (test verification + strategy adjustment)
+
+Artifact path: `scratch/{YYYYMMDD}-refactor-{scope}/reflection-log.md`
+
+---
+
+## maestro kg index — Documentation Sync
+
+```bash
+maestro kg index [--full] [--since <commit|HEAD~N>] [--dry-run]
+```
+
+Detect changes via `git diff` → track the impact chain through `doc-index.json` → update the `.workflow/codebase/` documentation.
+
+---
+
+## retrospective — Phase Retrospective
+
+```bash
+retrospective [phase|N..M] [--lens technical|process|quality|decision] [--all] [--no-route] [--compare N] [-y]
+```
+
+Four parallel lenses (Technical / Process / Quality / Decision), with automatic insight routing:
+
+| Route Target | Condition |
+|---------|------|
+| Spec stub | Reusable patterns/constraints |
+| Issue | Recurring gaps |
+| Knowhow tip | Process notes/reminders |
+| Learnings | All insights (always) |
+
+---
+
+## Quality Loop Flow
+
+```
+                    ┌──────────────────────┐
+                    │ Phase execution done │
+                    └───────────┬──────────┘
+                                │
+                    ┌───────────▼──────────┐
+             ┌──────┤ review               │
+             │      └───────────┬──────────┘
+             │ BLOCK            │ PASS/WARN
+             │                  ▼
+    ┌────────▼────────┐  ┌──────▼───────────┐
+    │ plan --gaps     │  │ test / auto-test │
+    │ (fix)           │  │ (testing)        │
+    └────────┬────────┘  └────────┬─────────┘
+             │ apply fixes        │ issues found
+             ▼                    ▼
+    ┌─────────────────┐     ┌─────▼────────────┐
+    │ execute         │◄────┤ debug            │
+    └────────┬────────┘ fix └─────┬────────────┘
+             │ root cause found   │
+             │                    │
+    ┌────────▼─────────┐          │
+    │ re-run test loop │◄─────────┘
+    └────────┬─────────┘
+             │ all passing
+             ▼
+    ┌───────────────────────────────────────────────────────┐
+    │ /maestro-odyssey --mode improve (optional, tech debt) │
+    │ maestro kg index (sync the codebase index)            │
+    │ retrospective step (retro, knowledge feedback)        │
+    └───────────────────────────────────────────────────────┘
+```
+
+<details>
+<summary>Decision tree: which command to use when</summary>
+
+```
+Code was just executed
+  ├─ Need a code quality assessment? ──> review <phase>
+  │    ├─ PASS/WARN ──> continue to testing
+  │    └─ BLOCK ──> plan <phase> --gaps
+  │
+  ├─ Need user acceptance? ──> test <phase>
+  │    ├─ All passed ──> /maestro-session-seal
+  │    └─ Issues found ──> debug --from-uat <phase>
+  │
+  ├─ Need automated testing? ──> auto-test <phase>
+  │    ├─ Converged ──> test <phase>
+  │    └─ Bugs found ──> debug --from-uat <phase>
+  │
+  ├─ Have a known bug? ──> debug "<issue>"
+  │    ├─ Root cause clear ──> plan <phase> --gaps
+  │    └─ Still uncertain ──> keep debugging
+  │
+  ├─ Need to reduce tech debt? ──> /maestro-odyssey --mode improve <scope>
+  │    ├─ Tests pass ──> maestro kg index
+  │    └─ Tests fail ──> debug <scope>
+  │
+  ├─ Code changed but docs did not? ──> maestro kg index
+  │
+  └─ Phase finished and needs a retrospective? ──> retrospective <phase>
+       ├─ Insights found ──> auto-routed to spec/issue/knowhow
+       └─ After completion ──> maestro session status
+```
+
+</details>
+
+---
+
+## Integration with the Phase Pipeline
+
+`execute` (which includes the built-in verification gate E2.7) is the standard entry point for the quality commands:
+
+```bash
+execute 1 → review 1 → auto-test 1 → test 1 → retrospective 1
+```
+
+`--gaps` is the core bridge between the quality pipeline and the Phase pipeline:
+
+| Trigger Scenario | Command |
+|---------|------|
+| `review` returns BLOCK | `plan {phase} --gaps` |
+| `debug` confirms a root cause | `plan {phase} --gaps` |
+| `test --auto-fix` | Automatically invokes `plan --gaps → execute → verify` |
+
+**Pre-milestone-audit checkpoint**: all phases verified → critical phases reviewed → core features tested → issues closed out → retrospective completed
+Update Todos
+
+Translate delegate-async-guide.md to English
+
+Translate quality-pipeline-guide.md to English
+
+Translate issue-discover-guide.md to English
+
+Translate learn-tools-guide.md to English
+
+Translate install-guide.md to English
+
+Translate search-system-guide.md to English
+
+Translate knowledge-management-guide.md to English
+
+Fix 2 residual Chinese lines in README.en.md
+
+Verify no CJK remains across all files
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\issue-discover-guide.md
+318 lines
+---
+title: "Issue Discovery Guide"
+---
+
+The complete manual for the Maestro Issue system, covering the full discovery, management, and closed-loop workflow.
+
+---
+
+## 1. Overview
+
+The Maestro Issue system is an issue-tracking mechanism that is independent of the Phase pipeline. The Phase pipeline (analyze -> plan -> execute -> verify) drives predefined development tasks, while the Issue system captures and manages problems discovered in the codebase.
+
+The two can run independently or work together:
+
+- **Independent operation**: discover and manage issues directly, without affecting Phase progress
+- **Linked mode**: issues are injected into the Phase pipeline via the `--gaps` parameter, driving root-cause analysis and fixes
+
+`/maestro-issue discover` is the entry point to the Issue system and offers two discovery modes:
+
+- **Multi-perspective full scan**: 8 specialized perspectives analyzed in parallel, covering code quality comprehensively
+- **Prompt-driven exploration**: deep, targeted exploration around the user's area of concern
+
+Discovery results are automatically deduplicated, turned into issue records, and fed into the closed-loop workflow.
+
+---
+
+## 2. maestro-issue discover in Detail
+
+### Basic Usage
+
+```bash
+/maestro-issue discover                              # Interactive mode selection
+/maestro-issue discover multi-perspective            # 8-perspective full scan
+/maestro-issue discover by-prompt "Check API error handling"  # Prompt-driven
+/maestro-issue discover multi-perspective -y         # Skip confirmation
+/maestro-issue discover multi-perspective --scope=src/auth/**  # Restrict the scope
+/maestro-issue discover by-prompt "Database query performance" --depth=deep  # Deep exploration
+```
+
+### Parameter Reference
+
+| Parameter | Description | Default |
+|------|------|--------|
+| _(no arguments)_ | Interactive mode selection | -- |
+| `multi-perspective` | 8-perspective parallel scan | -- |
+| `by-prompt "..."` | Prompt-driven exploration | -- |
+| `-y` / `--yes` | Skip confirmation prompts | Confirmation required |
+| `--scope=<pattern>` | File scan scope | `**/*` |
+| `--depth=standard\|deep` | Exploration depth (by-prompt only) | `standard` |
+
+---
+
+### 8-Perspective Full Scan Mode
+
+Launches parallel analysis across 8 specialized perspectives (4 agents per batch):
+
+```
+Batch 1: security, performance, reliability, maintainability
+Batch 2: scalability, ux, accessibility, compliance
+```
+
+Each perspective agent scans the source files, records `file:line` evidence, assesses severity (critical/high/medium/low), and suggests a fix direction.
+
+<details>
+<summary>Perspective definitions (8 dimensions)</summary>
+
+| Perspective | Focus Areas | Core Question |
+|------|---------|---------|
+| **SECURITY** | Authentication, authorization, input validation, secret management, injection attacks | What security vulnerabilities or unsafe patterns exist? |
+| **PERFORMANCE** | N+1 queries, unbounded loops, missing caches, memory leaks, large payloads | What performance bottlenecks or inefficient patterns exist? |
+| **RELIABILITY** | Error handling, retry logic, race conditions, data integrity, graceful degradation | Which failure modes are unhandled or could cause data loss? |
+| **MAINTAINABILITY** | Code duplication, tight coupling, missing abstractions, unclear naming, dead code | What makes the codebase harder to understand or change? |
+| **SCALABILITY** | Hard-coded limits, single-threaded bottlenecks, stateful assumptions, schema rigidity | What will break as load/data/users grow? |
+| **UX** | Confusing flows, missing feedback, inconsistent behavior, accessibility gaps | What creates friction or confusion for end users? |
+| **ACCESSIBILITY** | Screen readers, keyboard navigation, color contrast, ARIA labels, focus management | What barriers exist for users with disabilities? |
+| **COMPLIANCE** | Missing logging, audit trails, data retention, privacy controls, regulatory requirements | Which regulatory or policy requirements are unmet? |
+
+</details>
+
+#### Result Deduplication
+
+Raw findings from all perspectives are merged and deduplicated: grouped by `file:line`, entries with >80% description similarity are merged, and the higher severity is retained.
+
+#### Sample Output
+
+```
+Discovery Session: DBP-20260513-143022
+Mode: multi-perspective
+Raw findings: 47 → Unique issues: 31
+
+Severity: critical(3) high(8) medium(12) low(8)
+Next: /maestro-issue list --severity critical
+```
+
+---
+
+### by-prompt Mode
+
+Prompt-driven mode performs deep, targeted exploration around the user's area of concern.
+
+**Execution flow**:
+
+1. Decompose the user prompt into 3-5 exploration dimensions (search patterns + file patterns + discovery criteria)
+2. Run semantic and pattern searches for each dimension, collecting code snippets
+3. Explore iteratively (up to 3 rounds): identify issues -> refine the search -> final sweep
+4. Deduplicate and create issue records
+
+**Suitable for**: troubleshooting a specific module, targeted security audits, dependency analysis before a refactor, systematic triage of user-reported issues.
+
+**When no prompt is given**, the system offers preset directions to choose from: Error handling gaps / API contract violations / Test coverage gaps / Custom.
+
+---
+
+### Artifact Paths
+
+Each discovery session creates artifacts under `.workflow/issues/discoveries/{SESSION_ID}/` (session ID format: `DBP-YYYYMMDD-HHmmss`):
+
+| File | Description |
+|------|------|
+| `discovery-state.json` | Session metadata and progress tracking |
+| `discovery-issues.jsonl` | Issues created in this session |
+| `{PERSPECTIVE}-findings.json` | Raw findings per perspective (full scan) |
+| `exploration-plan.json` | Exploration dimension definitions (by-prompt) |
+| `{dimension}-context.md` | Code context for each dimension |
+| `exploration-log.md` | Round-by-round exploration log |
+
+---
+
+### How Findings Become Issues
+
+1. Severity maps to priority: `critical->1`, `high->2`, `medium->3`, `low->4`
+2. Generate an issue ID (`ISS-YYYYMMDD-NNN`), scanning to avoid collisions
+3. Build the full issue record (including `context.location`, `fix_direction`, `tags`)
+4. Write to both `issues.jsonl` (global) and `discovery-issues.jsonl` (session record)
+5. Initial status `registered`, source `discovery`
+
+---
+
+## 3. maestro-issue in Detail
+
+`/maestro-issue` handles issue lifecycle management and supports 6 subcommands.
+
+### Basic Usage
+
+```bash
+/maestro-issue create --title "Memory leak" --severity high
+/maestro-issue list --severity critical --status open
+/maestro-issue status ISS-20260513-001
+/maestro-issue update ISS-20260513-001 --status in_progress --priority 1
+/maestro-issue close ISS-20260513-001 --resolution "Memory leak fixed"
+/maestro-issue link ISS-20260513-001 --task TASK-003
+```
+
+---
+
+### Subcommand Details
+
+<details>
+<summary>create -- Create an issue</summary>
+
+```bash
+/maestro-issue create --title "Title" [options]
+```
+
+| Option | Description | Default |
+|------|------|--------|
+| `--title TEXT` | Title (**required**) | Prompted interactively |
+| `--severity VALUE` | critical / high / medium / low | `medium` |
+| `--source VALUE` | planned / supplement / bug / review / verification / discovery / manual | `manual` |
+| `--phase VALUE` | Phase reference | -- |
+| `--milestone VALUE` | Milestone reference (inferred automatically from `state.json`) | -- |
+| `--description TEXT` | Detailed description | Prompted interactively |
+| `--priority NUMBER` | 1-5; lower means higher priority | `3` |
+| `--tags TAG1,TAG2` | Tag list | -- |
+
+After creation, an ID is generated automatically (`ISS-YYYYMMDD-NNN`), you are prompted to add context, and `supplement`-type issues are checked for cross-milestone conflicts.
+
+</details>
+
+<details>
+<summary>list -- List issues</summary>
+
+| Option | Description |
+|------|------|
+| `--status VALUE` | open / in_progress / completed / failed / deferred |
+| `--phase VALUE` | Filter by phase |
+| `--milestone VALUE` | Filter by milestone |
+| `--severity VALUE` | Filter by severity |
+| `--source VALUE` | Filter by source |
+| `--all` | Include closed issues (read from `issue-history.jsonl`) |
+
+Output is sorted by ascending priority and descending severity.
+
+</details>
+
+<details>
+<summary>status / update / close / link</summary>
+
+**status** shows the full issue details (title, status, severity, description, fix direction, context, tags, history, feedback):
+
+```bash
+/maestro-issue status ISS-20260513-001
+```
+
+**update** updates fields; status changes are recorded automatically in `issue_history`:
+
+```bash
+/maestro-issue update ISS-20260513-001 --status in_progress --priority 1 --add-tag urgent
+# Optional: --severity, --tags, --phase, --milestone, --fix-direction, --description, --note
+```
+
+**close** closes the issue and moves it into the history list:
+
+```bash
+/maestro-issue close ISS-20260513-001 --resolution "Fix description" [--status completed|failed|deferred]
+```
+
+**link** creates a bidirectional association (Issue `affected_components` <-> Task `issue_refs`):
+
+```bash
+/maestro-issue link ISS-20260513-001 --task TASK-003
+```
+
+</details>
+
+---
+
+### issues.jsonl Format
+
+All issues are stored as JSONL. Key fields:
+
+```json
+{
+  "id": "ISS-20260513-001",
+  "title": "Refresh token is not rotated correctly",
+  "status": "registered",
+  "priority": 1,
+  "severity": "critical",
+  "source": "discovery",
+  "phase_ref": "01-auth",
+  "milestone_ref": "MVP",
+  "description": "...",
+  "fix_direction": "Use a database lock to guarantee atomicity",
+  "context": { "location": "src/auth/token.ts:45", "suggested_fix": "..." },
+  "tags": ["SECURITY", "auth"],
+  "affected_components": ["src/auth/token.ts"],
+  "issue_history": [{ "from_status": null, "to_status": "registered", "note": "Issue created" }]
+}
+```
+
+| Storage Location | Description |
+|---------|------|
+| `.workflow/issues/issues.jsonl` | Active issues |
+| `.workflow/issues/issue-history.jsonl` | Closed issues (archive) |
+
+---
+
+### Status Transitions
+
+```
+registered -> open -> in_progress -> completed
+                                -> failed
+                                -> deferred
+```
+
+| Status | Description | Trigger |
+|------|------|------|
+| `registered` | Initial (created by discover) | Automatic discovery |
+| `open` | Confirmed and pending | Manual creation/confirmation |
+| `in_progress` | Being worked on | Fix started |
+| `completed` | Resolved | Fix verified |
+| `failed` | Handling failed | Fix failed |
+| `deferred` | Postponed | Low priority or dependencies not ready |
+
+---
+
+## 4. The Issue Closed Loop
+
+### Standard Flow
+
+```
+discover -> list -> analyze -> plan -> execute -> verify -> close
+```
+
+```bash
+# 1. Discover
+/maestro-issue discover multi-perspective
+
+# 2. Review the results
+/maestro-issue list --severity critical
+/maestro-issue status ISS-20260513-001
+
+# 3-5. Root cause analysis → solution planning → apply the fix
+#      (--gaps injects the issue into the Phase pipeline; the orchestrator
+#       dispatches analyze → plan → execute in sequence)
+/maestro "Fix ISS-20260513-001"
+
+# 6. Close
+/maestro-issue close ISS-20260513-001 --resolution "Fix description"
+```
+
+### Fast Path
+
+For urgent or simple issues, `/maestro-next` can skip the intermediate steps:
+
+```bash
+/maestro-next "Fix the token rotation race condition"
+/maestro-issue close ISS-20260513-001 --resolution "Fixed via /maestro-next"
+```
+
+### Integration with Roadmap/Milestone
+
+- **Milestone association**: `--milestone` sets the owning milestone (inferred automatically from `state.json` when omitted); `supplement`-type issues are automatically checked for cross-milestone conflicts
+- **Phase association**: `--phase` links to a phase; `--gaps` converts the issue into a gap injected into the analysis flow; `link` creates a bidirectional association between an issue and a task
+- **Roadmap feedback**: issue statistics (count, severity distribution, fix rate) inform planning; phases with a high issue density may need to be split; `supplement` items can serve as requirement input for the next milestone
+
+The Commander agent automatically identifies unanalyzed issues and drives them forward; combined with hooks, this enables a fully automatic closed loop.
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\learn-tools-guide.md
+261 lines
+---
+title: "Learning Toolkit Guide"
+---
+
+The complete manual for the Maestro learning toolkit, covering the principles, usage, and collaboration patterns of the 4 `/maestro-learn` subcommands (`follow` / `investigate` / `decompose` / `consult`). Periodic retrospectives have moved to the `retrospective` pipeline step (see 2.1).
+
+---
+
+## 1. Overview
+
+The learning toolkit is Maestro's **interactive deep-learning** module, focused on extracting structured knowledge from code, documentation, and decision history. Every command follows the scientific method — hypothesis, evidence, verification, consolidation — turning tacit engineering experience into reusable explicit knowledge.
+
+### Difference from `/maestro-knowhow`
+
+| Dimension | The `/maestro-learn` toolkit | `/maestro-knowhow` |
+|------|---------------|--------------|
+| Interaction model | Interactive deep learning, multi-round guidance | Atomic operation, single capture |
+| Goal | Systematically build deep understanding | Quickly record a single insight |
+| Artifacts | Structured reports, pattern catalog, evidence trail | A single `.workflow/knowhow/` entry |
+| Duration | Several minutes, multiple agents in parallel | Seconds, completed instantly |
+
+Simple rule: **use `/maestro-learn` when you need to think, use `/maestro-knowhow` when you need to record**.
+
+---
+
+## 2. Command Details
+
+### 2.1 Retrospectives — `/learn-retro` has been retired
+
+> **Command removed**: `/learn-retro` (along with `/learn-retro-git` and `/learn-retro-decision`) was deleted during the knowledge-management streamlining because its functionality overlapped with the quality retrospective. Periodic retrospectives are now handled by the `retrospective` pipeline step — it is dispatched by the orchestrator (there is no `/xxx` form), entered via `/maestro-next` or the quality pipeline, and reviews phase artifacts through the `technical` / `process` / `quality` / `decision` lenses, consolidating the resulting insights. See the Quality Pipeline Guide for usage.
+
+---
+
+### 2.2 `/maestro-learn follow` -- Guided Reading
+
+Extracts deep understanding from code or documentation through section-by-section guided reading.
+
+**Parameters**:
+
+| Parameter | Description | Default |
+|------|------|--------|
+| `<target>` | File path / Wiki ID / topic keyword | Required |
+| `--depth shallow\|deep` | Shallow (key structures and patterns) or deep (every function and branch) | `shallow` |
+| `--save-wiki` | Save the reading notes as a wiki entry | Off |
+
+<details>
+<summary>Command examples</summary>
+
+```bash
+/maestro-learn follow src/auth/jwt.ts                     # Read through a specific file
+/maestro-learn follow src/utils/ --depth deep              # Deep read of an entire directory
+/maestro-learn follow arch-auth-design --save-wiki          # Read a wiki doc and save notes
+```
+</details>
+
+**Target resolution**: file paths (containing `/` or `\`) are read directly; a Wiki ID invokes `wiki get`; topic text searches the wiki first, then the source code.
+
+#### The 4 Mandatory Questions
+
+| # | Question | What It Extracts |
+|---|------|---------|
+| 1 | What pattern is being used here? | Design patterns, idioms, conventions |
+| 2 | Why was this approach chosen over the alternatives? | Trade-offs, options that were ruled out |
+| 3 | What implicit assumptions does this code rely on? | Implicit contracts, input shapes, execution ordering |
+| 4 | If this changed, what would break? | Fragile points, downstream blast radius |
+
+The command automatically builds a **1-hop context neighborhood** (wiki references, import dependencies, downstream consumers) and cross-checks the extracted results against `coding-conventions.md`: already-documented items are marked "confirmed", undocumented ones are suggested for inclusion in the specs.
+
+**Artifact paths**: `KNW-follow-{slug}-{date}.md` (understanding map), `specs/learnings.md` (consolidation)
+
+---
+
+### 2.3 `/maestro-learn decompose` -- Code Pattern Decomposition
+
+Systematically decomposes complex code into a catalog of reusable design patterns, analyzed in parallel across 4 dimensions.
+
+**Parameters**:
+
+| Parameter | Description | Default |
+|------|------|--------|
+| `<target>` | File path / directory / module name | Required |
+| `--patterns <list>` | Comma-separated pattern names to focus the analysis on | Detect all |
+| `--save-spec` | Automatically invoke `/maestro-spec "<constraint>"` for each new pattern | Off |
+| `--save-wiki` | Create a wiki note per dimension | Off |
+
+<details>
+<summary>Command examples</summary>
+
+```bash
+/maestro-learn decompose src/auth/                       # Decompose the auth module
+/maestro-learn decompose src/utils/ --patterns "Factory,Observer,Strategy"  # Focus on specific patterns
+/maestro-learn decompose src/core/ --save-spec --save-wiki  # Decompose and sync to spec and wiki
+```
+</details>
+
+#### 4-Dimension Parallel Analysis
+
+| Agent | Dimension | What It Detects |
+|-------|------|---------|
+| Structural | Structural patterns | Class hierarchies, composition, DI/IoC, Factory/Builder/Singleton, barrel exports |
+| Behavioral | Behavioral patterns | Event flows, middleware chains, observer/pub-sub, command/strategy, state machines |
+| Data | Data patterns | Repository/DAO, DTO pipelines, caching strategies (memo/LRU/TTL), serialization, schema validation |
+| Error | Error patterns | Error boundaries, retry/backoff/circuit breaker, fallback chains, guard clauses, logging strategy |
+
+Every finding carries: pattern name, dimension, confidence, code anchor (file:line), description, and trade-offs. Findings are compared against existing knowledge and marked documented / known / new; duplicates across dimensions are merged automatically.
+
+**Artifact paths**: `KNW-decompose-{slug}-{date}.md` (pattern catalog), `specs/learnings.md` (consolidation)
+
+---
+
+### 2.4 `/maestro-learn consult` -- Multi-Perspective Analysis
+
+Gets alternative perspectives on code, decisions, or plans, avoiding the blind spots of a single point of view.
+
+**Parameters**:
+
+| Parameter | Description | Default |
+|------|------|--------|
+| `<target>` | File path / Wiki ID / `HEAD` / `staged` / phase number | Required |
+| `--mode` | `review` / `challenge` / `consult` | `review` |
+
+<details>
+<summary>Command examples</summary>
+
+```bash
+/maestro-learn consult src/auth/jwt.ts                    # Default review mode
+/maestro-learn consult src/core/ --mode challenge          # Adversarial challenge
+/maestro-learn consult HEAD --mode consult                 # Interactive Q&A
+/maestro-learn consult 2 --mode review                     # Review the plan for Phase 2
+```
+</details>
+
+#### The Three Modes
+
+**Review (default)**: 3 agents reviewing in parallel
+
+| Agent Role | Focus | Core Questions |
+|-----------|--------|---------|
+| Pragmatist | Simplicity, YAGNI, maintenance cost | "What is the simplest viable approach? What is the maintenance burden?" |
+| Purist | Correctness, edge cases, type safety | "Which assumptions could be violated?" |
+| Strategist | Extensibility, architectural consistency | "Does it support future growth? Does it fit the architecture?" |
+
+Synthesized into: points of consensus, points of disagreement, an overall verdict, and the top 3 recommendations.
+
+**Challenge**: a single adversarial agent that tries to find the weakest assumption, construct breaking scenarios, identify the biggest risk, and propose alternatives.
+
+**Consult**: an interactive Q&A loop — the agent loads the target and answers your questions; say "done" to finish and compile the report.
+
+**Artifact paths**: `KNW-opinion-{slug}-{date}.md` (analysis report), `specs/learnings.md` (consolidation)
+
+---
+
+### 2.5 `/maestro-learn investigate` -- Systematic Investigation
+
+Uses the scientific method to investigate the "why" and "how" questions in a codebase — not to fix bugs, but to understand the system.
+
+**Parameters**:
+
+| Parameter | Description | Default |
+|------|------|--------|
+| `<question>` | The question to investigate | Required |
+| `--scope <path>` | Restrict the search scope | The whole project |
+| `--max-hypotheses N` | Maximum number of hypotheses; exceeding it triggers escalation | 3 |
+
+<details>
+<summary>Command examples</summary>
+
+```bash
+/maestro-learn investigate "What is the full lifecycle of a JWT refresh token"
+/maestro-learn investigate "Why does queue consumption sometimes process duplicates" --scope src/queue/
+/maestro-learn investigate "What cache invalidation strategies exist" --max-hypotheses 5
+```
+</details>
+
+#### Hypothesis-Testing Flow
+
+```
+define the question → collect evidence → pattern matching → generate hypotheses → test hypotheses → synthesize report
+                                                                                          ↑
+                                                                        3-strike escalation mechanism
+```
+
+**Collect evidence**: 4 parallel channels — code search (Grep), file inspection, dependency tracing (import chains), and Git history.
+
+**Generate hypotheses**: produces a ranked list based on the evidence, e.g. `[HIGH] JWT refresh uses a rotation strategy — Evidence: src/auth/jwt.ts:42`.
+
+**Test hypotheses**: tested one by one in priority order and marked confirmed / disproved / inconclusive. All evidence is recorded in NDJSON format in `evidence.ndjson`.
+
+**3-strike escalation**: when everything is inconclusive, the user is asked whether to widen the scope and re-hypothesize, or mark the investigation INCONCLUSIVE and produce a known-unknowns report.
+
+**Artifact paths**: `KNW-investigate-{slug}/` (containing `evidence.ndjson`, `understanding.md`, `report.md`), `specs/learnings.md` (consolidation)
+
+---
+
+## 3. The Learning Data Flow
+
+### Artifact Structure
+
+Artifacts from all learning commands follow a unified storage convention:
+
+```
+.workflow/knowhow/                         # Main directory for learning artifacts
+├── KNW-retro-{date}.md / .json            # Retrospective reports
+├── KNW-follow-{slug}-{date}.md            # Guided reading notes
+├── KNW-decompose-{slug}-{date}.md         # Pattern catalog
+├── KNW-opinion-{slug}-{date}.md           # Second opinions
+└── KNW-investigate-{slug}/                # Investigation directory
+    ├── evidence.ndjson
+    ├── understanding.md
+    └── report.md
+specs/learnings.md                         # Unified learning consolidation
+```
+
+### learnings.md Structure
+
+Uses the closed `<spec-entry>` tag format with `category`, `keywords`, `date`, and `source` attributes to keep everything traceable.
+
+### Knowledge Flow
+
+- All commands **automatically** write a knowhow report and an entry in `specs/learnings.md`
+- `--save-spec` / `--save-wiki` control whether results are further synced into the spec system and the wiki
+- Duplicate findings are deduplicated automatically — existing knowledge is marked documented/known, and only new entries are consolidated
+
+---
+
+## 4. Use-Case Quick Reference
+
+### Choosing a Command by Intent
+
+| What you want to do | Command | Example |
+|-----------|---------|------|
+| Understand the design of an unfamiliar module | `/maestro-learn follow` | `src/auth/ --depth deep` |
+| Learn the implicit conventions in some code | `/maestro-learn follow` | `src/utils/logger.ts` |
+| Inventory a module's design patterns | `/maestro-learn decompose` | `src/core/ --save-spec` |
+| Extract a reusable pattern library | `/maestro-learn decompose` | `src/ --save-wiki` |
+| Review code quality (multi-perspective) | `/maestro-learn consult` | `src/api/` |
+| Stress-test a proposal | `/maestro-learn consult` | `HEAD --mode challenge` |
+| Ask the AI about a specific implementation | `/maestro-learn consult` | `plan.json --mode consult` |
+| Understand "why does it work this way" | `/maestro-learn investigate` | `"What causes cache penetration"` |
+| Trace the full path of a call chain | `/maestro-learn investigate` | `"The path from entry point to the database"` |
+
+### Typical Workflow Combinations
+
+| Scenario | Steps |
+|------|------|
+| **New member onboarding** | `/maestro-learn follow src/` → `/maestro-learn decompose src/core/ --save-wiki` → `retrospective` step (orchestrator-dispatched) |
+| **Before an architecture decision** | `/maestro-learn follow src/auth/ --depth deep` → `/maestro-learn consult --mode review` → `/maestro-learn consult --mode challenge` → `/maestro-learn investigate "blast radius"` |
+| **Iteration retrospective** | `retrospective` step → `/maestro-learn investigate "reasons for high churn"` → `/maestro-learn decompose --save-spec` |
+| **Troubleshooting (to understand, not to fix)** | `/maestro-learn investigate "causes of latency"` → `/maestro-learn follow <key files>` → `/maestro-learn consult --mode consult` |
+
+### Natural Transitions Between Commands
+
+```
+/maestro-learn follow → /maestro-learn decompose      # From understanding to pattern extraction
+/maestro-learn follow → /maestro-learn consult        # From understanding to multi-perspective validation
+/maestro-learn decompose → /maestro-spec "<constraint>"  # From pattern discovery to spec entry
+retrospective step → /maestro-learn investigate       # From retrospective findings to deep investigation
+/maestro-learn investigate → /maestro-learn follow    # From locating the problem to deep reading
+/maestro-learn consult → /maestro-learn decompose     # From challenge to systematic decomposition
+```
+Update Todos
+
+Translate delegate-async-guide.md to English
+
+Translate quality-pipeline-guide.md to English
+
+Translate issue-discover-guide.md to English
+
+Translate learn-tools-guide.md to English
+
+Translate install-guide.md to English
+
+Translate search-system-guide.md to English
+
+Translate knowledge-management-guide.md to English
+
+Fix 2 residual Chinese lines in README.en.md
+
+Verify no CJK remains across all files
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\install-guide.md
+494 lines
+---
+title: "Install Guide"
+---
+
+Installing Maestro-Flow is a two-step process: a global CLI install, then project initialization.
+
+---
+
+## Quick Install
+
+```bash
+# 1. Install the global CLI
+npm install -g maestro-flow
+
+# 2. Initialize the project (run from the project root)
+maestro install
+```
+
+**Prerequisites**:
+- Node.js ≥ 18
+- Claude Code CLI (required)
+- Codex CLI / Gemini CLI (optional, for multi-agent workflows)
+
+---
+
+## Installation Flow
+
+`maestro install` performs the following steps:
+
+1. **Detect project state** — empty project / existing code / existing .workflow/
+2. **Select components** — interactive component selection screen
+3. **Choose the install mode** — global (~/.maestro/) or project-level (.workflow/)
+4. **Copy files** — copied to the target location per the component definitions
+5. **Generate the manifest** — records the installed components and supports incremental updates
+
+---
+
+## Supported Platforms
+
+In the first step of `maestro install`, you can select the target AI-assisted coding platforms needed for the current project or development environment.
+
+Because there are 60+ supported platforms, the interactive TUI platform selection screen is **paginated** (10 entries per page).
+* **Page switching**: use the **Left/Right arrow keys**, the **`h`/`l` keys**, or the **`[`/`]` keys** to turn pages.
+* **Shortcut keys**: the first 9 entries on each page are locally labeled `[1]` through `[9]`; press the corresponding number key to toggle that entry.
+* **Page indicator**: a pagination indicator is shown at the bottom, e.g. `Page 1 / 7 [● ○ ○ ○ ○ ○ ○]`.
+
+The full list of currently supported platforms is below (it covers most mainstream AI coding clients and agent harnesses):
+
+| Platform ID | Platform Name (Label) | Install Target Path / Description |
+|---------|------------------|-------------------|
+| `claude` | Claude Code | Core slash commands, skills, agents, hooks, MCP |
+| `codex` | Codex | Agents, skills, hooks, MCP |
+| `cursor` | Cursor | Skills, agents → copied to `.cursor/` |
+| `agy` | Agy (Gemini CLI) | Skills, agents, hooks → copied to `.gemini/` |
+| `copilot` | GitHub Copilot | Skills, agents → copied to `.github/` |
+| `kiro` | Kiro | Skills, agents → copied to `.kiro/` |
+| `opencode` | OpenCode | Skills, agents → copied to `.opencode/` |
+| `kilo` | Kilo Code | Skills, agents → copied to `.kilocode/` |
+| `devin` | Devin | Skills, agents → copied to `.devin/` |
+| `qoder` | Qoder / Qoder CN | Skills, agents → copied to `.qoder/` |
+| `codebuddy` | CodeBuddy | Skills, agents → copied to `.codebuddy/` |
+| `droid` | Droid | Skills, agents → copied to `.factory/` |
+| `trae` | Trae / Trae CN | Skills, agents → copied to `.trae/` |
+| `roo` | Roo Code | Skills, agents → copied to `.roo/` |
+| `aider-desk` | AiderDesk | Skills, agents → copied to `.aider-desk/` |
+| `amp` | Amp | Skills, agents → copied to `.amp/` |
+| `antigravity` | Antigravity | Skills, agents → copied to `.antigravity/` |
+| `antigravity-cli` | Antigravity CLI | Skills, agents → copied to `.antigravity-cli/` |
+| `astrbot` | AstrBot | Skills, agents → copied to `.astrbot/` |
+| `autohand-code` | Autohand Code CLI | Skills, agents → copied to `.autohand/` |
+| `augment` | Augment | Skills, agents → copied to `.augment/` |
+| `bob` | IBM Bob | Skills, agents → copied to `.bob/` |
+| `cline` | Cline | Skills, agents → copied to `.cline/` |
+| `codearts-agent` | CodeArts Agent | Skills, agents → copied to `.codeartsdoer/` |
+| `codemaker` | Codemaker | Skills, agents → copied to `.codemaker/` |
+| `codestudio` | Code Studio | Skills, agents → copied to `.codestudio/` |
+| `command-code` | Command Code | Skills, agents → copied to `.commandcode/` |
+| `continue` | Continue | Skills, agents → copied to `.continue/` |
+| `cortex` | Cortex Code | Skills, agents → copied to `.cortex/` |
+| `crush` | Crush | Skills, agents → copied to `.crush/` |
+| `deepagents` | Deep Agents | Skills, agents → copied to `.deepagents/` |
+| `dexto` | Dexto | Skills, agents → copied to `.dexto/` |
+| `eve` | Eve | Skills, agents → copied to `agent/` |
+| `firebender` | Firebender | Skills, agents → copied to `.firebender/` |
+| `forgecode` | ForgeCode | Skills, agents → copied to `.forge/` |
+| `goose` | Goose | Skills, agents → copied to `.goose/` |
+| `hermes-agent` | Hermes Agent | Skills, agents → copied to `.hermes/` |
+| `inference-sh` | inference.sh | Skills, agents → copied to `.inferencesh/` |
+| `jazz` | Jazz | Skills, agents → copied to `.jazz/` |
+| `junie` | Junie | Skills, agents → copied to `.junie/` |
+| `iflow-cli` | iFlow CLI | Skills, agents → copied to `.iflow/` |
+| `kimi-code-cli` | Kimi Code CLI | Skills, agents → copied to `.kimi-code-cli/` |
+| `kode` | Kode | Skills, agents → copied to `.kode/` |
+| `lingma` | Lingma | Skills, agents → copied to `.lingma/` |
+| `loaf` | Loaf | Skills, agents → copied to `.loaf/` |
+| `mcpjam` | MCPJam | Skills, agents → copied to `.mcpjam/` |
+| `mistral-vibe` | Mistral Vibe | Skills, agents → copied to `.vibe/` |
+| `moxby` | Moxby | Skills, agents → copied to `.moxby/` |
+| `mux` | Mux | Skills, agents → copied to `.mux/` |
+| `openhands` | OpenHands | Skills, agents → copied to `.openhands/` |
+| `ona` | Ona | Skills, agents → copied to `.ona/` |
+| `qwen-code` | Qwen Code | Skills, agents → copied to `.qwen/` |
+| `replit` | Replit | Skills, agents → copied to `.replit/` |
+| `reasonix` | Reasonix | Skills, agents → copied to `.reasonix/` |
+| `rovodev` | Rovo Dev | Skills, agents → copied to `.rovodev/` |
+| `tabnine-cli` | Tabnine CLI | Skills, agents → copied to `.tabnine/` |
+| `terramind` | Terramind | Skills, agents → copied to `.terramind/` |
+| `tinycloud` | Tinycloud | Skills, agents → copied to `.tinycloud/` |
+| `warp` | Warp | Skills, agents → copied to `.warp/` |
+| `windsurf` | Windsurf | Skills, agents → copied to `.windsurf/` |
+| `zed` | Zed | Skills, agents → copied to `.zed/` |
+| `zencoder` | Zencoder / Zenflow | Skills, agents → copied to `.zencoder/` |
+| `neovate` | Neovate | Skills, agents → copied to `.neovate/` |
+| `pochi` | Pochi | Skills, agents → copied to `.pochi/` |
+| `promptscript` | PromptScript | Skills, agents → copied to `.promptscript/` |
+| `adal` | AdaL | Skills, agents → copied to `.adal/` |
+| `agents-standard` | Open Standard | `.agents/` open specification format (cross-platform) |
+
+> **Pi Agent note**: Maestro no longer installs the Pi platform directly (it no longer copies skills/agents into `~/.pi/`).
+> Install the official Maestro Flow plugin inside Pi to integrate with the Pi platform:
+>
+> ```bash
+> pi install https://github.com/catlog22/pi-maestro-flow
+> ```
+
+---
+
+## Component Groups
+
+Since v0.5.32, the installable components have been consolidated from 53 individual entries into 25 groups, for a simpler selection experience.
+
+### Core Components (selected by default)
+
+| Group | Description | File Count |
+|------|------|--------|
+| **commands** | Core slash commands | ~30 |
+| **hooks** | Automation hooks | ~5 |
+| **workflows** | Workflow scripts | ~10 |
+| **specs** | Spec templates | 7 |
+
+### Optional Skill Packs
+
+| Group | Included Skills | Description |
+|------|----------|------|
+| **skills-extra-team** | team-arch-opt, team-brainstorm, team-designer, team-frontend, team-issue, team-planex, and others | Team-collaboration skills |
+| **skills-scholar** | scholar-anti-ai-writing, scholar-citation-verify, scholar-experiment, scholar-ideation, and others | Academic research skills |
+| **skills-meta** | meta-workflow, meta-analysis, and others | Meta-skills and workflow orchestration |
+
+### Built-in Team Skills (always installed)
+
+The following 9 team skills are installed automatically with the core components and do not need to be selected separately:
+
+- team-adversarial-swarm
+- team-coordinate
+- team-executor
+- team-lifecycle-v4
+- team-quality-assurance
+- team-review
+- team-swarm
+- team-tech-debt
+- team-testing
+
+---
+
+## Install Modes
+
+### Global Mode (recommended)
+
+Installs into `~/.maestro/`, shared by all projects:
+
+```bash
+maestro install --mode global
+```
+
+Best for: a personal development machine, sharing configuration across multiple projects
+
+### Project Mode
+
+Installs into the project's `.workflow/` directory, affecting only the current project:
+
+```bash
+maestro install --mode project
+```
+
+Best for: team collaboration, project-specific configuration
+
+---
+
+## Subcommands
+
+`maestro install` provides the following subcommands for jumping straight to a specific installation step:
+
+| Subcommand | Description |
+|--------|------|
+| `maestro install components` | Install file components (interactive component selection) |
+| `maestro install hooks` | Install hooks (interactive level selection) |
+| `maestro install mcp` | Register MCP servers (interactive tool selection) |
+| `maestro install toggle` | Enable/disable installed commands, skills, and agents |
+| `maestro install fonts` | Install font assets |
+| `maestro install wizard` | Launch the full interactive TUI wizard (legacy) |
+
+Every subcommand supports `--global` or `--path <dir>` to specify the installation scope.
+
+---
+
+## Toggle — Enable/Disable Management
+
+`maestro install toggle` offers both an interactive TUI and a non-interactive command line for managing the enabled state of installed commands, skills, and agents.
+
+### Three-State Model
+
+Every entry has one of three states:
+
+| State | Icon | Meaning |
+|------|------|------|
+| **on** | ✓ | Installed and enabled |
+| **off** | ✗ | Installed but disabled (the file is renamed to `.md.disabled`) |
+| **available** | · | Present in the source directory but not yet installed to the target location |
+
+Disabling mechanism: the `.md` file is renamed to `.md.disabled`, and renamed back when re-enabled. For skills, disabling renames `SKILL.md` → `SKILL.md.disabled`.
+
+### Interactive TUI
+
+```bash
+# Toggle for the global installation
+maestro install toggle
+
+# Toggle for a project installation
+maestro install toggle --path ./my-project
+```
+
+The ToggleView interface has three tabs:
+
+| Tab | Contents |
+|--------|------|
+| **Commands** | All `.claude/commands/*.md` command files |
+| **Skills** | All `.claude/skills/*/SKILL.md` skill directories |
+| **Agents** | All `.claude/agents/*.md` agent files |
+
+Controls:
+- **Tab** — switch tabs (Shift+Tab to go backwards)
+- **Space** — toggle the current entry's state (available→on, on→off, off→on)
+- **Up/Down arrows** — move the cursor
+- **Enter** — save and exit (updates the `disabledItems` list in the manifest)
+- **Escape** — exit (unsaved changes are saved automatically)
+
+Viewport window: when there are more than 20 entries, scroll hints are shown (↑ N more / ↓ N more).
+
+You can restrict the tabs with the `--type` flag:
+
+```bash
+# Show only the commands tab
+maestro install toggle --type command
+```
+
+### Non-Interactive Operations
+
+```bash
+# List all entries and their states
+maestro install toggle --list
+
+# Filter by type
+maestro install toggle --list --type skill
+
+# Enable in bulk
+maestro install toggle --enable "maestro-ralph,maestro-search"
+
+# Disable in bulk
+maestro install toggle --disable "team-swarm,team-review"
+```
+
+---
+
+## Config Profile — Export/Import
+
+An installation configuration can be exported to a JSON profile file, for sharing across a team or reproducing an installation in a CI environment.
+
+### Exporting a Profile
+
+```bash
+# Export from the global installation config
+maestro install --export
+
+# Export to a specific path
+maestro install --export ./team-profile.json
+
+# Export from a project's config
+maestro install --path ./my-project --export
+```
+
+The exported profile contains the complete installation configuration: component selections, hook level, MCP config, statusline theme, and so on.
+
+### Importing a Profile
+
+```bash
+# Non-interactive install from a profile
+maestro install --import ./team-profile.json
+```
+
+Importing runs the full installation flow automatically, with no manual intervention. Best for:
+- Standardizing a team's development environment
+- Quickly bootstrapping CI/CD environments
+- Syncing configuration across multiple machines
+
+### Profile Storage Location
+
+Exported profiles are saved to the `~/.maestro/install-profiles/` directory by default.
+
+---
+
+## Extra MCP Targets
+
+Beyond Claude Code, `maestro install` can register MCP servers with the following IDEs/tools:
+
+| Target ID | Config File Path | Description |
+|---------|-------------|------|
+| `cursor` | `.cursor/mcp.json` | Cursor IDE |
+| `qoder` | `mcp.json` in the project root | Qoder |
+| `trae` | `.mcp.json` | Trae IDE |
+| `kiro` | `.kiro/settings/mcp.json` | Kiro IDE |
+| `roo` | `.roo/mcp.json` | Roo Code (project-level only) |
+| `vscode-copilot` | `.vscode/mcp.json` | VS Code Copilot |
+| `gemini-cli` | `.gemini/settings.json` | Gemini CLI |
+
+In the interactive install wizard, the Extra MCP step lets you select which of the targets above to register with. Each target supports both global and project scope.
+
+MCP tool list (6 tools): `write_file`, `edit_file`, `read_file`, `read_many_files`, `team_msg`, `store_knowhow`
+
+---
+
+## Migrating from Older Versions
+
+### Automatic Migration (v0.5.32+)
+
+Individual skill IDs from older versions are mapped automatically to the new group IDs:
+
+| Old ID | New ID |
+|--------|-------|
+| team-arch-opt | skills-extra-team |
+| team-brainstorm | skills-extra-team |
+| scholar-ideation | skills-scholar |
+| ... | ... |
+
+Migration runs automatically at install time; no manual action is needed.
+
+### Manual Migration
+
+If you need to update manually:
+
+```bash
+# Force a reinstall
+maestro install --force
+```
+
+---
+
+## Updating
+
+```bash
+# Check for updates (check only, do not install)
+maestro update --check
+
+# Update to the latest version
+maestro update
+
+# Preview update notices (used together with --notices)
+maestro update --notices --dry-run
+
+# Non-interactive update (CI/automation scenarios)
+maestro update --non-interactive
+```
+
+### Update Flow
+
+Running `maestro update` automatically performs a three-step flow:
+
+1. **Reinstall the workflows** — using the profile-based mechanism (`manifestToProfile + spawn --import --upgrade`)
+2. **Apply version notices** — display the feature/tool/skill changes in the new version
+3. **Run migrations** — execute any necessary data migrations
+
+### Profile-Based Reinstall Mechanism
+
+v0.5.37 introduced a profile-based reinstall mechanism that works around the Windows command-line length limit (~8192 characters) and shell escaping problems:
+
+- `manifestToProfile()` exports the current install state to a temporary profile JSON
+- `spawn --import --upgrade` re-imports it using the new version
+- `mergeNewDefaults()` automatically merges new default components into the existing selection
+
+### The --upgrade Flag
+
+```bash
+# Import a profile and merge in the new default components
+maestro install --import profile.json --upgrade
+```
+
+The `--upgrade` flag tells the install command to call `mergeNewDefaults()` during import, automatically adding components in the new version whose `defaultSelected !== false`.
+
+### Update Options
+
+| Option | Description |
+|------|------|
+| `--check` | Check for updates only; do not install |
+| `--notices` | Display version notices |
+| `--dry-run` | Preview changes (must be used with `--notices`) |
+| `--from <ver>` | Specify the starting version (notice filtering) |
+| `--to <ver>` | Specify the target version (notice filtering) |
+| `--non-interactive` | Non-interactive mode (CI/automation) |
+| `--migrate <path>` | Run a specific migration script (internal use) |
+
+---
+
+## Uninstalling
+
+```bash
+# Interactive uninstall
+maestro uninstall
+
+# Bulk uninstall (skip confirmation)
+maestro uninstall --yes
+```
+
+Uninstalling will:
+1. Remove the installed component files
+2. Clean up the manifest records
+3. Preserve the project data in `.workflow/` (specs, knowhow, etc.)
+
+---
+
+## Network Proxy
+
+To install through a proxy, configure it in `~/.maestro/cli-tools.json`:
+
+```json
+{
+  "proxy": {
+    "enabled": true,
+    "httpProxy": "http://127.0.0.1:7890",
+    "noProxy": "127.0.0.1,localhost"
+  }
+}
+```
+
+---
+
+## FAQ
+
+### The install hangs
+
+1. Check your network connection
+2. Try configuring a proxy (see above)
+3. Use `--verbose` to see detailed logs
+
+### Missing components
+
+```bash
+# Force a reinstall
+maestro install --force
+```
+
+### Permission errors
+
+A global install may require administrator privileges:
+```bash
+# macOS/Linux
+sudo npm install -g maestro-flow
+
+# Windows (run as administrator)
+npm install -g maestro-flow
+```
+
+---
+
+## Related Commands
+
+```bash
+# Install management
+maestro install [--global] [--path <dir>] [--force]
+maestro install [--export [path]] [--import <path>] [--upgrade]
+maestro install [--load <path>]  # Load a profile into the interactive TUI
+maestro uninstall [--yes]
+maestro update [--check] [--notices] [--dry-run] [--from <ver>] [--to <ver>] [--non-interactive]
+
+# Subcommands
+maestro install components [--global | --path <dir>]
+maestro install hooks [--global | --project]
+maestro install mcp [--global | --path <dir>]
+maestro install toggle [--global | --path <dir>] [--type <type>] [--enable <names>] [--disable <names>] [--list]
+maestro install fonts
+maestro install wizard
+
+# Version information
+maestro --version
+```
+Update Todos
+
+Translate delegate-async-guide.md to English
+
+Translate quality-pipeline-guide.md to English
+
+Translate issue-discover-guide.md to English
+
+Translate learn-tools-guide.md to English
+
+Translate install-guide.md to English
+
+Translate search-system-guide.md to English
+
+Translate knowledge-management-guide.md to English
+
+Fix 2 residual Chinese lines in README.en.md
+
+Verify no CJK remains across all files
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\search-system-guide.md
+486 lines
+---
+title: "Search System Guide"
+---
+
+The Maestro search system is built on the BM25F algorithm and provides unified knowledge search across spec, knowhow, issue, domain, and other data sources.
+
+For retrieval's role in the full knowledge loop, canonical identity, and the anti-concentration strategy, see
+[Maestro Knowledge System Architecture](../docs/knowledge-system-architecture.md).
+
+---
+
+## Overview
+
+`maestro search` is the unified search entry point for the knowledge system. It combines:
+- **WikiIndexer** — BM25F-weighted full-text retrieval
+- **MaestroGraph** — AST-level code symbol search (optional)
+- **Type filtering** — filter by type: spec/knowhow/issue/domain, etc.
+
+---
+
+## Basic Usage
+
+```bash
+# Keyword search (1-3 core terms works best)
+maestro search "authentication"
+
+# With a type filter
+maestro search "jwt token" --type spec
+
+# Filter by category
+maestro search --category coding
+
+# Combined query
+maestro search "oauth pkce" --type spec --category arch --limit 10
+
+# Code search (requires MaestroGraph to be enabled)
+maestro search "UserService" --code
+
+# Unified KG search (MaestroGraph full-source; replaces the deprecated maestro kg search)
+maestro search "UserService" --kg
+
+# Search all sources (wiki + code) with unified normalized ranking
+maestro search "UserService" --all
+
+# Skip embeddings, use BM25 only (avoids the ONNX cold start)
+maestro search "jwt token" --no-emb
+
+# JSON output (for script consumption)
+maestro search "jwt token" --json
+```
+
+### Query Best Practices
+
+**1-3 core terms** is the optimal query length. Beyond 4 terms, the BM25 score gets diluted by irrelevant words:
+
+```bash
+# ❌ Piling up multiple unrelated keywords
+maestro search "topology display frontend DetailedTopologySVG elk"
+
+# ✅ Split into targeted queries
+maestro search "topology layout"
+maestro search "DetailedTopologySVG" --code
+maestro search "elk layout" --type knowhow
+```
+
+**CamelCase identifiers** are split automatically: searching for `DetailedTopologySVG` also matches `detailed`, `topology`, `svg`, and the full identifier.
+
+**IDF-adaptive weighting**: beyond 3 terms, the system automatically boosts highly specific terms (such as symbol names) and down-weights generic ones.
+
+---
+
+## The BM25F Algorithm
+
+### Field Weights
+
+The search system uses BM25F (Best Match 25 with Field weighting), assigning different weights to different fields. The system maintains separate configurations for three document classes:
+
+**Default (standard documents such as spec/knowhow/issue)**
+
+| Field | boost | b | Description |
+|------|-------|---|------|
+| `title` | 3 | 0.3 | Title matches carry the highest weight |
+| `tags` | 2 | 0 | Tag matches, no length normalization |
+| `summary` | 1.5 | 0.75 | Summary matches |
+| `body` | 1 | 0.75 | Body matches (baseline) |
+
+**KG (knowledge-graph virtual nodes)**
+
+| Field | boost | b | Description |
+|------|-------|---|------|
+| `title` | 2 | 0.3 | Only the title contributes to the score |
+| `tags` | 1 | 0 | Tag matches |
+| `summary` | 0 | 0 | Does not contribute to the score |
+| `body` | 0 | 0 | Does not contribute to the score |
+
+**Scratch (scratch documents)**
+
+| Field | boost | b | Description |
+|------|-------|---|------|
+| `title` | 1 | 0.3 | Title matches (lower weight) |
+| `summary` | 0.5 | 0.75 | Summary matches |
+| `tags` | 0.5 | 0 | Tag matches, no length normalization |
+| `body` | 0.3 | 0.75 | Body matches |
+
+### Scoring Formula
+
+```
+score = Σ_idf(tf~ × (k1 + 1)) / (tf~ + k1)
+```
+
+where `tf~` is the cross-field weighted term frequency:
+
+```
+tf~ = Σ(boost_f × tf_f / (1 - b + b × dl_f / avgdl_f))
+```
+
+- `tf_f` — term frequency within field f
+- `dl_f` — document length of field f
+- `avgdl_f` — average document length of field f
+- `k1 = 1.5` — saturation parameter
+- `boost` / `b` — set independently per configuration, as listed above
+
+### Division-by-Zero Protection
+
+When a field's `avgFieldLength = 0`, that field is skipped automatically to avoid a division-by-zero error.
+
+### Time Decay
+
+After BM25F + proximity reranking, search results have a time-decay weight applied that is based on the Ebbinghaus forgetting curve:
+
+```
+factor = floor + (1 - floor) × e^(-λ × age_days)
+λ = ln2 / half_life
+```
+
+Half-life by type:
+
+| Type | Half-life (days) |
+|------|-------------|
+| `domain` | 180 |
+| `spec` | 60 |
+| `knowhow` | 30 |
+| `issue` | 14 |
+| `project` / `roadmap` / `note` | 90 |
+
+The decay floor is `floor = 0.3`, so even the oldest entries retain 30% of their original score.
+
+Run `maestro spec health` to see overall freshness statistics for the knowledge base.
+
+### Filtering Deprecated Entries
+
+Entries with status `deprecated` (marked via `maestro spec supersede`) are excluded from search results by default. Use the `--include-deprecated` flag to include them:
+
+```bash
+maestro search "error handling" --include-deprecated
+```
+
+---
+
+## Chinese Language Support
+
+### CJK Tokenization
+
+Chinese characters are automatically tokenized as bigrams + trigrams (`cjkNgrams`, n=2..3); single characters are not emitted on their own. (The examples below keep the original Chinese input, since they demonstrate how CJK text is tokenized.)
+
+- Input `"认证"` ("authentication") → tokens: `["认证"]`
+- Input `"用户认证"` ("user authentication") → tokens: `["用户", "户认", "认证", "用户认", "户认证"]`
+- Input `"JWT认证"` ("JWT authentication") → tokens: `["jwt", "认证"]`
+
+### Bilingual Index
+
+doc-site search supports bilingual metadata:
+- `name` / `name_zh` — English/Chinese command name
+- `description` / `description_zh` — English/Chinese description
+- `workflow_zh` — Chinese workflow description
+
+---
+
+## Deduplication
+
+### Source-Level Deduplication
+
+Multiple entries under the same `source.path` (for example a `spec-entry` and a `knowhow-entry`) are **not** deduplicated or merged — they are displayed independently.
+
+### Query-Term Deduplication
+
+Repeated query terms are merged automatically to prevent score inflation:
+```bash
+# "token token jwt" is equivalent to "token jwt"
+maestro search "token token jwt"
+```
+
+---
+
+## Index Sources
+
+WikiIndexer automatically indexes the following data sources:
+
+| Source | Path | Description |
+|------|------|------|
+| Project / Roadmap | `.workflow/project.md`, `roadmap.md` | Single-document project files |
+| Spec | `.workflow/specs/` | Specification documents |
+| Knowhow | `.workflow/knowhow/` | Knowledge entries |
+| Issue | `.workflow/issues/` | Issue JSONL lines (virtual entries) |
+| Domain | `.workflow/domain/` | Domain glossary |
+| Run-mode Session | `.workflow/sessions/` | Session/Run lifecycle artifacts (see the next section) |
+| Codebase / KG | `.workflow/codebase/`, `kg/` | doc-index components/features/ADRs, knowledge-graph nodes |
+| Claude Code sessions | `~/.claude/projects/<slug>/` | Claude Code session transcripts (scanned automatically) |
+| Codex sessions | `~/.codex/sessions/` | Codex session transcripts (scanned automatically) |
+
+While building the index, WikiIndexer automatically selects the matching BM25F configuration (default/kg/scratch) based on the entry type.
+
+### CLI Session Transcripts
+
+Claude Code and Codex JSONL session transcripts are parsed into lightweight note entries (category `session`) and can be filtered with `--type session`. In hybrid search, each source is capped at 3 entries so that low-value sources cannot flood the results. On startup, the daemon monitors the CLI session directories and discovers new sessions automatically.
+
+### Run-mode Session/Run Entries
+
+Session/Run lifecycle artifacts under `.workflow/sessions/` enter the index according to these rules:
+
+- **Only sealed/archived items are indexed**: sessions and runs in `running`/draft state are not indexed, consistent with the rule that aref only resolves sealed items;
+- **Writer/reader version matrix**: the runtime writer currently always emits `session/1.3` + `command-run/1.3`. The wiki read side is compatible with `session/1.0`–`session/1.3` and `command-run/1.0`–`command-run/1.3` (i.e. `1.0-1.3`), normalizing everything to the current read model. Unknown Session/Run schema versions fail closed and produce no virtual entry (set `MAESTRO_DEBUG=1` to see the warning);
+- **Live search/load**: sealed 1.3 Sessions/Runs produced by the real runtime writer can be found directly through `maestro search`; use the returned ID with `maestro load`. `artifacts/1.0` and `artifacts/1.1` remain compatible at the read boundary;
+- **Entry shape**: one entry per sealed session plus one per sealed run (both of type `knowhow`). A run entry's body starts with a structured handoff section (`## 决策` Decisions / `## 约束` Constraints / `## 关注点` Concerns / `## 豁免` Exemptions — these headings are emitted literally in Chinese by the runtime), followed by the concatenated sealed artifact content (each file truncated at 50KB);
+- **tags**: run entries carry `session`, `run`, the command name, `verdict:<verdict>`, `constraint` (when locked constraints are present), and the artifact kind (e.g. `diagnosis`, `review-findings`), supporting the `--kind` filter;
+- **Topology**: a session entry's `related` points to all of its run entries and any promoted spec/knowhow (bidirectionally linked); a run entry's `parent` points back to the session, and aref references form cross-run edges. Search results expose the `sessionId`/`runId`/`runCount`/`related` fields for these entries.
+
+---
+
+## Credibility and Search Popularity
+
+A search hit asynchronously increments the node's `search_hits` counter (via `CredibilityStore`), which feeds later credibility scoring. This is best-effort and does not block the search from returning.
+
+---
+
+## Search Cache Invalidator Hook
+
+`search-cache-invalidator` is a PostToolUse hook that automatically rebuilds the WikiIndexer cache after file modifications:
+
+- **Trigger**: after a Write or Edit tool call
+- **Scope**: enabled only inside a workspace (`requiresWorkspace: true`)
+- **Behavior**: automatically rebuilds the WikiIndexer index so search results reflect the latest file contents
+- **Persistence version**: `search-cache.json` is currently at **cache v3** (`version: 3`); legacy cache generations are all rejected for reuse and rebuilt through the existing atomic path
+
+This hook is enabled by default in the standard hook set and requires no manual configuration. When spec/knowhow and other files under `.workflow/` are modified via Write|Edit, the search index updates automatically.
+
+---
+
+## Performance Characteristics
+
+| Optimization | Improvement | Description |
+|--------|------|------|
+| Cold-start optimization | ~3200ms → ~280ms | Daemon hot path + BM25-only fallback + background daemon startup |
+| Backlinks construction | O(n²) → O(1) | Uses a Set instead of Array.includes |
+| Inverted index | Prebuilt | Built on first load and reused thereafter |
+| Candidate-set trimming | 3x limit | The candidate set is 3× the limit, returned after filtering |
+| Workspace filtering | Applied before the limit | Filters before truncating results, so valid entries are not lost |
+| Embedding skip | Automatically skipped for non-embedding queries | Falls back to BM25-only when the daemon is unavailable, avoiding the ONNX cold-start penalty |
+
+---
+
+## Search Daemon (resident process)
+
+The search daemon is a resident background process that keeps the WikiIndexer and the ONNX embedding model hot in cache, avoiding the cold-start cost on every search.
+
+### Basic Operations
+
+```bash
+# Start the daemon
+maestro search-daemon start
+
+# Stop the daemon
+maestro search-daemon stop
+
+# Check the daemon status
+maestro search-daemon status
+```
+
+### How It Works
+
+- **Protocol**: TCP on localhost, newline-delimited JSON
+- **Lock file**: `.workflow/search-daemon.json` (records the PID + port)
+- **Idle timeout**: shuts down automatically after 30 minutes without a request
+- **ONNX hot cache**: the daemon preloads the embedding model at startup, so later searches do not reload it
+
+### Automatic Fallback Strategy
+
+When the daemon is unavailable, the search command falls back automatically:
+
+1. Uses BM25-only mode (skipping embeddings) to avoid the ONNX cold start (~1800ms)
+2. Starts the daemon in the background so later searches get embedding acceleration
+
+```bash
+# Daemon available: hot path, embeddings included
+maestro search "query"          # ~280ms
+
+# Daemon unavailable: falls back to BM25-only
+maestro search "query"          # ~280ms (BM25-only)
+maestro search "query" --no-emb # Explicitly skip embeddings
+```
+
+---
+
+## Embedding Management
+
+Maestro supports embedding-based semantic search, complementing BM25 full-text retrieval with vector similarity. For detailed configuration, see the [Embedding Model Configuration Guide](embedding-guide.md).
+
+> **Note**: `embedding` is a standalone top-level command, not a subcommand of `search`. `maestro search embedding status` would be greedily captured by the variadic argument of `search <query...>` and treated as the search keywords `"embedding status"`.
+
+```bash
+# Check the embedding model status
+maestro embedding status
+
+# Warm up the embedding model
+maestro embedding warmup
+
+# Rebuild the embedding index
+maestro embedding rebuild
+```
+
+**Quick setup**:
+
+```bash
+# Install the dependencies
+npm install @huggingface/transformers onnxruntime-node
+
+# Check the status
+maestro embedding status
+
+# Warm up the model (the first load is slower)
+maestro embedding warmup
+```
+
+**Using a local model folder** (offline environments or custom models):
+
+```bash
+# Option 1: the config file ~/.maestro/local-embedding.json
+echo '{"modelPath": "D:/models/multilingual-e5-small"}' > ~/.maestro/local-embedding.json
+
+# Option 2: an environment variable (takes precedence over the config file)
+export MAESTRO_EMBEDDING_MODEL_PATH="D:/models/multilingual-e5-small"
+```
+
+The model folder must contain `onnx/model.onnx` (or `model.onnx` in the root) plus `tokenizer.json` and `config.json`.
+
+**Automatic fallback**: when embeddings are unavailable, search falls back to BM25-only mode automatically, with no manual intervention.
+
+---
+
+## Search Result Structure
+
+```typescript
+interface SearchResult {
+  id: string;           // Unique identifier
+  type: WikiNodeType;   // spec/knowhow/issue/domain/...
+  title: string;        // Title
+  category: string;     // coding/arch/review/...
+  summary: string;      // Summary
+  score: number;        // BM25F score
+  snippet: string;      // Context snippet (keywords highlighted)
+  source: { path: string };  // Source file path
+  // Present only on run-mode session/run entries (topology exposure)
+  sessionId?: string;   // Owning session
+  runId?: string;       // Run ID of a run entry
+  runCount?: number;    // Number of runs on a session entry
+  related?: string[];   // session→runs / run→session + aref edges
+}
+```
+
+---
+
+## Filter Syntax
+
+### Filter by Type
+
+```bash
+maestro search "query" --type spec       # Search specs only
+maestro search "query" --type knowhow    # Search knowhow only
+maestro search "query" --type issue      # Search issues only
+maestro search "query" --type domain     # Search domain entries only
+```
+
+Valid types: `project`, `roadmap`, `spec`, `issue`, `knowhow`, `note`, `domain`, `session`, `scratch`
+
+`session` and `scratch` are virtual type aliases; they actually filter by category (CLI session transcript entries).
+
+### Filter by Category
+
+```bash
+maestro search "query" --category coding   # Coding conventions
+maestro search "query" --category arch     # Architecture constraints
+maestro search "query" --category review   # Review standards
+maestro search "query" --category debug    # Debug notes
+maestro search "query" --category test     # Test conventions
+maestro search "query" --category learning # Lessons learned
+```
+
+### Filter by Artifact Kind
+
+```bash
+maestro search "timeout" --kind diagnosis         # Only runs containing diagnosis artifacts
+maestro search "regression" --kind review-findings # Only review findings
+maestro search "lessons" --kind lessons           # Only retrospective output
+```
+
+`--kind` matches entry tags exactly (run-mode run entries carry the artifact kind as a tag). It applies only to wiki results and cannot be combined with `--code`/`--kg`.
+
+### Filter by Workspace
+
+```bash
+maestro search "query" --workspace shared  # Search a shared workspace
+```
+
+---
+
+## Code Search
+
+With the `--code` flag enabled, search also queries the MaestroGraph AST index:
+
+```bash
+maestro search "UserService" --code
+```
+
+Code search results are displayed separately and include:
+- Symbol name and type (function/class/interface/...)
+- File path and line number
+- Function signature (when available)
+
+---
+
+## FAQ
+
+### Search returns no results
+
+1. Confirm that `.workflow/wiki-index.json` exists
+2. Run `maestro wiki health` to check the index status
+3. Try broader keywords
+
+### Chinese search results are inaccurate
+
+CJK tokenization operates at the bigram + trigram level, so short queries (2 characters or fewer) may not match well. Recommendations:
+- Use keywords of 3 characters or more to trigger trigram matching
+- Combine with `--category` filtering to narrow the scope
+
+### Unexpected scores
+
+If an entry scores unexpectedly high, the cause may be:
+- A title-field hit (3× weight under the default configuration)
+- A tags-field hit (2× weight, no length normalization)
+- Heavy keyword repetition (already optimized, but it can still have an effect)
+
+---
+
+## Related Commands
+
+```bash
+# Unified search (recommended)
+maestro search <query> [--type <type>] [--category <cat>] [--kind <kind>] [--code] [--kg] [--diversity balanced|off] [--all] [--no-emb] [--json]
+
+# Wiki system search
+maestro wiki search <query> [--json]
+maestro wiki list [--type <type>] [--category <cat>] [--keyword <kw>]
+
+# Knowledge-graph search (deprecated; use maestro search --kg instead)
+maestro kg search <symbol>   # [deprecated] Use "maestro search --kg" instead
+maestro kg context <node>
+
+# Search Daemon
+maestro search-daemon start   # Start the resident process
+maestro search-daemon stop    # Stop the resident process
+maestro search-daemon status  # Check the status
+
+# Embedding management
+maestro embedding status   # Check the embedding model status
+maestro embedding warmup   # Warm up the embedding model
+maestro embedding rebuild  # Rebuild the embedding index
+
+# Index health check
+maestro wiki health
+
+# Knowledge health check (freshness, evolution-chain integrity)
+maestro spec health
+```
+
+`--kg` shares the `--type`, `--category`, lifecycle, and diversity constraints with regular search. A KG result's `id` is a canonical ID that can be passed to `maestro load`; `graphId`/`aliases` preserve graph-traversal and historical-compatibility identities.
+Update Todos
+
+Translate delegate-async-guide.md to English
+
+Translate quality-pipeline-guide.md to English
+
+Translate issue-discover-guide.md to English
+
+Translate learn-tools-guide.md to English
+
+Translate install-guide.md to English
+
+Translate search-system-guide.md to English
+
+Translate knowledge-management-guide.md to English
+
+Fix 2 residual Chinese lines in README.en.md
+
+Verify no CJK remains across all files
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\knowledge-management-guide.md
+542 lines
+---
+title: "Knowledge Consolidation Management System"
+---
+
+Maestro's knowledge consolidation comes in two forms: **constraints** and **accumulation**. Constraints are coding conventions, architectural decisions, and quality rules — they define "what must not be done." Accumulation is operating procedures, design assets, and debugging experience — it records "how it was done." The former must be force-loaded; the latter is retrieved on demand.
+
+> For the authoritative system design, see [Maestro Knowledge System Architecture](../docs/knowledge-system-architecture.md). This document focuses on day-to-day operations; the identity model, Run ledger, reconciliation freshness, retrieval diversity, and safe pruning are governed by the architecture document.
+
+<details>
+<summary>Artifact directory structure</summary>
+
+```
+.workflow/
+├── specs/                          # Constraint layer: rule index organized by category
+│   ├── coding-conventions.md       # category: coding
+│   ├── architecture-constraints.md # category: arch
+│   ├── review-standards.md         # category: review
+│   ├── debug-notes.md              # category: debug
+│   ├── test-conventions.md         # category: test
+│   └── learnings.md                # category: learning (lessons learned)
+├── knowhow/                        # Accumulation layer: complete knowledge documents
+│   ├── KNW-*.md                    # Conversation compression records
+│   ├── RCP-*.md                    # Operating recipes (step-by-step guides, can be marked tool: true)
+│   ├── TPL-*.md                    # Code/config templates
+│   ├── REF-*.md                    # External document summaries
+│   ├── DCS-*.md                    # Architecture decision records
+│   ├── TIP-*.md                    # Quick tips
+│   ├── AST-*.md                    # Code assets (API contracts, data models)
+│   ├── BLP-*.md                    # Architecture blueprints
+│   └── DOC-*.md                    # Long-form documents (general fallback)
+├── domain/                         # Domain knowledge: project glossary
+│   └── glossary.yaml               # Domain terms (YAML is the primary format; glossary.json is kept for backward compatibility)
+├── wiki-index.json                 # Unified index (auto-generated by WikiIndexer)
+└── codebase/
+    └── knowledge-graph.json        # Code knowledge graph (queried via the kg CLI)
+```
+
+</details>
+
+---
+
+## The Relationship Between Spec and Knowhow
+
+**Spec is the index and the rules; Knowhow is the detail and the process.** The two are bridged by the `ref` attribute.
+
+| Layer | Role | Content Characteristics | Loading Method |
+|---|---|---|---|
+| Spec (`specs/`) | Index + rules | Short entries, summaries under 200 words | Auto-injected (hook) |
+| Knowhow (`knowhow/`) | Detail documents | Full steps, code examples | Loaded on demand (`wiki load`) |
+
+### The Session/Run Knowledge Review Loop
+
+A Run no longer writes conclusions straight into Spec/Knowhow; it goes through a reviewable two-phase process:
+
+```text
+[auto] search/load → automatically recorded as consumed
+[auto] check → automatic reconcile
+[auto] complete → automatically stages decisions/constraints
+[manual] review → review + adjudication
+[manual] promote → explicit promotion
+[manual] seal → close out
+```
+
+```bash
+# Stage a candidate (optional; decisions/constraints are staged automatically on complete)
+# For long bodies, use --content-file <path|-> instead
+# --signal/--signal-ids can also record Run relationships such as validated/contradicted
+maestro knowledge stage spec "Rule title" "Rule body" \
+  --action propose --run <run-id> --session <session-id> \
+  --signal validated --signal-ids spec:S-1,knowhow:K-1
+
+# Review (--refresh includes a reconcile)
+maestro knowledge review <session-id> --refresh
+
+# Make an evidence-backed ruling on a review_required candidate (refreshes the view as part of the call)
+maestro knowledge review <session-id> \
+  --resolve <candidate-id> --as related --target <knowledge-id> --reason "<reason>"
+
+# After the Run is sealed, explicitly promote the selected candidates
+maestro knowledge promote <session-id> --candidate <candidate-id>
+maestro knowledge promote <session-id> --all
+maestro session seal <session-id>
+```
+
+`review` is read-only by default; `--refresh` includes a reconcile and should only be used when the display shows `missing` or `stale`. `--resolve` makes the ruling from inside the review interface, with no separate command needed. Search and automatic injection are only exposure; an explicit `load` is recorded automatically as consumed, and neither triggers promotion.
+
+<details>
+<summary>Entry format examples</summary>
+
+Spec entries use the closed `<spec-entry>` tag:
+
+```markdown
+<spec-entry category="coding" keywords="auth,token,rotation" date="2026-04-21">
+
+### Token rotation needs email carried through refresh flow
+
+Revoked column must be set rather than deleting tokens.
+
+</spec-entry>
+```
+
+Knowhow documents use YAML frontmatter:
+
+```markdown
+---
+title: OAuth PKCE Authorization Flow
+type: recipe
+category: coding
+keywords: [oauth, pkce, auth]
+tool: true
+summary: "Use when implementing OAuth 2.0 login for public clients."
+---
+
+## Steps
+1. Generate code_verifier ...
+```
+
+- `category` = **who owns it** (determines file routing and agent injection)
+- `keywords` = **what it is about** (cross-category discovery)
+
+</details>
+
+---
+
+## The Knowledge Lifecycle
+
+### Stable Identity (sid)
+
+Every `<spec-entry>` is automatically assigned a stable ID on creation (format `S-YYYYMMDD-xxxx`), used for cross-file references and evolution-chain tracking. Existing entries can be backfilled with `maestro spec backfill-sid`.
+
+### Evolution Chains (Supersession)
+
+When new knowledge replaces old knowledge, use supersede to establish an evolution chain:
+
+```bash
+# 1. Add the new entry (the sid is generated automatically)
+maestro spec add coding "New rule" "Content" --keywords kw1,kw2 --json
+# The output includes the sid, e.g. S-20260704-a1b2
+
+# 2. Mark the old entry as deprecated
+maestro spec supersede <old-sid> --by <new-sid>
+
+# 3. View the evolution chain
+maestro spec history <sid>
+# ○ deprecated  S-20260101-x1y2  "Old rule"
+#     ↓
+# ● CURRENT     S-20260704-a1b2  "New rule"
+```
+
+Superseded entries automatically get `status="deprecated"` and are excluded from search and agent injection, but remain viewable via `--include-deprecated`.
+
+### Two Tracks for Conflicts
+
+The relationship between new knowledge and an existing entry falls into two categories with different semantics and different operations:
+
+| Relationship | Scenario | Operation | Old Entry Status |
+|------|------|------|-----------|
+| **supersede** | The new rule replaces the old rule (evolution) | `maestro spec supersede` | `deprecated` (excluded) |
+| **conflict** | Both rules have merit (contested) | `maestro spec conflict mark` | `contested` (down-weighted but retained) |
+
+### Health Check
+
+```bash
+maestro spec health
+```
+
+Output: lifecycle statistics (active/deprecated/contested), the number of evolution chains, detection of dangling/circular supersedes, and the overall mean freshness.
+
+---
+
+## Related Commands
+
+### Write Operations
+
+| Command | Responsibility |
+|------|------|
+| `/maestro-spec` | Append a `<spec-entry>` to a specs file; supports both inline and ref modes |
+| `/maestro-knowhow` | Capture 6 types of knowledge documents into knowhow/ (compact, template, recipe, reference, decision, tip); add `--tool` to mark it as an executable tool |
+| `/maestro-learn` | Capture atomic insights into `learnings.md` (pattern, gotcha, technique, tip) |
+| `/maestro-knowledge harvest` | Extract knowledge fragments from workflow artifacts and route them to the wiki/spec/issue stores |
+
+### Read Operations
+
+| Command | Responsibility |
+|------|------|
+| `maestro spec load` | Load the main document by category + cross-file keyword-matched entries + auto-discovered knowhow tools |
+| `maestro knowhow` | list/search/get against the workflow knowhow store; deletion/cleanup goes through `/maestro-knowledge audit` |
+| `/maestro-knowledge wiki` | Wiki graph health, search, cleanup, and statistics |
+
+### Analysis Operations
+
+| Command | Responsibility |
+|------|------|
+| `/maestro-knowledge wiki digest` | Semantic topic clustering + knowledge coverage heatmap + gap analysis |
+| `/maestro-knowledge wiki connect` | Find isolated nodes and missing connections, repairing graph connectivity |
+| `/maestro-knowledge audit` | Audit the spec/knowhow/artifact stores — contradiction detection, staleness retirement, orphan cleanup (five-state decisions: keep/supersede/contest/deprecate/delete) |
+| `/maestro-learn decompose` | Extract design patterns from code and write them into spec and wiki |
+| `/maestro-learn follow` | Guided reading of code/wiki, extracting patterns and building understanding |
+
+### Initialization
+
+| Command | Responsibility |
+|------|------|
+| `maestro spec init` | Scan the project structure and initialize the specs skeleton files (6 seed files) |
+
+---
+
+## Tool — Executable Knowledge
+
+A Tool is a knowhow document marked with `tool: true` that defines an **executable business process** — a lightweight workflow that lives in the project directory and is self-discovering and self-applying.
+
+```yaml
+---
+title: Payment Gateway Idempotency Verification
+type: recipe
+category: test
+keywords: [payment, gateway, idempotency]
+tool: true
+summary: "Use when testing payment endpoints for retry safety."
+---
+
+## Steps
+1. Generate idempotency key (UUID v4)
+2. Submit charge request with key
+3. Retry same request — assert identical response
+4. Submit different amount with same key — assert 409
+5. Verify webhook delivers exactly once
+```
+
+`maestro spec load --category test` automatically scans knowhow/ for documents with `category=test` and `tool=true`, and injects the tool summaries into the agent context alongside the specs.
+
+### Registration and Use
+
+A Tool is simply a knowhow document with `tool: true`: consolidate it with `/maestro-knowhow` (recipe type + `--tool`), and agents discover it automatically through `maestro spec load --category` and get the summary injected — no dedicated registration or execution command is required.
+
+---
+
+## The Automatic Injection Mechanism
+
+| Hook | Trigger | Behavior |
+|------|---------|------|
+| `spec-injector` | PreToolUse:Agent | agent type → category → load specs + keyword entries + knowhow tools |
+| `keyword-spec-injector` | UserPromptSubmit | prompt keywords → match spec-entry keywords → inject (up to 5 entries per call) |
+
+| Agent Type | Mapped Category |
+|---|---|
+| code-developer, tdd-developer | coding, learning |
+| workflow-planner | arch |
+| workflow-reviewer | review |
+| debug-explore-agent | debug |
+| test-fix-agent | coding, test |
+
+Session-level deduplication: the same entry is never injected twice.
+
+---
+
+## Code Knowledge Graph Integration (KG × Wiki)
+
+Once `maestro kg index` has generated `knowledge-graph.json`, WikiIndexer automatically indexes the KG data as virtual wiki entries:
+
+| KG Data | Wiki Entry | virtualKind | Purpose |
+|---------|-----------|-------------|------|
+| GraphNode | `kg-{id}` | `kg-node` | Code entities (functions, classes, modules) |
+| Layer | `kg-layer-{id}` | `kg-layer` | Architecture layers (CLI, Core, Orchestration) |
+| TourStep | `kg-tour-{order}` | `kg-tour-step` | Code tour steps (chained as a linked list) |
+
+**Two-tier edge storage**: `related[]` holds the top-N related IDs (used for wiki graph analysis), while `ext.kgEdges[]` holds the full directed heterogeneous edges (used for semantic traversal).
+
+**Search down-weighting**: KG nodes index only title + tags in BM25, so code identifiers do not pollute regular search.
+
+**Cross-references**: KG nodes are automatically matched to `codebase-comp-*` entries via `filePath`, establishing an `ext.semanticDuplicateOf` reference.
+
+```bash
+# View the KG index
+maestro wiki list --keyword kg
+
+# Search for code entities
+maestro wiki search "AuthMiddleware"
+
+# Code change impact analysis
+maestro kg diff-wiki
+
+# KG node details (including linked wiki entries)
+maestro kg explain <node-id>
+```
+
+---
+
+## The Domain Knowledge System
+
+The Domain system manages the project's domain glossary, providing domain context for spec injection and code comprehension. Its core modules are `domain-loader.ts` (term CRUD + file locking), `domain-scanner.ts` (code scanning to discover candidate terms), and `domain-matcher.ts` (CJK-aware term matching).
+
+### CLI Subcommands
+
+| Subcommand | Responsibility |
+|--------|------|
+| `domain init` | Initialize `.workflow/domain/` and an empty `glossary.yaml` |
+| `domain add <canonical> <definition>` | Add a domain term (supports aliases, keywords, relationships, tier) |
+| `domain list` | List all terms; supports `--status active\|deprecated` filtering |
+| `domain show <id>` | View term details (including the concept_ref document content) |
+| `domain update <id>` | Update a term (definition, aliases, relationships, keywords, tier) |
+| `domain remove <id>` | Delete a term (checks reference dependencies, returns warnings) |
+| `domain search <query>` | Search terms (canonical + aliases + definition + keywords) |
+| `domain discover` | Scan the codebase for candidate terms (based on interface/type/enum/class/route/doc) |
+| `domain import` | Import terms from an external source (`--from context-package \| @<file>`) |
+| `domain deprecate <id>` | Soft-delete a term (marked deprecated; a successor can be specified) |
+| `domain validate` | Validate the `glossary.yaml` schema and relationship integrity |
+
+### Term Structure
+
+Each term contains: `id` (kebab-case), `canonical` (display name), `definition`, `aliases[]`, `keywords[]`, `relationships[]`, `tier` (core/extended/peripheral), `status` (active/deprecated), `source` (manual/discover/import), and an optional `concept_ref` (path to a detailed concept document).
+
+### Integration with Spec Injection
+
+Before injecting spec entries, `spec-injector` and `keyword-spec-injector` first use `domain-matcher` to match domain terms in the prompt, then inject the matched term definitions as a context prefix, helping the agent understand project-specific concepts.
+
+---
+
+## The Credibility Assessment System
+
+`credibility.ts` implements **exponential-decay**-based knowledge credibility scoring, and `spec-analytics.ts` records injection logs for improvement analysis.
+
+### The Decay Model
+
+```
+factor = floor + (1 - floor) * e^(-λ * age_days)
+λ = ln(2) / half_life
+```
+
+| Node Type | Half-life (days) | Description |
+|----------|-------------|------|
+| domain | 180 | Domain terms change slowly |
+| spec | 60 | Constraint rules update at a moderate rate |
+| knowhow | 30 | Operational knowledge decays faster |
+| issue | 14 | Issue status changes frequently |
+| project/roadmap/note | 90 | Generic moderate decay |
+
+- `floor = 0.3`: the minimum credibility guarantee
+- `ceiling = 1.2`: the upper bound that search hits can raise credibility to
+- `warningThreshold = 0.5`: falling below this triggers a low-credibility warning
+
+### Storage and Updates
+
+`CredibilityStore` uses the SQLite `credibility` table, recording `search_hits`, `consumption_count`, `last_hit_at`, `last_consumed_at`, and `content_changed_at`. When content changes, the `content_hash` comparison resets the decay start point. It supports `incrementSearchHits` (batch) and `incrementConsumption` (single) for tracking usage.
+
+### Spec Analytics
+
+`spec-analytics.ts` records three log types into `.workflow/spec-analytics.jsonl`:
+
+| Type | Source | Recorded Content |
+|------|------|---------|
+| `injection` | spec-injector / keyword-spec-injector / spec-injection-plugin | Agent type, matched category, number of injected entries, budget action, matched keywords |
+| `cli` | CLI endpoints | Command name, arguments |
+| `hook` | workflow hooks | Hook name, duration, result |
+
+Statistical aggregation provides: injection hit rate by source/agent type/category, top-N keyword rankings, CLI usage frequency, and hook invocation statistics. The log file rotates automatically (5MB by default).
+
+---
+
+## Cross-Workspace Knowledge Sharing
+
+`workspace.ts` provides cross-project knowledge sharing, enabling spec/knowhow/domain reuse across projects by linking other Maestro workspaces.
+
+### CLI Subcommands
+
+| Subcommand | Responsibility |
+|--------|------|
+| `workspace link <path>` | Link a target workspace; supports `--name` and `--share spec,knowhow,domain,codebase` |
+| `workspace unlink <name>` | Remove a linked workspace |
+| `workspace list` | List all linked workspaces (path, shared types, validity) |
+| `workspace status` | Show detailed status (entry counts per shared type) |
+
+### Shared Types
+
+| Type | Shared Content | Source Directory |
+|------|---------|---------|
+| `spec` | Constraint rule entries | `specs/*.md` |
+| `knowhow` | Knowledge documents | `knowhow/**/*.md` |
+| `domain` | Domain glossary | `domain/glossary.yaml` |
+| `codebase` | Code documentation index | `codebase/doc-index.json` |
+
+Link information is persisted in `workspace.linked[]` inside `.workflow/config.json`. On load, paths are resolved automatically and the target `.workflow/` directory is validated for existence.
+
+---
+
+## The KG Custom Extractor Plugin Mechanism
+
+`plugin-engine.ts` supports two plugin modes for extending the knowledge graph's code extraction capability, configured through `.workflow/kg/extractors.yaml`.
+
+### The Two Plugin Modes
+
+| Mode | Configuration | Execution | Suitable For |
+|------|---------|---------|---------|
+| **declarative** | `rules[]` defined in YAML | Regex/call/assignment pattern matching | Simple symbol extraction (constants, routes, decorators) |
+| **script** | `.workflow/kg/extractors/*.mjs` | Dynamic import + `extract(ctx)` invocation | Complex logic (AST traversal, cross-file analysis) |
+
+### Declarative Rule Types
+
+- `regex`: regex matching, with `$1`-`$9` templates for extracting the name
+- `call`: function call patterns (e.g. `builder.define_constant($NAME, $_)`)
+- `assignment`: assignment patterns, with `module`/`class`/`any` scope filtering
+
+### The Script Plugin API
+
+Script plugins export an `extract(ctx)` function; `PluginContext` provides:
+
+- `ctx.filePath` / `ctx.sourceCode` / `ctx.language`: file information
+- `ctx.findAll(nodeType)`: traverse the tree-sitter AST to find nodes of a given type
+- `ctx.text(startLine, endLine)`: extract source lines
+- `ctx.makeSymbol(input)`: build a normalized symbol object
+
+### Merge Strategy
+
+Plugin extraction results are merged with the core tree-sitter results; the conflict strategy is controlled by `defaults.conflictPolicy`: `merge-metadata` (default, keeps the core symbol), `plugin-wins` (the plugin overrides), or `core-wins` (the core is retained).
+
+---
+
+## The CooldownGuard Abstraction
+
+`cooldown-guard.ts` provides a cross-process cooldown guard, implementing throttling between child processes through a bridge file in the temp directory.
+
+### Core API
+
+```typescript
+class CooldownGuard {
+  shouldRun(sessionId): boolean   // Whether we are still inside the cooldown window
+  markDone(sessionId, extra?)     // Mark as done, writing a timestamp
+  timeSinceLastMs(sessionId)      // Milliseconds since the last trigger
+}
+```
+
+### Preconfigured Instances
+
+| Instance | Cooldown | Purpose |
+|------|---------|------|
+| `kgSyncGuard` | 30 seconds | KG sync throttling, to avoid rebuilding the index too often |
+| `kgInitGuard` | 5 minutes | KG initialization throttling, to avoid repeated full scans |
+
+Bridge files are stored in the system temp directory (`maestro-kg-sync-{sessionId}.json` / `maestro-kg-init-{sessionId}.json`) and contain a `last_trigger` timestamp. `shouldRun()` compares the current time with the last trigger time and returns `true` once the cooldown window has passed.
+
+---
+
+## The Script Plugins Security Policy
+
+Script plugins (`.mjs` files) are **disabled** by default and must be explicitly enabled, to prevent execution of untrusted code.
+
+### How to Enable
+
+```bash
+# Enable explicitly from the CLI
+maestro kg sync --allow-extractor-scripts
+
+# Pass it through the code-extractor call chain
+codeExtractor.extract({ allowScripts: true })
+```
+
+### Security Behavior
+
+| Scenario | Behavior |
+|------|------|
+| `.mjs` files exist but scripts are not enabled | A warning is written to stderr and all script plugins are skipped |
+| Enabled | Loaded via dynamic `import()`; if `extract()` fails, handling follows the `onError` policy |
+| Plugin has no `export function extract` | Silently skipped |
+| Declarative plugins | Always loaded; not subject to this security policy |
+
+`warn` (default): a warning is emitted on plugin failure and execution continues. `fail`: a plugin failure throws an error and aborts the extraction.
+
+---
+
+## The Knowledge Flow Panorama
+
+```
+Execution artifacts     Extraction                        Storage           Consumption
+───────────────────     ──────────                        ───────           ───────────
+Analysis sessions ─┐                                  ┌─→ specs/      ─→ spec-injector    → agent
+Debug records     ─┼──→ /maestro-knowledge harvest ───┼─→ knowhow/    ─→ wiki load        → on demand
+Planning docs     ─┤    retrospective step            ├─→ issues/     ─→ /maestro-issue   → tracking
+Code changes      ─┘    /maestro-learn decompose      └─→ learnings   ─→ keyword-injector → context
+```
+
+Progressive Fill — automatic consolidation at each stage:
+
+```bash
+maestro-init → spec init (skeleton + scan)
+analyze → locked decisions → arch, code patterns → coding
+plan    → design conventions → coding/arch, test strategy → test
+execute → lessons learned → learning, root causes → debug
+execute → built-in verification (E2.7) → quality findings → review
+```
+
+<details>
+<summary>Worked example: a full-stack API development loop</summary>
+
+Take a user management module (registration, login, JWT auth, user CRUD) as the example:
+
+**1. Planning + analysis**
+
+```bash
+/maestro "User management module API: registration, login, JWT auth, user CRUD"
+/maestro "Analyze the API endpoint design patterns"
+```
+
+**2. Implementation + knowledge harvesting**
+
+```bash
+/maestro "Implement the plan above"
+/maestro-knowledge harvest --source lite-plan --to auto
+```
+
+Automatic harvest routing:
+
+| Extracted Content | Route Target | Example |
+|---|---|---|
+| API naming conventions | spec → coding | "All endpoints use the `/api/v1/` prefix" |
+| Auth scheme decision | spec → arch | "Passwords use bcrypt(12); tokens are signed with RS256" |
+| Response format knowledge | wiki → knowhow | "Always return the `{ data, error, meta }` structure" |
+| Missing functionality | issue | "No rate limiting middleware" |
+
+**3. Test consumption**
+
+```bash
+# auto-test and test are first-tier steps dispatched by the orchestrator (maestro run), not slash commands
+auto-test --keyword user-api             # Automated testing: discover the tool → generate test code
+test "user management API"               # Conversational UAT: verify item by item following the tool's steps
+```
+
+**4. Feeding knowledge back**
+
+```bash
+/maestro-learn "Retrying after a refresh token expires needs to handle a race condition"
+```
+
+Responsibilities of each command:
+
+| Command | Output | Nature |
+|---|---|---|
+| `/maestro-knowledge harvest` | spec entries + wiki entries + issues | Passive knowledge |
+| `/maestro-knowhow` | AST-*.md (API contracts); RCP-*.md marked with `--tool` (verification procedures) | Passive asset / actively executable |
+| `auto-test` step | Test code | Consumes the tool |
+
+</details>
+Now the two residual lines in README.en.md:
+
+Edit c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\README.en.md
+Modified
+Edit c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\maestro-flow documentation\README.en.md
+Modified
+Bash Verify remaining CJK across all docs
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai/maestro-flow documentation" && node -e "
+const fs=require('fs');
+let total=0;
+for (const f of fs.readdirSync('.')) {
+  if(!f.endsWith('.md')) continue;
+  const t=fs.readFileSync(f,'utf8');
+  const lines=t.split(/\r?\n/);
+  const hits=[];
+  lines.forEach((l,i)=>{ if(/[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef]/.test(l)) hits.push((i+1)+': '+l.trim().slice(0,120)); });
+  total+=hits.length;
+  console.log((hits.length? 'CJK  ':'clean')+' | '+f+' ('+hits.length+')');
+  hits.forEach(h=>console.log('       '+h));
+}
+console.log('\nTOTAL CJK lines remaining: '+total);
+"
+
+OUT
+clean | command-usage-guide.en.md (0)
+clean | delegate-async-guide.md (0)
+clean | install-guide.md (0)
+clean | issue-discover-guide.md (0)
+clean | knowledge-management-guide.md (0)
+clean | learn-tools-guide.md (0)
+clean | maestro-coordinator-guide.en.md (0)
+clean | OpenL-2608041124.md (0)
+clean | quality-pipeline-guide.md (0)
+clean | README.en.md (0)
+CJK   | search-system-guide.md (4)
+       166: - Input `"认证"` ("authentication") → tokens: `["认证"]`
+       167: - Input `"用户认证"` ("user authentication") → tokens: `["用户", "户认", "认证", "用户认", "户认证"]`
+       168: - Input `"JWT认证"` ("JWT authentication") → tokens: `["jwt", "认证"]`
+       224: - **Entry shape**: one entry per sealed session plus one per sealed run (both of type `knowhow`). A run entry's body sta
+
+TOTAL CJK lines remaining: 4
+Bash Inspect quality pipeline ASCII diagram
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai/maestro-flow documentation" && sed -n '168,200p' quality-pipeline-guide.md
+
+OUT
+---
+
+## Quality Loop Flow
+
+```
+                    ┌──────────────────────┐
+                    │ Phase execution done │
+                    └───────────┬──────────┘
+                                │
+                    ┌───────────▼──────────┐
+             ┌──────┤ review               │
+             │      └───────────┬──────────┘
+             │ BLOCK            │ PASS/WARN
+             │                  ▼
+    ┌────────▼────────┐  ┌──────▼───────────┐
+    │ plan --gaps     │  │ test / auto-test │
+    │ (fix)           │  │ (testing)        │
+    └────────┬────────┘  └────────┬─────────┘
+             │ apply fixes        │ issues found
+             ▼                    ▼
+    ┌─────────────────┐     ┌─────▼────────────┐
+    │ execute         │◄────┤ debug            │
+    └────────┬────────┘ fix └─────┬────────────┘
+             │ root cause found   │
+             │                    │
+    ┌────────▼─────────┐          │
+    │ re-run test loop │◄─────────┘
+    └────────┬─────────┘
+             │ all passing
+             ▼
+    ┌───────────────────────────────────────────────────────┐
+    │ /maestro-odyssey --mode improve (optional, tech debt) │
+    │ maestro kg index (sync the codebase index)            │
+Bash Inspect knowledge flow diagram
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai/maestro-flow documentation" && grep -n "Execution artifacts" -A 5 knowledge-management-guide.md
+
+OUT
+473:Execution artifacts     Extraction                        Storage           Consumption
+474-───────────────────     ──────────                        ───────           ───────────
+475-Analysis sessions ─┐                                  ┌─→ specs/      ─→ spec-injector    → agent
+476-Debug records     ─┼──→ /maestro-knowledge harvest ───┼─→ knowhow/    ─→ wiki load        → on demand
+477-Planning docs     ─┤    retrospective step            ├─→ issues/     ─→ /maestro-issue   → tracking
+478-Code changes      ─┘    /maestro-learn decompose      └─→ learnings   ─→ keyword-injector → context
+Bash Check box border alignment lengths
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai/maestro-flow documentation" && node -e "
+const l=require('fs').readFileSync('quality-pipeline-guide.md','utf8').split(/\r?\n/);
+for(let i=195;i<201;i++) console.log((i+1)+' len='+[...l[i]].length+' | '+l[i]);
+"
+
+OUT
+196 len=26 |              │ all passing
+197 len=14 |              ▼
+198 len=61 |     ┌───────────────────────────────────────────────────────┐
+199 len=61 |     │ /maestro-odyssey --mode improve (optional, tech debt) │
+200 len=61 |     │ maestro kg index (sync the codebase index)            │
+201 len=61 |     │ retrospective step (retro, knowledge feedback)        │
+Bash Check markdown table column consistency
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai/maestro-flow documentation" && node -e "
+const fs=require('fs');
+for(const f of fs.readdirSync('.').filter(x=>x.endsWith('.md'))){
+  const lines=fs.readFileSync(f,'utf8').split(/\r?\n/);
+  // table integrity: for each block of consecutive lines starting with |, check column counts match
+  let bad=0, blk=[];
+  const flush=()=>{ if(blk.length>1){ const c=blk.map(r=>r.split('|').length); const m=c[0]; if(c.some(x=>x!==m)) bad++; } blk=[]; };
+  for(const l of lines){ if(l.trim().startsWith('|')) blk.push(l.trim()); else flush(); }
+  flush();
+  console.log((bad?'WARN ':'ok   ')+f+'  lines='+lines.length+'  ragged-tables='+bad);
+}
+"
+
+OUT
+WARN command-usage-guide.en.md  lines=681  ragged-tables=2
+ok   delegate-async-guide.md  lines=284  ragged-tables=0
+ok   install-guide.md  lines=494  ragged-tables=0
+WARN issue-discover-guide.md  lines=318  ragged-tables=1
+WARN knowledge-management-guide.md  lines=542  ragged-tables=1
+WARN learn-tools-guide.md  lines=261  ragged-tables=1
+WARN maestro-coordinator-guide.en.md  lines=200  ragged-tables=1
+ok   OpenL-2608041124.md  lines=42  ragged-tables=0
+ok   quality-pipeline-guide.md  lines=258  ragged-tables=0
+ok   README.en.md  lines=236  ragged-tables=0
+ok   search-system-guide.md  lines=486  ragged-tables=0
+Update Todos
+
+Translate delegate-async-guide.md to English
+
+Translate quality-pipeline-guide.md to English
+
+Translate issue-discover-guide.md to English
+
+Translate learn-tools-guide.md to English
+
+Translate install-guide.md to English
+
+Translate search-system-guide.md to English
+
+Translate knowledge-management-guide.md to English
+
+Fix 2 residual Chinese lines in README.en.md
+
+Verify no CJK remains across all files
+Read all 11 files and translated everything Chinese into English.
+
+Fully translated (7 files)
+File	Was
+delegate-async-guide.md	"Delegate 异步执行指南" → "Delegate Async Execution Guide"
+quality-pipeline-guide.md	"质量管线指南" → "Quality Pipeline Guide"
+issue-discover-guide.md	"问题发现指南" → "Issue Discovery Guide"
+learn-tools-guide.md	"学习工具集指南" → "Learning Toolkit Guide"
+install-guide.md	"安装指南" → "Install Guide"
+search-system-guide.md	"搜索系统指南" → "Search System Guide"
+knowledge-management-guide.md	"知识沉淀管理系统" → "Knowledge Consolidation Management System"
+Also fixed the two Chinese lines in README.en.md:17 (简体中文 → Simplified Chinese) and :229 (the Linux DO tagline).
+
+Already English, left alone: command-usage-guide.en.md, maestro-coordinator-guide.en.md, OpenL-2608041124.md.
+
+Beyond prose I also translated Chinese inside shell-comment examples, table cells, sample search queries, and issue/spec sample data, and redrew the two ASCII diagrams (the quality closed loop and the knowledge-flow panorama) with English labels and recomputed box widths so the borders still line up. Command names, flags, file paths, ID formats, and JSON/YAML keys were left untouched.
+
+Four CJK strings I deliberately kept
+Verification shows 4 remaining CJK lines, all in search-system-guide.md, because translating them would make the document factually wrong. I glossed each in English rather than replacing it:
+
+Lines 166–168 — the CJK tokenization examples ("用户认证" → ["用户", "户认", "认证", ...]). The Chinese characters are the subject matter; English input doesn't produce bigram/trigram tokens, so English substitutes would be nonsense. Each now reads Input "认证" ("authentication") → tokens: ....
+Line 224 — ## 决策 / ## 约束 / ## 关注点 / ## 豁免. These are literal markdown headings the runtime writes into run-entry bodies, so they're identifiers rather than prose. Rendered as `## 决策` Decisions / `## 约束` Constraints / … — these headings are emitted literally in Chinese by the runtime.
+Say the word if you'd rather have those replaced with pure English anyway.
+
+One thing worth flagging: OpenL-2608041124.md is a 41-line partial English translation of knowledge-management-guide.md — it cuts off mid-document at the "Spec and Knowhow" heading. It's now redundant with the full translation. I left it in place rather than deleting it.
+
+These are all the documentations you will probably need for this project, but if needed more you can search its github repository for more documentation: https://github.com/catlog22/maestro-flow/blob/master/README.en.md
+
+Read the documentation of RAG-Work project (in a sibling folder of this project's root folder) to get the idea of how I create a project, such that from small to a big project. 
+Read the documentation of this project inside docs/ folder to know what I intend to build.
+Then, give me a step-by-step build guide for this project accordingly.
+I'll start by mapping this project's docs and checking access to the sibling project.
+
+Bash List project root and docs folder
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && ls -la && echo "=== DOCS ===" && find docs -type f 2>/dev/null | head -100
+
+OUT
+total 40
+drwxr-xr-x 1 LOQ 197121    0 Aug  4 11:27 .
+drwxr-xr-x 1 LOQ 197121    0 Aug  4 11:37 ..
+drwxr-xr-x 1 LOQ 197121    0 Aug  4 10:49 .git
+drwxr-xr-x 1 LOQ 197121    0 Aug  3 14:15 .venv
+-rw-r--r-- 1 LOQ 197121 5256 Jul 26 19:13 CLAUDE.md
+-rw-r--r-- 1 LOQ 197121 4408 Aug  4 10:48 README.md
+drwxr-xr-x 1 LOQ 197121    0 Aug  4 10:47 docs
+drwxr-xr-x 1 LOQ 197121    0 Aug  4 11:40 maestro-flow documentation
+=== DOCS ===
+docs/Architecture.md
+docs/Bugs.md
+docs/Decisions.md
+docs/Research.md
+docs/Status.md
+Bash Check sibling project directories
+IN
+ls "c:/Users/LOQ/Desktop/Projects/" 2>&1 | head -50
+
+OUT
+ADATRA
+Agentic AI Textbook
+Bhai-To-Bhai
+Deep-Learning-Based-Pseudo-Colorization-of-Grayscale-Images
+Document-Loaders
+Fyttr
+Human-Inspired Memory Architecture
+Langflow-learning-project
+Library-Finder
+Memora
+Memory-Management-Tools
+OpenHands
+RAG-work
+Rana-Brothers
+Resume
+SEAL
+continual-harness
+langfuse
+langsmith-masterclass
+temp-for-data
+Parent directory is accessible. Let me read this project's docs and the sibling RAG-work.
+
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\README.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\docs\Architecture.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\docs\Research.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\docs\Decisions.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\docs\Status.md
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\docs\Bugs.md
+Bash Explore sibling RAG-work project structure
+IN
+cd "c:/Users/LOQ/Desktop/Projects/RAG-work" 2>/dev/null && ls -la && echo "=== DOCS ===" && find docs -type f 2>/dev/null | head -60 && echo "=== MD at root ===" && ls *.md 2>/dev/null
+
+OUT
+total 735
+drwxr-xr-x 1 LOQ 197121      0 Jul 26 02:43 .
+drwxr-xr-x 1 LOQ 197121      0 Aug  4 11:37 ..
+drwxr-xr-x 1 LOQ 197121      0 Jul 10 12:06 .agents
+drwxr-xr-x 1 LOQ 197121      0 Jul  8 13:34 .claude
+drwxr-xr-x 1 LOQ 197121      0 Jul 13 11:49 .codex
+-rw-r--r-- 1 LOQ 197121   1614 Jul 27 14:10 .env
+drwxr-xr-x 1 LOQ 197121      0 Jul 30 17:27 .git
+-rw-r--r-- 1 LOQ 197121    375 Jul 13 11:50 .gitignore
+-rw-r--r-- 1 LOQ 197121    417 Jul 20 03:06 .graphifyignore
+drwxr-xr-x 1 LOQ 197121      0 May 19 17:56 .pytest_cache
+-rw-r--r-- 1 LOQ 197121      5 Apr 19 04:33 .python-version
+drwxr-xr-x 1 LOQ 197121      0 Jul 24 16:00 .venv
+-rw-r--r-- 1 LOQ 197121   5616 Jul 26 19:12 AGENTS.md
+-rw-r--r-- 1 LOQ 197121   5256 Jul 26 19:13 CLAUDE.md
+-rw-r--r-- 1 LOQ 197121  23657 Jul 26 02:43 README.md
+drwxr-xr-x 1 LOQ 197121      0 Jun 29 14:42 __pycache__
+drwxr-xr-x 1 LOQ 197121      0 Jul 11 21:35 app
+drwxr-xr-x 1 LOQ 197121      0 Jul 24 18:12 app_workflow
+drwxr-xr-x 1 LOQ 197121      0 Jul 24 16:05 data
+drwxr-xr-x 1 LOQ 197121      0 Jul 24 16:05 data_files
+drwxr-xr-x 1 LOQ 197121      0 Jul 29 11:56 docs
+drwxr-xr-x 1 LOQ 197121      0 Jul 11 21:36 frontend
+drwxr-xr-x 1 LOQ 197121      0 Jul 26 02:18 graphify-out
+drwxr-xr-x 1 LOQ 197121      0 Jul 24 19:36 marker_service
+drwxr-xr-x 1 LOQ 197121      0 Jun 17 12:07 notebook
+-rw-r--r-- 1 LOQ 197121   1526 Jul 24 16:01 pyproject.toml
+-rw-r--r-- 1 LOQ 197121  15914 Jul 10 00:19 requirements.txt
+-rw-r--r-- 1 LOQ 197121   1717 Jul 10 12:16 skills-lock.json
+drwxr-xr-x 1 LOQ 197121      0 Jul 30 17:25 useful_but_not_valuable_Files
+-rw-r--r-- 1 LOQ 197121 605784 Jul 10 12:58 uv.lock
+=== DOCS ===
+docs/Architecture.md
+docs/Bugs.md
+docs/Decisions.md
+docs/Research.md
+docs/Status.md
+=== MD at root ===
+AGENTS.md
+CLAUDE.md
+README.md
+Shell cwd was reset to c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\README.md
+Bash Check RAG-work docs sizes and Status structure
+IN
+cd "c:/Users/LOQ/Desktop/Projects/RAG-work/docs" && wc -l *.md && echo "=== Status.md headings ===" && grep -n "^#\{1,4\} " Status.md | head -120
+
+OUT
+  1142 Architecture.md
+  1387 Bugs.md
+  1027 Decisions.md
+   743 Research.md
+   616 Status.md
+  4915 total
+=== Status.md headings ===
+1:## Chronological Log
+3:### April 2026 — Foundation & Infrastructure
+15:### Early May 2026 — Agentic Loop & First Dry Runs
+29:### 2026-05-11 — LLM Caller Integration & Tool-Call Crash Fix
+37:### 2026-05-12 — System Prompt Architecture Overhaul
+47:### 2026-05-13 — Pipeline Health Check & NAC/DC Fixes
+60:### 2026-05-14 — Batch Sessions 12 & 13 (Self-Learning + Thumbdown Refinement)
+73:### 2026-05-15 — Bug-Fix Batch (Self-Learner & Validators)
+84:### 2026-05-18 — Retrieval Guard & Multi-Query Fix
+90:### 2026-05-21 — Batch 9 Dry Run Analysis
+99:### June 2026 — Documentation & Obsidian Vault
+106:#### 2026-06-08 — LLM Output Repair Layer (fix_llm_output.py)
+121:#### 2026-06-09 — fix_llm_output Integration + Config/Prompts Centralisation + Ablation Harness
+136:#### 2026-06-10 — Configuration Hardening + Fallback Parsing Architecture + Retry Infrastructure
+163:#### 2026-06-11 — Two-Track Retrieval Architecture (`documents` vs `learned_qa`)
+188:#### 2026-06-15 — Centralised Logging Module + Severity-Level Audit; LangGraph Researched, Not Adopted
+222:### 2026-06-17 — LangGraph Sandbox Expanded; `app_workflow/` Package Started; `tempFile.py` Deleted
+239:### 2026-06-18 — `app_workflow/` Restructured Into Per-Node Files + Per-Track Dual-Track LangGraph Pipeline; First Dry Run
+254:### 2026-06-19 — `generate_answer` Split Into `generate_draft` / `check_answer_quality` / `auto_distillation`; `data/feedback/` Parity Closed (BUG-043, BUG-044); Import/Path Bugs Fixed; `benchmark.py` Built and Abandoned for Manual Comparison
+284:#### 2026-06-20 — HTTP API Layer (`app/api.py`, `app_workflow/api.py`); `LLMRateLimitAbortError` Added
+297:#### 2026-06-22 — Timeout Infrastructure + Cross-Pipeline Performance Benchmark
+318:#### 2026-06-23 — Per-Run JSON Timing Files; Benchmark Automation Scripts
+346:#### 2026-06-24 — Benchmark Session Continued; `requirements.txt` Updated; FIFO LLM Serialization Gate, Adaptive Cooldown, and `request_id` Tracing (Separate Branch, Untested)
+360:#### 2026-06-25 — Branch `setup_async_lock` Merged to Master; FIFO Gate Ported to `app_workflow/`
+369:#### 2026-06-27 — MongoDB Migration for Both Pipelines; Request-ID-Based `/feedback/bad`; Transaction-Hardened Thumbdown Write Path
+383:#### 2026-06-29 — Redundant Variant Management in `app_workflow/`; Separate Per-Collection Similarity Thresholds
+407:#### 2026-06-30 — Log Analysis Tooling (`extract_logs.py`); Config Tuning (4 Constants); Tiered Model Architecture Exploration
+425:#### 2026-07-01 — HuggingFace Inference Providers Router Adopted for `judge_llm` / New `json_fix_llm` Tier; Colab+Localtunnel Path Explored and Abandoned; `fix_llm_output.py` Dead-Parameter Cleanup; GPU Driver Failure Identified
+442:#### 2026-07-02 — CAQ Rewritten to Structured Multi-Verdict Output; `generate_answer` Draft-as-Synthesis-Input Fix; `combine_tracks` Fan-In Barrier Fix (`defer=True`); `llm_setup.py` Cleanup; README Rewrite
+457:#### 2026-07-03 — Continual Harness Paper Studied; `llm_setup.py` Consolidated Onto Custom OpenAI-Compatible Endpoint; Groq Retained for Tool-Calling Only (`llm_tool`)
+468:#### 2026-07-06 — Tool-Calling Dropped from Query-Variant Generation; Full LLM-Configuration Benchmark Run (`Execution Time Comparison.md`); "Self-Adapting Language Models" Read
+486:#### 2026-07-07 — Continual Harness & SEAL Reference Implementations Traced (No Code Changes)
+495:#### 2026-07-08 — RAG Pipeline Debug-Log Quality Audits via graphify + Parallel Subagents; Llama vs Qwen Efficiency Comparison; Execution-Time Benchmark Completed (Setups 4–5); Full Custom-Endpoint LLM Consolidation
+510:#### 2026-07-09 — Arize Phoenix Tracing Adopted; Log-to-Trace Mirroring Across LangSmith + Phoenix; `trace_events.py` CLI Added
+528:#### 2026-07-10 — `app/llm_setup.py` Reverted to Groq for `llm`/`merge_llm`/`judge_llm`; `json_fix_llm` Moved to the HF Router (`app/` Diverges From `app_workflow/`)
+537:#### 2026-07-10 — Langfuse Adopted as Third Tracing Backend; Callback Config Threaded Through ~40 LLM Call Sites; Circular Import Fix; Phoenix↔Langfuse TracerProvider Conflict Diagnosed
+553:### 2026-07-13 — Central Tracing Policy (`operation_tracing.py`) Applied to All 17 Nodes/Services; Langfuse Log-Mirroring Handler; README Tracing Docs; Batch-Runner Script
+570:### 2026-07-14 — 15-Batch / 100-Scenario Workflow Benchmark; Long-Lived API Runner; Per-Request Workflow Switches
+583:### 2026-07-15 — Docling, Unstructured, and Marker-PDF Document-Loader Exploration; Batch Utilities Preserved
+595:### 2026-07-24 — Marker PDF→Markdown Deployed as an Isolated GPU Microservice; `app_workflow/` Ingestion Refactored Around Loader/Splitter Switches and a `POST /ingest` Endpoint
+Shell cwd was reset to c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai
+Read c:\Users\LOQ\Desktop\Projects\RAG-work\docs\Status.md
+Now let me ground the guide in the actual environment and check the knowledge system.
+
+Bash Check maestro availability and knowledge search
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && echo "=== maestro ===" && (maestro --version 2>&1 | head -3) && echo "=== search ===" && (maestro search "orchestration handoff budget" --json 2>&1 | head -30)
+
+OUT
+=== maestro ===
+0.5.61
+=== search ===
+{
+  "query": "orchestration handoff budget",
+  "wikiCount": 0,
+  "codeCount": 0,
+  "codeIndex": "not-initialized",
+  "codeIndexHint": "code index not initialized — run \"maestro kg init\" to enable code search (hooks keep it synced afterwards)",
+  "typeCounts": {},
+  "count": 0,
+  "results": []
+}
+Bash Check environment: python, agent CLIs, git, docker
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && echo "=== venv python ===" && (.venv/Scripts/python.exe --version 2>&1) && echo "=== agent CLIs ===" && for c in claude codex gemini opencode aider; do printf "%-10s " "$c"; (command -v $c >/dev/null 2>&1 && $c --version 2>&1 | head -1) || echo "NOT ON PATH"; done && echo "=== git ===" && git --version && echo "=== docker ===" && (docker --version 2>&1 | head -1)
+
+OUT
+=== venv python ===
+Python 3.13.13
+=== agent CLIs ===
+claude     2.1.220 (Claude Code)
+codex      codex-cli 0.146.0
+gemini     NOT ON PATH
+opencode   NOT ON PATH
+aider      NOT ON PATH
+=== git ===
+git version 2.52.0.windows.1
+=== docker ===
+Docker version 29.6.2, build dfc4efb
+Bash Check MongoDB availability
+IN
+echo "=== mongod ===" && (command -v mongod >/dev/null 2>&1 && mongod --version 2>&1 | head -2 || echo "mongod NOT ON PATH") && echo "=== mongosh ===" && (command -v mongosh >/dev/null 2>&1 && mongosh --version 2>&1 | head -1 || echo "mongosh NOT ON PATH") && echo "=== port 27017 ===" && (powershell -NoProfile -Command "(Test-NetConnection -ComputerName localhost -Port 27017 -WarningAction SilentlyContinue).TcpTestSucceeded" 2>&1 | tail -1)
+
+OUT
+=== mongod ===
+mongod NOT ON PATH
+=== mongosh ===
+2.8.3
+=== port 27017 ===
+True
+Bash Check RAG-work architecture changelog cadence
+IN
+cd "c:/Users/LOQ/Desktop/Projects/RAG-work/docs" && grep -n "^### " Architecture.md | head -30
+
+OUT
+70:### `agent_query.py`
+79:### `tools.py`
+87:### `context_compression.py`
+97:### `retriever.py`
+106:### `embedding_manager.py`
+110:### `vector_store.py`
+113:### `ingest.py`
+116:### `validators.py`
+131:### `llm_caller.py`
+140:### `db.py`
+143:### `feedback_store.py`
+150:### `self_learner.py`
+157:### `learned_qa_store.py`
+167:### `run_batch.py`
+170:### `fix_llm_output.py`
+185:### `config.py`
+190:### `prompts.py`
+193:### `api.py`
+205:### `run_combinations.py`
+208:### `logger_config.py`
+477:### June 2026 — Stage 5: LLM Output Repair Layer
+491:### 2026-06-09 — Stage 5 Integration + Configuration Centralisation
+505:### 2026-06-10 — Configuration Hardening + Execution Path Stabilisation
+544:### 2026-06-11 — Stage 6: Two-Track Retrieval Architecture (`documents` vs `learned_qa`)
+579:### 2026-06-15 — Stage 7: Centralised Logging Module (`logger_config.py`)
+597:### 2026-06-16 — LangGraph Migration Attempt Started, Then Paused; Non-Architectural Practice Sandbox (`tempFile.py`)
+605:### 2026-06-17 — LangGraph Sandbox Finalised and Deleted; `app_workflow/` Package Bootstrapped (Stage 1)
+627:### 2026-06-18 — `app_workflow/` Restructured Into Modular Per-Node Files + Full Dual-Track LangGraph Pipeline (Stage 2)
+756:### 2026-06-19 — Answer Pipeline Split (Stage 3); `data/feedback/` Parity Closed; Startup Import/Path Bugs Fixed
+768:### 2026-06-20 — HTTP API Layer + LLMRateLimitAbortError
+Shell cwd was reset to c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai
+Environment confirmed. I have everything I need — writing the guide now.
+
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\docs\Build-Guide.md
+250 lines
+# Build Guide
+
+Phased implementation order for Bhai-To-Bhai, written 2026-08-04. This replaces the build guidance produced on 2026-08-03 that was never saved into the repository (`Status.md`, 2026-08-03, final bullets). It records the two things that entry flagged as missing everywhere: **the phased build order** and **the concrete v0 acceptance test**.
+
+Nothing here overrides `Decisions.md`. Where a stage exists because of an ADR, the ADR is cited and remains authoritative.
+
+---
+
+## How this project grows
+
+The build order below follows the working pattern from the sibling `RAG-work` project (`RAG-work/docs/Status.md`, April–July 2026), which took a system from nothing to a two-implementation, three-tracing-backend, GPU-microservice architecture without ever having a "big rewrite" phase. Six habits carried that:
+
+1. **Infrastructure before intelligence.** April 2026 built `ingest.py`, `embedding_manager.py`, `vector_store.py`, `retriever.py` — and a plain single-pass `query.py` — *before* the agentic loop existed. The clever part was built on a data layer that already worked.
+2. **A walking skeleton that runs end-to-end on real data, early.** `query.py` (non-agentic) preceded `agent_query.py` (4-phase loop). The first dry runs immediately surfaced the two problems that dictated the next month of work (acronym ambiguity, premature tool calls). Failures found by running set the backlog; speculation did not.
+3. **Cheap storage first, real storage later.** Interaction history and thumbdowns were JSONL flat files from May until the MongoDB migration on 2026-06-27. The schema was learned by using it, then migrated once.
+4. **One focused change per session, logged the same day.** Each dated entry is a single capability plus the bugs it exposed, with ADR and BUG identifiers. Nothing accumulates unrecorded.
+5. **Don't adopt a framework until the hand-rolled version shows you what you need.** LangGraph was "researched, not adopted" on 2026-06-15, sandboxed on 06-16/06-17, and only then became a real implementation — built *alongside* the original, sharing one store, and benchmarked head-to-head rather than replacing it.
+6. **Observability and optional services come after the core works.** Tracing backends arrived in July; the isolated GPU Marker service arrived on 07-24, once ingestion was stable enough to be worth accelerating.
+
+Applied here, that means: **the durable artifact layer and a one-agent spine come before routing, budgets, or failover** — even though failover is the headline feature. This is also what ADR-005 already concluded independently ("load-bearing … and the first thing to build").
+
+A second framing, from `Architecture.md`, governs every stage: this is *structurally a job scheduler whose workers are unreliable, expensive, and non-deterministic*. When a stage feels like it is about prompting, it has probably been scoped wrong.
+
+---
+
+## Target: the v0 acceptance test
+
+Restated verbatim in substance from `Status.md` (2026-08-03), because it is the clearest definition of done and was not recorded anywhere else:
+
+> Give the system a real task in a real repo, set one agent's budget artificially low so it will be exhausted partway through, and have the system plan, start implementing, detect the limit, fail over to a second agent mid-task, continue from the existing partial work rather than restarting, pass the deterministic check runner, and leave a complete audit trail.
+
+Broken into the assertions a test can actually make:
+
+| # | Assertion | Verified by |
+|---|---|---|
+| A1 | A plan exists with discrete steps before implementation begins | Plan document persisted, steps in `pending` state |
+| A2 | Agent 1 starts work and completes at least one step | ≥1 commit in the worktree attributable to agent 1; ≥1 step `done` |
+| A3 | Agent 1's exhaustion is detected, not guessed | Ledger state transitions to `exhausted` from a non-zero exit + rate-limit match, not from the estimate alone |
+| A4 | A handoff packet is built **without** agent 1 having written anything on exit | Packet assembled purely from commits, step status, event log, last check result |
+| A5 | Agent 2 continues rather than restarts | Agent 2's first commit builds on agent 1's HEAD; no step already `done` is re-executed |
+| A6 | Dead ends are carried forward | The packet contains agent 1's failed attempts; agent 2 does not repeat the identical failing approach |
+| A7 | Completion is decided by exit codes, not by any agent's claim | Check runner result recorded with the commit SHA it ran against |
+| A8 | The whole run is reconstructable after the fact | Event log replays the run start-to-finish, including the switch and its reason |
+
+**A4 is the test.** A1–A3 and A5–A8 can all pass in a design that still fails the moment a real rate limit kills a process mid-sentence. Kill agent 1 with `SIGKILL` rather than a graceful stop when exercising this.
+
+---
+
+## Stage 0 — Preflight and repository skeleton
+
+**Goal:** the environment is provably capable of what later stages assume, and failures are loud at startup rather than opaque later.
+
+**Why first:** `Bugs.md` #2's Prevention note asks for exactly this — the orchestrator invokes every agent as a subprocess, so each CLI must resolve from *the orchestrator's* environment, not from an interactive shell where PATH was fixed by hand. `Bugs.md` #1 adds the network variant: verify an endpoint from the process that will actually call it.
+
+**Verified present on this machine as of 2026-08-04:**
+
+| Component | Status |
+|---|---|
+| Python | 3.13.13 (`.venv`, per `Status.md` 2026-08-03) |
+| Maestro | 0.5.61 |
+| Claude Code | 2.1.220 |
+| Codex | codex-cli 0.146.0 |
+| Git | 2.52.0.windows.1 |
+| Docker | 29.6.2 |
+| MongoDB | listening on `localhost:27017` (`mongosh` 2.8.3) |
+
+**Not present:** `gemini`, `opencode`, `aider` are not on PATH. Also note `~/.maestro/cli-tools.json` currently has **only `codex` enabled** (`claude`, `gemini`, `opencode`, `agy` are all `enabled: false`). Delegating to Claude Code requires flipping `claude.enabled` to `true` there. Plan v0 around **Codex + Claude Code**, the two agents that actually exist here; treat Gemini/OpenCode/Aider as Stage 8 adapters.
+
+**Build:**
+
+- `preflight.py` — resolves every configured agent binary, runs each one's version probe, checks MongoDB connectivity, checks `git worktree` support, and exits non-zero with a per-item report. Nothing else runs until this passes.
+- `requirements.txt` / `requirements-dev.txt` — these do not exist in the working tree or in git history and must be rewritten. Keep them phase-scoped: Stage 0–3 needs little more than `pymongo`, `pydantic`, and a test runner. Do not pre-install the Phoenix/OTel stack; it belongs to Stage 9.
+- Repository layout, created empty and filled by later stages:
+
+```
+orchestrator/
+├── preflight.py          # Stage 0
+├── config.py             # Stage 0 — constants, feature flags, vendor error strings
+├── store/                # Stage 1 — MongoDB access, event log, run/step records
+├── workspace/            # Stage 1 — git worktree lifecycle + lock
+├── checks/               # Stage 2 — deterministic check runner
+├── adapters/             # Stage 4 — one module per agent CLI
+├── handoff/              # Stage 3 — packet reconstruction
+├── ledger/               # Stage 5 — budget accounting
+├── router/               # Stage 6 — agent selection
+└── skills/<name>/SKILL.md  # ADR-001 — canonical skill source, injected verbatim
+```
+
+**Done when:** `python preflight.py` passes on a clean shell, and fails loudly and specifically when an agent binary is renamed away.
+
+---
+
+## Stage 1 — The durable artifact layer
+
+**Goal:** four artifact classes are written *continuously during* a run, such that killing the process at any instant still leaves a recoverable state.
+
+**Why now:** ADR-005 names this the first thing to build. Every later stage reads from it, and it is the only stage whose absence cannot be worked around later — retrofitting durability onto a system that buffers is a rewrite.
+
+**Build the four artifacts from ADR-005 exactly:**
+
+| Artifact | Requirement | Failure if skipped |
+|---|---|---|
+| Worktree commits | Agent instructed to commit per logical step, **plus** an orchestrator-side auto-commit timer | A killed process leaves no diff |
+| Plan step status | `pending` / `in_progress` / `done`, persisted on every transition | Cannot tell what was finished from what was attempted |
+| Event stream | Written to MongoDB **as each event arrives**, never buffered to process exit | The exact failure mode ADR-005 exists to avoid |
+| Last check result | Tied to the commit SHA it ran against | A pass/fail with no anchor is not evidence |
+
+Also build here, because they are storage concerns:
+
+- **Worktree manager** with a **workspace lock — one active agent per worktree.** `Architecture.md` (2026-08-03 changelog) names the absence of this as one of two failure modes that "burn every agent budget at once." It is not a refinement.
+- **Crash reconciliation on startup.** ADR-005's second consequence: a run with a start timestamp and no end timestamp is an orphan. Restart must reconcile persisted plan state against *actual Git state*, never assume an interrupted run did nothing.
+
+**Done when:** you can start a long-running write to a worktree, `SIGKILL` the orchestrator, restart it, and have it correctly report which steps completed, what the diff is, and that the run was orphaned — with no summary having been written by anything.
+
+**Test this stage adversarially.** Kill at: mid-commit, between step transition and event write, and during check execution.
+
+---
+
+## Stage 2 — Single-agent end-to-end spine
+
+**Goal:** one agent, one task, one worktree, real repo, start to finish, with a deterministic verdict. No routing. No failover. No budget.
+
+**Why now:** this is `RAG-work`'s `query.py` — the walking skeleton that proves the plumbing before the interesting behaviour is layered on. `Status.md` (2026-08-03) already sequences it this way: "a single-agent end-to-end spine first."
+
+**Build:**
+
+- **Task intake → plan → execute → check**, driven through `maestro delegate` against **Codex** (the one agent enabled in `cli-tools.json` today).
+- **Deterministic check runner** (`checks/`): reads a verification manifest, runs each check as a subprocess, decides pass/fail **from exit codes only**. Not an LLM judge — ADR-003 is explicit that this is why `/goal`-style completion was rejected. Record each result against a commit SHA (Stage 1).
+- **Explicit skill injection** per ADR-001: `load_skill(name)` reads `skills/<name>/SKILL.md` and prepends it to the prompt string on every call, for every agent. Do not rely on `.claude/skills/` or `AGENTS.md` auto-discovery — in headless subprocess mode there is no way to confirm it fired.
+
+**Two Maestro constraints to encode now, both from ADR-004:**
+
+- Maestro's built-in decision gates are **all post-execution**. There is no built-in gate that reviews a plan *before* execution. If you want a plan-review checkpoint, assemble it manually with a `maestro delegate` call — do not wait for a gate that does not exist.
+- Maestro's own completion signals are **subordinate to the check runner**. A Maestro run reporting success is an input, not a verdict.
+
+Useful Maestro surface for this stage (see `maestro-flow documentation/delegate-async-guide.md`): `maestro delegate "<prompt>" --to codex --mode write --async` returns an execId immediately; `status`, `output`, `tail`, and `cancel` operate on it; `--timeout <ms>` sets the stale-stream kill (default 600000ms), and per-tool `streamTimeoutMs` in `cli-tools.json` does the same globally.
+
+**Done when:** a real task in a real repo runs unattended and produces a pass or fail that you trust because you can see which command exited non-zero.
+
+**Then run it on something real, immediately.** This is habit 2. Whatever breaks here sets the Stage 3–6 backlog, and it will not be what you predicted.
+
+---
+
+## Stage 3 — Handoff Builder (reconstruct on entry)
+
+**Goal:** given only Stage 1's artifacts, produce the packet an incoming agent receives — with no cooperation from the outgoing agent.
+
+**Build** the packet contents from `Architecture.md`'s Handoff Builder section: canonical objective and constraints, relevant prior decisions, current Git diff, latest check failures, remaining work, the agent's own native session reference if resuming, and injected skill content.
+
+**Three constraints that are easy to under-build:**
+
+1. **Reconstructed at entry, never summarized at exit** (ADR-005). Enforce it structurally: the Handoff Builder must not have an API that an outgoing agent can call.
+2. **Dead ends carried explicitly** — "X was tried and fails because Y." Without this the incoming agent reattempts exactly what killed its predecessor. This is acceptance assertion A6, and it is the most commonly omitted field.
+3. **The packet is itself budgeted and measured.** Every handoff consumes the receiving agent's allowance — the very resource being managed. Record packet size per handoff from day one; you will need the number in Stage 6 to price switching.
+
+Keep the **Session Registry** separate from the **Canonical Task Context Store** (`Architecture.md`, and Research topic 1): native session IDs are per-vendor bookkeeping for resuming the *same* agent, not a cross-vendor continuity mechanism. Conflating them reintroduces the false claim the project explicitly refuses to make.
+
+**Done when:** you can kill agent 1 with `SIGKILL` mid-step and produce a packet that a human reading it could use to continue the work correctly.
+
+---
+
+## Stage 4 — Adapter interface and the second agent
+
+**Goal:** agent-specific behaviour lives behind one interface, and a second real agent runs through it.
+
+**Why now:** `Status.md` sequences it here ("then the adapter interface and a second agent"), and it is the earliest point where the interface is informed by a working implementation rather than guessed.
+
+**Build:**
+
+- `AgentAdapter` covering: invocation, streamed event normalization, usage extraction from each call, native session capture/resume, and **rate-limit classification**.
+- **Claude Code adapter** as the second implementation. Requires setting `claude.enabled = true` in `~/.maestro/cli-tools.json`.
+- Keep the adapter boundary above Maestro, not below it. ADR-004 retains Flow-next as the fallback if Maestro's post-execution-only gates prove too restrictive; that fallback is only real if swapping the execution layer does not mean rewriting the adapters.
+
+**Done when:** the Stage 2 spine runs identically against Codex and Claude Code with only a config change, and both produce normalized events and usage records.
+
+---
+
+## Stage 5 — Budget ledger
+
+**Goal:** a normalized per-agent allowance model that is honest about not being queryable.
+
+**Build exactly what ADR-006 specifies** — this stage has more ways to be subtly wrong than any other:
+
+| Element | Rule |
+|---|---|
+| `limit_type` | `rolling window` / `daily requests` / `monetary` / `none` — the four agents are not bounded by comparable quantities |
+| Configured limit | User-supplied. No vendor exposes remaining allowance (Research topic 6) |
+| Consumption | Accumulated from per-call reported usage — **an estimate**, used for pre-emptive routing only |
+| Exhaustion | A non-zero exit carrying a rate-limit message — **authoritative**, sets cooldown and triggers failover |
+| State | `available` / `degraded` / `exhausted` / `cooldown` |
+| Vendor error strings | **In configuration, not code.** Vendors reword them |
+
+The precedence is the whole point: the estimate routes, the reactive signal decides. Do not let drift in the estimate become a wrong routing decision instead of a correct failover.
+
+Two agent-specific realities to encode: Gemini CLI's free tier is bounded by **request count**, not tokens, so a token-shaped ledger cannot represent it. DeepSeek is a *model*, not an agentic coding CLI — it is either wrapped in a harness accepting an OpenAI-compatible endpoint (Aider, OpenCode) or restricted to non-agentic roles. Its ledger placement stays unresolved until that is settled hands-on.
+
+**Done when:** you can artificially set a limit low, run until it trips, and see the ledger transition to `exhausted` from the reactive signal — with the estimate visibly disagreeing beforehand, which is expected and fine.
+
+---
+
+## Stage 6 — Agent Router and the failover loop
+
+**Goal:** the headline behaviour, assembled from parts that all already work.
+
+**Build:**
+
+- **Deterministic rules first**, per `Architecture.md`: architecture/planning → Claude Code, implementation → Codex, large-context repo analysis → a large-context agent, mechanical refactors → OpenCode/Aider. An LLM router is a fallback for ambiguous cases only, not the default path.
+- **Reserve headroom before dispatch** (ADR-006). A mid-task death costs both the partial work and a cold-start handoff — do not dispatch a job that visibly will not fit.
+- **Price the cost of switching** (ADR-006). Resuming an agent that still holds a native session is materially cheaper than cold-starting a different vendor. Use the packet-size measurements from Stage 3.
+- **Per-step attempt cap that escalates to a different agent.** The second of the two failure modes named in `Architecture.md`'s 2026-08-03 changelog: without it, unbounded fix loops burn every agent budget at once. Cap attempts per step, then change agent — do not retry the same agent indefinitely.
+
+**Done when:** the loop runs planner → implementer → check → fixer with a real switch in the middle, driven by ledger state rather than by a hardcoded sequence.
+
+---
+
+## Stage 7 — v0 acceptance
+
+Run the scenario from the top of this document against assertions A1–A8. Use a real repository and a real task, not a fixture. Kill the first agent with `SIGKILL`, not a graceful stop.
+
+Record the result in `Status.md` as a dated session entry, and open `Bugs.md` records for every assertion that fails. If A4 fails, the fix belongs in Stage 1 or Stage 3 — not in the router.
+
+---
+
+## Stage 8 and beyond — after v0
+
+Ordered by dependency, not by appeal. None of this should start before A1–A8 pass.
+
+| Stage | Work | Notes |
+|---|---|---|
+| 8 | Reviewer stage and additional adapters | Completes planner → implementer → reviewer → fixer. `Architecture.md` requires the reviewer to be a *different* agent than the implementer. Gemini CLI, OpenCode/Aider adapters land here — none is currently installed |
+| 9 | Observability — Phoenix / OpenTelemetry | Deliberately deferred, per habit 6. The event log from Stage 1 already carries the audit trail; this is for traces, durations, and cost attribution |
+| 10 | Human approval gate | Optional, policy-driven, independent of which agents ran |
+| 11 | Workflow-engine decision | Research topic 7 is still open, and deliberately so. Maestro supplies its own run/step lifecycle, so decide **after** Stages 1–7 have shown what actually needs durable execution. Langflow is ruled out as a runtime; LangGraph and Temporal remain candidates for whatever executes inside Maestro's lifecycle. Adopting a framework before the adapter/handoff/ledger layers exist risks encoding the wrong shape |
+
+Two documentation debts to clear while working: the Temporal evaluation notes owed to `Research.md` topic 7 (`Status.md`, 2026-08-03), and DeepSeek's ledger placement (ADR-006).
+
+---
+
+## Working rhythm
+
+Carried from `RAG-work`, and the reason its documentation survived seven months of daily change:
+
+- **One focused change per session**, logged in `Status.md` the same day with what was attempted, what was diagnosed, what was decided, and where it was tracked.
+- **ADR on every real decision**, numbered, with options considered — including the ones rejected. `Decisions.md` here already supersedes ADRs in place (ADR-002 → ADR-004) rather than deleting them; keep doing that.
+- **Bugs get identifiers and stay recorded after they are closed.** `Bugs.md` entries carry a Prevention field; both existing entries produced concrete build requirements in Stage 0 of this guide.
+- **Update `Architecture.md`'s changelog when the shape changes**, not when the code changes.
+- **Benchmark before and after any change you expect to matter.** `RAG-work` ran a 10-query benchmark before adopting its second implementation and a 15-batch/100-scenario benchmark after; both changed decisions.
+
+---
+Wrote the guide to docs/Build-Guide.md. It fills a gap your own log flags: Status.md:41 records that the 2026-08-03 build guidance and dependency lists were never saved, and that "the phased build order and the concrete v0 acceptance test are not yet recorded anywhere and should be rewritten before implementation starts."
+
+What I read
+This project — README.md and all five docs. Design phase, no code; Maestro adopted as the execution layer (ADR-004); handoff-by-reconstruction (ADR-005); budget ledger with reactive detection (ADR-006).
+
+Sibling RAG-work — README.md plus docs/Status.md and the Architecture.md changelog structure. Same 5-file system, which your Status.md:8 says you adopted from there.
+
+The pattern I extracted from RAG-work
+Six habits took it from nothing to a two-implementation system with no big-rewrite phase:
+
+Infrastructure before intelligence — April built the data layer and a plain non-agentic query.py before the agentic loop existed.
+Walking skeleton on real data, early — first dry runs surfaced the two problems that set the next month's backlog. Failures found by running set the agenda; speculation didn't.
+Cheap storage first — JSONL flat files from May until the MongoDB migration on 06-27. Schema learned by use, then migrated once.
+One focused change per session, logged same day with ADR/BUG IDs.
+No framework until the hand-rolled version shows what you need — LangGraph was "researched, not adopted" 06-15, sandboxed 06-16/17, then built alongside the original and benchmarked head-to-head.
+Observability and optional services last — tracing in July, GPU Marker service 07-24.
+The resulting stage order
+Applied here, habit 1 says durable artifacts and a one-agent spine come before routing, budgets, or failover — even though failover is the headline feature. ADR-005 reached the same conclusion independently ("the first thing to build").
+
+Stage	
+0	Preflight + repo skeleton — both Bugs.md entries convert directly into requirements here
+1	Durable artifact layer (ADR-005's four artifacts) + worktree lock + crash reconciliation
+2	Single-agent end-to-end spine, Codex only, real repo, exit-code check runner
+3	Handoff Builder — reconstruct on entry, never summarize on exit
+4	Adapter interface + Claude Code as second agent
+5	Budget ledger (ADR-006)
+6	Router + failover loop, with the attempt cap and headroom reservation
+7	v0 acceptance
+8–11	Reviewer stage, Phoenix/OTel, approval gate, workflow-engine decision
+I also decomposed the v0 target from Status.md:42 into eight testable assertions, and singled out A4 — building a handoff packet with the outgoing agent having written nothing on exit — as the one that actually tests the design. The other seven can pass in a system that still dies on a real rate limit. The guide says to kill agent 1 with SIGKILL, not a graceful stop.
+
+Environment findings that change the plan
+I verified the machine rather than assuming, and two things matter:
+
+Present: Python 3.13.13, Maestro 0.5.61, Claude Code 2.1.220, Codex 0.146.0, Git 2.52, Docker 29.6.2, MongoDB listening on 27017.
+Absent: gemini, opencode, aider are not on PATH — so v0 must be scoped to Codex + Claude Code, and the other adapters move to Stage 8.
+Config gotcha: ~/.maestro/cli-tools.json has only codex enabled; claude is enabled: false. Delegating to Claude Code needs that flipped, which is why Stage 2 uses Codex and Stage 4 is where Claude Code arrives.
+Also worth noting: maestro search returns zero results and the code index is uninitialized, so there's no accumulated Maestro knowledge to draw on for this project yet.
+
+Two things I deliberately did not do, since they change project history rather than add to it: no Status.md session entry for today, and Build-Guide.md isn't added to the docs table in README.md. Say the word and I'll do both.
+
+Maestro was installed by me unintentionally globally. I want it only in this repo's uv.
+Can u fix it?
+Before changing anything — there's a mismatch I want to verify first. maestro-flow is an npm package, and uv manages Python. Let me check what's actually installed and where.
+
+Bash Locate maestro install and list global npm packages
+IN
+echo "=== which maestro ===" && (command -v maestro; where maestro 2>/dev/null) ; echo "=== npm global list ===" && (npm ls -g --depth=0 2>&1 | head -30) ; echo "=== npm global root ===" && (npm root -g 2>&1)
+
+OUT
+=== which maestro ===
+/c/Users/LOQ/AppData/Roaming/npm/maestro
+C:\Users\LOQ\AppData\Roaming\npm\maestro
+C:\Users\LOQ\AppData\Roaming\npm\maestro.cmd
+=== npm global list ===
+C:\Users\LOQ\AppData\Roaming\npm
++-- @openai/codex@0.146.0
++-- maestro-flow@0.5.61
+`-- npm@11.19.0
+
+=== npm global root ===
+C:\Users\LOQ\AppData\Roaming\npm\node_modules
+Bash Check repo for npm/uv project files
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && echo "=== repo root ===" && ls -a && echo "=== package.json? ===" && (ls package.json node_modules 2>&1 | head -5) && echo "=== pyproject/uv? ===" && (ls pyproject.toml uv.lock .python-version 2>&1 | head -5) && echo "=== .workflow? ===" && (ls -d .workflow 2>&1)
+
+OUT
+=== repo root ===
+.
+..
+.git
+.venv
+.workflow
+CLAUDE.md
+README.md
+docs
+maestro-flow documentation
+=== package.json? ===
+ls: cannot access 'package.json': No such file or directory
+ls: cannot access 'node_modules': No such file or directory
+=== pyproject/uv? ===
+ls: cannot access 'pyproject.toml': No such file or directory
+ls: cannot access 'uv.lock': No such file or directory
+ls: cannot access '.python-version': No such file or directory
+=== .workflow? ===
+.workflow
+Facts gathered. Let me check the blast radius before touching anything.
+
+Bash Inspect .workflow dir in this repo
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && echo "=== .workflow contents ===" && find .workflow -maxdepth 2 2>/dev/null | head -30 && echo "=== git tracked? ===" && (git status --short | head -10) && echo "=== gitignore ===" && (cat .gitignore 2>&1 | head)
+
+OUT
+=== .workflow contents ===
+.workflow
+.workflow/embedding-index.bin
+.workflow/embedding.zvec
+.workflow/embedding.zvec/0
+.workflow/embedding.zvec/del.0
+.workflow/embedding.zvec/idmap.0
+.workflow/embedding.zvec/LOCK
+.workflow/embedding.zvec/manifest.0
+.workflow/embedding.zvec.meta.json
+.workflow/search-cache.json
+.workflow/search-daemon.json
+.workflow/wiki-index.json
+=== git tracked? ===
+?? .workflow/
+?? docs/Build-Guide.md
+?? "maestro-flow documentation/"
+=== gitignore ===
+cat: .gitignore: No such file or directory
+Bash Check sibling projects and global config for maestro dependencies
+IN
+echo "=== siblings with .workflow ===" && for d in "c:/Users/LOQ/Desktop/Projects"/*/; do [ -d "$d/.workflow" ] && echo "  $(basename "$d")"; done; echo "=== ~/.maestro ===" && ls "c:/Users/LOQ/.maestro" 2>&1 | head -20; echo "=== hooks referencing maestro ==="; grep -rl "maestro" "c:/Users/LOQ/.claude/settings.json" "c:/Users/LOQ/.claude/settings.local.json" 2>/dev/null; echo "(done)"
+
+OUT
+=== siblings with .workflow ===
+  Bhai-To-Bhai
+  Resume
+=== ~/.maestro ===
+arch-kb
+backups
+cli-tools.json
+config.json
+data
+manifests
+overlays
+prepare
+ref
+templates
+version.json
+workflows
+=== hooks referencing maestro ===
+c:/Users/LOQ/.claude/settings.json
+(done)
+Bash Show maestro references in global Claude settings
+IN
+echo "=== maestro refs in global settings.json ===" && grep -n "maestro" "c:/Users/LOQ/.claude/settings.json" | head -30
+
+OUT
+=== maestro refs in global settings.json ===
+38:            "command": "maestro hooks run spec-injector"
+47:            "command": "maestro hooks run preflight-guard"
+56:            "command": "maestro hooks run spec-validator"
+67:            "command": "maestro hooks run delegate-monitor"
+76:            "command": "maestro hooks run search-cache-invalidator"
+86:            "command": "maestro hooks run team-monitor"
+94:            "command": "maestro hooks run telemetry"
+102:            "command": "maestro hooks run coordinator-tracker"
+113:            "command": "maestro hooks run session-context"
+122:            "command": "maestro hooks run kg-auto-init"
+131:            "command": "maestro hooks run search-daemon-start"
+141:            "command": "maestro hooks run skill-context"
+149:            "command": "maestro hooks run keyword-spec-injector"
+157:            "command": "maestro hooks run kg-sync"
+165:    "command": "maestro-statusline"
+Bash Check Resume project workflow dir and running daemon
+IN
+echo "=== Resume/.workflow ===" && find "c:/Users/LOQ/Desktop/Projects/Resume/.workflow" -maxdepth 1 2>/dev/null | head -20; echo "=== search daemon ===" && cat "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai/.workflow/search-daemon.json" 2>&1
+
+OUT
+=== Resume/.workflow ===
+c:/Users/LOQ/Desktop/Projects/Resume/.workflow
+c:/Users/LOQ/Desktop/Projects/Resume/.workflow/embedding-index.bin
+c:/Users/LOQ/Desktop/Projects/Resume/.workflow/embedding.zvec
+c:/Users/LOQ/Desktop/Projects/Resume/.workflow/embedding.zvec.meta.json
+c:/Users/LOQ/Desktop/Projects/Resume/.workflow/search-cache.json
+c:/Users/LOQ/Desktop/Projects/Resume/.workflow/search-daemon.json
+c:/Users/LOQ/Desktop/Projects/Resume/.workflow/wiki-index.json
+=== search daemon ===
+{"pid":39464,"port":64639,"startedAt":"2026-08-04T07:16:15.135Z"}
+Found the blocker before changing anything — and it's a hard one.
+
+uv can't do this. maestro-flow is an npm package (Node.js), installed at C:\Users\LOQ\AppData\Roaming\npm\node_modules\maestro-flow@0.5.61. uv manages Python packages from PyPI; it has no mechanism for npm packages, and there's no maestro-flow on PyPI. This repo's .venv is also a bare venv — no pyproject.toml, no uv.lock — so it isn't even a uv project yet. The repo-local equivalent is a local npm install, not uv.
+
+Two more things I found that change the shape of the fix:
+
+1. What actually makes maestro "global" is 14 hooks, not the binary. C:\Users\LOQ\.claude\settings.json runs maestro hooks run … on 14 triggers plus maestro-statusline, in every project you open. If maestro leaves the global PATH, all 14 break everywhere with command-not-found.
+
+2. Those hooks are what created .workflow/ here. It appeared during this session — my maestro search call plus the kg-auto-init / search-daemon-start hooks. It holds only search/embedding cache (no specs or knowhow), it's untracked, and there's a daemon live on PID 39464. The sibling Resume project has an identical cache-only .workflow/ for the same reason — you never deliberately installed maestro into either repo; the global hooks scatter it.
+
+So "only in this repo" splits into two independent decisions: where the binary lives, and where the hooks run. The hooks are the part you're actually feeling.
+
+AskUserQuestion
+OUT
+Your questions have been answered: "Which scope do you want for maestro? (uv is off the table — npm only.)"="Local npm + move hooks here (Recommended)", "Your global CLAUDE.md @-imports ~/.maestro/cli-tools.json and ~/.maestro/workflows/delegate-usage.md, so those load in every project. Keep or move?"="Leave ~/.maestro alone (Recommended)". You can now continue with these answers in mind.
+Executing: local npm install here, hooks migrated to this repo, ~/.maestro/ untouched.
+
+Update Todos
+
+Back up global ~/.claude/settings.json
+
+Install maestro-flow@0.5.61 locally in this repo
+
+Create Bhai-To-Bhai/.claude/settings.json with the 14 hooks + statusline
+
+Strip maestro hooks + statusline from global settings.json
+
+Uninstall global maestro-flow
+
+Stop orphaned search daemon (PID 39464)
+
+Add .gitignore for node_modules/ and .workflow/
+
+Verify local maestro runs and global is gone
+Bash Back up global settings.json
+IN
+cp "c:/Users/LOQ/.claude/settings.json" "c:/Users/LOQ/.claude/settings.json.bak-20260804" && echo "backed up to settings.json.bak-20260804" && wc -l "c:/Users/LOQ/.claude/settings.json"
+
+OUT
+backed up to settings.json.bak-20260804
+170 c:/Users/LOQ/.claude/settings.json
+Read c:\Users\LOQ\.claude\settings.json
+Bash Install maestro-flow locally and check bin entries
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && npm init -y >/dev/null 2>&1 && npm install maestro-flow@0.5.61 2>&1 | tail -15 && echo "=== bin entries ===" && ls node_modules/.bin/ | grep -i maestro
+
+OUT
+3 high severity vulnerabilities
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+npm warn install-scripts 5 packages have install scripts not yet covered by allowScripts:
+npm warn install-scripts   @zvec/zvec@0.5.0 (install: node scripts/install.js)
+npm warn install-scripts   argon2@0.44.0 (install: cross-env ZERO_AR_DATE=1 node-gyp-build)
+npm warn install-scripts   onnxruntime-node@1.21.0 (postinstall: node ./script/install)
+npm warn install-scripts   sharp@0.34.5 (install: node install/check.js || npm run build)
+npm warn install-scripts   protobufjs@7.6.5 (postinstall: node scripts/postinstall)
+npm warn install-scripts
+npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+=== bin entries ===
+maestro
+maestro-context-monitor
+maestro-context-monitor.cmd
+maestro-context-monitor.ps1
+maestro-mcp
+maestro-mcp.cmd
+maestro-mcp.ps1
+maestro-statusline
+maestro-statusline.cmd
+maestro-statusline.ps1
+maestro.cmd
+maestro.ps1
+Installed, but npm skipped 5 native install scripts. Let me verify the local binary actually works before removing the global one.
+
+Bash Test local maestro binary and hooks
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && echo "=== version ===" && ./node_modules/.bin/maestro --version 2>&1 | head -5 && echo "=== hooks run (real hook) ===" && (echo '{}' | ./node_modules/.bin/maestro hooks run session-context 2>&1 | head -10) && echo "exit=$?" && echo "=== statusline ===" && (echo '{}' | ./node_modules/.bin/maestro-statusline 2>&1 | head -3)
+
+OUT
+=== version ===
+0.5.61
+=== hooks run (real hook) ===
+exit=0
+=== statusline ===
+✎ Claude | ■ Bhai-To-Bhai  ⎇ main
+Bash Test local maestro search and delegate subsystems
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && echo "=== search (embedding path) ===" && (./node_modules/.bin/maestro search "handoff" --json 2>&1 | head -12) && echo "=== delegate show ===" && (./node_modules/.bin/maestro delegate show 2>&1 | head -6)
+
+OUT
+=== search (embedding path) ===
+{
+  "query": "handoff",
+  "wikiCount": 0,
+  "codeCount": 0,
+  "codeIndex": "not-initialized",
+  "codeIndexHint": "code index not initialized — run \"maestro kg init\" to enable code search (hooks keep it synced afterwards)",
+  "typeCounts": {},
+  "count": 0,
+  "results": []
+}
+=== delegate show ===
+No recent executions.
+Local maestro is fully functional. Now migrating the hooks.
+
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\.claude\settings.json
+139 lines
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run spec-injector"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Write|Edit|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run preflight-guard"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run spec-validator"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run delegate-monitor"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run search-cache-invalidator"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run team-monitor"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run telemetry"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run coordinator-tracker"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run session-context"
+          }
+        ]
+      },
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run kg-auto-init"
+          }
+        ]
+      },
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run search-daemon-start"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run skill-context"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run keyword-spec-injector"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run kg-sync"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro-statusline\""
+  }
+}
+Bash Simulate hook commands with CLAUDE_PROJECT_DIR and validate JSON
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && export CLAUDE_PROJECT_DIR="c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && echo "=== simulate hook command string ===" && (echo '{}' | eval "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro\" hooks run session-context" 2>&1 | head -5); echo "hook exit=$?" && echo "=== simulate statusline ===" && (echo '{}' | eval "\"$CLAUDE_PROJECT_DIR/node_modules/.bin/maestro-statusline\"" 2>&1 | head -2); echo "statusline exit=$?" && echo "=== validate JSON ===" && node -e "JSON.parse(require('fs').readFileSync('.claude/settings.json','utf8')); console.log('project settings.json OK')"
+
+OUT
+=== simulate hook command string ===
+hook exit=0
+=== simulate statusline ===
+✎ Claude | ■ Bhai-To-Bhai  ⎇ mainstatusline exit=0
+=== validate JSON ===
+project settings.json OK
+Hooks resolve correctly. Now stripping maestro from the global settings.
+
+Bash Remove maestro hooks and statusLine from global settings
+IN
+cd "c:/Users/LOQ/.claude" && node -e "
+const fs=require('fs');
+const p='settings.json';
+const o=JSON.parse(fs.readFileSync(p,'utf8'));
+const hadHooks='hooks' in o, hadSL='statusLine' in o;
+delete o.hooks; delete o.statusLine;
+fs.writeFileSync(p, JSON.stringify(o,null,2)+'\n','utf8');
+console.log('removed hooks:',hadHooks,'| removed statusLine:',hadSL);
+console.log('remaining keys:',Object.keys(o).join(', '));
+"
+
+OUT
+removed hooks: true | removed statusLine: true
+remaining keys: permissions, model, effortLevel, autoUpdatesChannel, theme
+Shell cwd was reset to c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai
+Update Todos
+
+Back up global ~/.claude/settings.json
+
+Install maestro-flow@0.5.61 locally in this repo
+
+Create Bhai-To-Bhai/.claude/settings.json with the 14 hooks + statusline
+
+Strip maestro hooks + statusline from global settings.json
+
+Stop orphaned search daemon (PID 39464)
+
+Uninstall global maestro-flow
+
+Add .gitignore for node_modules/ and .workflow/
+
+Verify local maestro runs and global is gone
+Bash Stop the running search daemon
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && echo "=== stop daemon via local binary ===" && (./node_modules/.bin/maestro search-daemon stop 2>&1 | head -5); echo "=== PID 39464 still alive? ===" && (powershell -NoProfile -Command "if (Get-Process -Id 39464 -ErrorAction SilentlyContinue) { 'ALIVE' } else { 'gone' }" 2>&1 | tail -1)
+
+OUT
+=== stop daemon via local binary ===
+Search daemon stopped.
+=== PID 39464 still alive? ===
+gone
+Bash Uninstall global maestro-flow
+IN
+npm uninstall -g maestro-flow 2>&1 | tail -5; echo "=== global list now ===" && npm ls -g --depth=0 2>&1 | head -10; echo "=== maestro on PATH? ===" && (command -v maestro >/dev/null 2>&1 && echo "STILL ON PATH: $(command -v maestro)" || echo "not on PATH (expected)")
+
+OUT
+npm warn cleanup     }
+npm warn cleanup   ]
+npm warn cleanup ]
+
+removed 279 packages in 2s
+=== global list now ===
+C:\Users\LOQ\AppData\Roaming\npm
++-- @openai/codex@0.146.0
+`-- npm@11.19.0
+
+=== maestro on PATH? ===
+not on PATH (expected)
+Bash Check for leftover global shims and confirm ~/.maestro intact
+IN
+echo "=== leftover shims in npm global bin ===" && (ls "c:/Users/LOQ/AppData/Roaming/npm" | grep -i maestro || echo "  none - clean"); echo "=== ~/.maestro preserved? ===" && (ls "c:/Users/LOQ/.maestro/cli-tools.json" "c:/Users/LOQ/.maestro/workflows/delegate-usage.md" 2>&1)
+
+OUT
+=== leftover shims in npm global bin ===
+  none - clean
+=== ~/.maestro preserved? ===
+c:/Users/LOQ/.maestro/cli-tools.json
+c:/Users/LOQ/.maestro/workflows/delegate-usage.md
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\.gitignore
+Write failed
+# Node — maestro-flow is installed repo-locally (see README / Build-Guide Stage 0)
+node_modules/
+
+# Maestro runtime state: search cache, embedding index, daemon lockfile.
+# Regenerated automatically; not shared between machines.
+.workflow/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Environment
+.env
+Read c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\.gitignore
+Write c:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\.gitignore
+16 lines
+# Node — maestro-flow is installed repo-locally (see docs/Build-Guide.md, Stage 0)
+node_modules/
+
+# Maestro runtime state: search cache, embedding index, daemon lockfile.
+# Regenerated automatically; not shared between machines.
+.workflow/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Environment
+.env
+Bash Final verification of the migration
+IN
+cd "c:/Users/LOQ/Desktop/Projects/Bhai-To-Bhai" && echo "=== local maestro works ===" && ./node_modules/.bin/maestro --version && echo "=== global gone ===" && (command -v maestro >/dev/null 2>&1 && echo FAIL || echo "confirmed absent") && echo "=== global settings.json valid + maestro-free ===" && node -e "
+const o=JSON.parse(require('fs').readFileSync('c:/Users/LOQ/.claude/settings.json','utf8'));
+console.log('keys:',Object.keys(o).join(', '));
+console.log('contains maestro:', JSON.stringify(o).includes('maestro'));
+" && echo "=== git status ===" && git status --short
+
+OUT
+=== local maestro works ===
+0.5.61
+=== global gone ===
+confirmed absent
+=== global settings.json valid + maestro-free ===
+keys: permissions, model, effortLevel, autoUpdatesChannel, theme
+contains maestro: false
+=== git status ===
+?? .claude/
+?? .gitignore
+?? docs/Build-Guide.md
+?? "maestro-flow documentation/"
+?? package-lock.json
+?? package.json
+Update Todos
+
+Back up global ~/.claude/settings.json
+
+Install maestro-flow@0.5.61 locally in this repo
+
+Create Bhai-To-Bhai/.claude/settings.json with the 14 hooks + statusline
+
+Strip maestro hooks + statusline from global settings.json
+
+Stop orphaned search daemon (PID 39464)
+
+Uninstall global maestro-flow
+
+Add .gitignore for node_modules/ and .workflow/
+
+Verify local maestro runs and global is gone
+Done. Maestro now exists and runs only in this repo.
+
+What changed
+Before	After
+Package	global npm at AppData\Roaming\npm	package.json → node_modules/maestro-flow@0.5.61
+14 hooks + statusline	~/.claude/settings.json (ran in every project)	.claude/settings.json (this repo only)
+maestro on PATH	yes	no — invoke as ./node_modules/.bin/maestro
+~/.maestro/	—	untouched, as you chose
+Verified after the change: local binary reports 0.5.61; maestro is absent from PATH; global settings.json parses clean and contains zero maestro references (permissions, model, effortLevel, autoUpdatesChannel, theme all preserved); @openai/codex@0.146.0 left alone since ADR-004 needs it.
+
+I sequenced it so the replacement was proven before the original was removed — tested --version, a real hook (hooks run session-context, exit 0), the statusline, search, and delegate show on the local binary first, then simulated the exact $CLAUDE_PROJECT_DIR command strings from the new settings file to confirm they resolve. Only then did I uninstall the global package. Backup at ~/.claude/settings.json.bak-20260804.
+
+Also: stopped the orphaned search daemon (PID 39464, confirmed gone), and .gitignore now covers node_modules/ and .workflow/ — git status is back to just your real untracked files.
+
+Three things to know
+The hooks take effect on your next Claude Code session. Settings are read at startup, so this session is still running the old global config in memory. Nothing to do — just be aware the switch isn't live yet.
+
+npm skipped 5 native install scripts — onnxruntime-node, @zvec/zvec, argon2, sharp, protobufjs. npm 11 gates these behind allowScripts now. Core maestro is unaffected (I tested search, hooks, delegate, statusline), but embeddings fall back to BM25-only, exactly as search-system-guide.md describes. If you want semantic search later: npm install-scripts approve onnxruntime-node then reinstall.
+
+The Resume sibling has a now-orphaned .workflow/ cache dir. It only ever held search cache from the global hooks, and with those gone nothing will recreate or read it. I left it alone — sibling projects are read-only per your CLAUDE.md. Delete it yourself whenever, or say the word and I'll ask for access.
+
+One note on the original request: uv genuinely can't be part of this. maestro-flow is npm-only, and this repo's .venv has no pyproject.toml or uv.lock — it's a bare venv, not a uv project. If you want the Python side properly uv-managed for the Stage 0 work in the build guide (preflight.py, pymongo, pydantic), that's a separate uv init I can do next.
+
+
+2:23 PM
+Help me build this project. I have no clue how to create a Multi-Agent System. I have created Memora but it was a single agent RAG. I am using maestro-flow for this. But give me a good youtube video that I can use to learn and implement this multi-agent system
+Worked for 4m 1s
+Best video for you
+
+Watch Multi-Agent Systems – A Complete Guide with Hands-On Using LangGraph by AI Bites.
+
+It is a 52-minute practical tutorial that covers:
+
+Why a single agent becomes insufficient
+Supervisor, hierarchical, network, and team structures
+Agent specialization
+Routing work to different agents
+Passing state during handoffs
+Building and testing a complete hierarchical workflow
+
+The coding starts around 8:00. Its hierarchical supervisor design closely resembles your planner → implementer → reviewer → fixer pipeline. The course outline confirms the full hands-on structure.
+
+One caution: the tutorial uses some older LangGraph APIs. Learn the architecture from it, but use current APIs such as create_agent when writing new code; the current official LangChain multi-agent tutorial reflects that newer API.
+
+For a shorter official explanation afterward, watch Hierarchical Multi-Agent Systems with LangGraph by LangChain.
+
+How it maps to your project
+Video concept	Your implementation
+Supervisor	Agent Router / Coordinator
+Research or writing agents	Claude Code, Codex, Gemini CLI, OpenCode
+Agent tool call	maestro delegate invocation
+Handoff	Reconstructed context packet
+Graph state	MongoDB canonical task state
+Agent output	Commits, diffs, events and structured results
+Workflow routing	planner → implementer → reviewer → fixer
+Completion	Deterministic tests, lint, types and security checks
+Retry	Fix loop or switch to another coding agent
+
+The major difference is that the video creates several LLM agents inside one Python application. Your agents already exist as separate CLI programs. Therefore, you are building an orchestrator around external processes—not building each agent from scratch.
+
+Maestro Flow should provide the execution and delegation mechanisms:
+
+maestro delegate "Create an implementation plan" --to claude
+maestro delegate "Implement the approved plan" --to codex
+maestro delegate "Review the implementation" --to gemini
+
+Your custom code must decide:
+
+Which agent receives each stage.
+What context it receives.
+What state is persisted.
+Whether an agent has failed or exhausted its allowance.
+Which agent should continue after failure.
+Whether deterministic verification passed.
+When the workflow is genuinely complete.
+
+That division agrees with Maestro Flow’s current positioning: it supplies Ralph, sessions, delegation and Delegate/Team/Wave/Swarm patterns. Your project adds the durable routing, failover and verification policies around them. Official Maestro Flow repository.
+
+What you should build first
+
+Do not begin with all four roles, parallel agents, LangGraph, MongoDB, Phoenix and Docker simultaneously. Build one narrow vertical slice:
+
+Task
+  → Claude creates plan
+  → Codex starts implementation
+  → forced/artificial limit failure
+  → state and Git diff are persisted
+  → Gemini or Claude continues the partial work
+  → test command executes
+  → audit log shows the complete handoff
+
+For this first version, use a small hand-written Python state machine around maestro delegate. Keep LangGraph deferred because Maestro already supplies a run/step lifecycle; add LangGraph later only if Maestro cannot express the routing and recovery behavior you need. LangGraph’s custom workflows are most useful when you need explicit deterministic branches, loops and parallel execution. Official custom-workflow documentation.
+
+Your existing 
+16-Architecture.md and 
+14-Decisions.md already describe the right target. The missing piece is now the small executable v0 above.
+
+Also avoid videos titled “UiPath Maestro” or “Maestro AI Command Center”—those concern different products, not catlog22/maestro-flow.
+
+The best next step is to build the v0 project structure with the task-state schema, Maestro adapter, two-agent routing loop, failure detector and deterministic check runner.
+
+
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial> python .\research_builder.py
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial\research_builder.py", line4, in <module>
+    from langgraph.graph import MessagesState, START, END, GraphState
+ImportError: cannot import name 'GraphState' from 'langgraph.graph' (C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial.venv\Lib\site-packages\langgraph\graph_init_.py)
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial>                             
+
+Tuesday 7:22 PM
+GraphState is not provided by LangGraph. It must be defined by you.
+Change:
+from langgraph.graph import MessagesState, START, END, GraphState
+to:
+from langgraph.graph import MessagesState, START, END
+Then either use MessagesState directly:
+builder = StateGraph(MessagesState)
+or define your own:
+class GraphState(MessagesState):
+    pass
+If you already defined State in state.py, import it:
+from state import State
+
+builder = StateGraph(State)
+
+
+Tuesday 7:22 PM
+
+
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial> python .\research_builder.py
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial\research_builder.py", line4, in <module>
+    from langgraph.graph import MessagesState, START, END, GraphState
+ImportError: cannot import name 'GraphState' from 'langgraph.graph' (C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial.venv\Lib\site-packages\langgraph\graph_init_.py)
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial>                             
+Tuesday 7:23 PM
+Your file still imports GraphState. You probably meant StateGraph—the words are reversed.
+Replace line 4 with:
+from langgraph.graph import MessagesState, StateGraph, START, END
+Then save the file and rerun:
+python .\research_builder.py
+StateGraph is LangGraph’s graph builder.
+GraphState is not a built-in LangGraph class.
+
+
+Tuesday 7:24 PM
+
+
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial> python .\research_builder.py
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial\research_builder.py", line7, in <module>
+    research_builder.add_node("supervisor", research_supervisor_node)
+  File "C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial.venv\Lib\site-packages\langgraph\graph\state.py", line 791, in add_node
+    raise RuntimeError
+RuntimeError
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial> 
+Tuesday 7:25 PM
+Worked for 28s
+
+
+
+research_supervisor_node is None because make_supervisor_node() defines supervisor() but never returns it.
+Add this at the end of make_supervisor_node() in state.py:
+def make_supervisor_node(llm, members: List[str]):
+    # ...
+
+    def supervisor(state: State):
+        # ...
+        if goto == "FINISH":
+            return Command(goto=END)
+
+        return Command(goto=goto, update={"next": goto})
+
+    return supervisor  # missing
+Also change this in research_builder.py:
+research_graph = research_builder.build()
+to:
+research_graph = research_builder.compile()
+The immediate RuntimeError occurs because this effectively passes None:
+research_builder.add_node("supervisor", None)
+
+
+Tuesday 7:25 PM
+
+
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial> python .\research_builder.py
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial\research_builder.py", line12, in <module>
+    research_graph = research_builder.compile()
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial.venv\Lib\site-packages\langgraph\graph\state.py", line 1248, in compile
+    self.validate(
+  File "C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial.venv\Lib\site-packages\langgraph\graph\state.py", line 1155, in validate
+    raise ValueError(f"Found edge ending at unknown node {target}")
+ValueError: Found edge ending at unknown node *end*
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial> 
+
+
+
+
+Show more
+
+Tuesday 7:29 PM
+Worked for 16s
+
+
+
+The end-node value is misspelled:
+'_end_'  # wrong
+END      # correct; value is "__end__"
+Update state.py:
+def make_supervisor_node(llm, members: List[str]):
+    # ...
+
+    def supervisor(state: State) -> Command[Literal[*members, END]]:
+        # ...
+
+        if goto == "FINISH":
+            return Command(goto=END)
+
+        return Command(
+            goto=goto,
+            update={"next": goto},
+        )
+
+    return supervisor
+Two important corrections:
+Command[Literal[*members, END]]
+return Command(goto=END)
+LangGraph was treating "_end_" as the name of a regular node, but no such node exists.
+
+
+Tuesday 7:29 PM
+
+
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial> uv pip install mermaid
+  × No solution found when resolving dependencies:
+  ╰─▶ Because only mermaid==0.3.2 is available and mermaid==0.3.2 has invalid metadata,
+      we can conclude that all versions of mermaid cannot be used.
+      And because you require mermaid, we can conclude that your requirements are
+      unsatisfiable.
+  hint: Metadata for `mermaid` (v0.3.2) could not be parsed:
+    after parsing `1.7`, found `torchvision`, which is not part of a valid version
+    torch (>=1.7torchvision)
+           ^^^^^^^^^^^^^^^^
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial> 
+
+
+
+
+Show more
+
+Tuesday 7:34 PM
+You installed the wrong package. LangGraph does not require the Python package named mermaid.
+To print Mermaid diagram code:
+print(research_graph.get_graph().draw_mermaid())
+To generate an image:
+research_graph.get_graph().draw_mermaid_png(
+    output_file_path="research_graph.png"
+)
+So remove this command from your setup:
+uv pip install mermaid
+If you specifically need the Mermaid CLI, it is an npm package:
+npx @mermaid-js/mermaid-cli --help
+
+
+Tuesday 7:34 PM
+
+
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial> python .\research_builder.py
+Traceback (most recent call last):
+  File "C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial\research_builder.py", line5, in <module>
+    import Path
+ModuleNotFoundError: No module named 'Path'
+(.venv) PS C:\Users\LOQ\Desktop\Projects\Bhai-To-Bhai\yt-tutorial> 
+Tuesday 7:35 PM
+Path is a class inside Python’s built-in pathlib module.
+Replace:
+import Path
+with:
+from pathlib import Path
+Example for saving the graph image:
+png_data = research_graph.get_graph().draw_mermaid_png()
+Path("research_graph.png").write_bytes(png_data)
+No package installation is needed.
+
+
+Tuesday 7:35 PM

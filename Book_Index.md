@@ -1,6 +1,8 @@
 # Self-Learning Agentic RAG System
 ### A Step-by-Step Guide to Learn and Create
 
+*Scope note: the book teaches two things built by the same hands-on, evidence-first methodology — an agentic, self-learning RAG system (Parts I–VII, the `Memora` codebase) and multi-agent orchestration of coding-agent CLIs (Part VIII, the `Bhai-To-Bhai` codebase). "Agentic" in the title covers both: agents that decide their own retrieval, and agents that coordinate other agents.*
+
 ---
 
 ## Table of Contents
@@ -623,30 +625,126 @@
 41B.10 The PDF-only loader caveat — why `ENABLE_MARKER_LOADER=True` silently drops non-PDF files from a mixed corpus, and when to fall back to the Unstructured loader or a two-pass ingestion
 41B.11 What stayed constant — `app/ingest.py` and the LangChain pipeline are untouched; this entire subsystem is scoped to `app_workflow/`
 
-### Chapter 42 — Advanced Topics and Extensions
-42.1 Multi-modal RAG — images, tables, audio
-42.2 GraphRAG — knowledge graphs as the retrieval substrate
-42.3 Multi-agent systems — planner, researcher, critic — see the in-progress `Bhai-To-Bhai` orchestration platform (Appendix A, C.5, K.5) for a real multi-agent-CLI-coordination design still in its requirements/tool-survey phase
-42.4 Long-term user memory vs shared organization memory
-42.5 Fine-tuning a small model on your distilled dataset — and what the *Continual Harness* framework adds on top of a static distillation pass
-42.6 Moving from memory injection to true weight-level learning — the SEAL framework (Zweiger et al., NeurIPS 2025): self-edits, ReSTEM, LoRA-based inner loop, and the catastrophic-forgetting caveat
-42.7 Self-RAG and reflection-token approaches
-42.8 Semantic / fuzzy matching for thumbdown lookup (beyond normalized exact match)
-42.9 Process Reward Models for agents — what *ToolPRMBench* measures and how it would apply to the retrieve/compress/draft/judge phases
-42.10 Where our memory-injection loop stops and weight-level self-adaptation begins — an honest map of the gap
+## **PART VIII — MULTI-AGENT ORCHESTRATION: COORDINATING CODING-AGENT CLIS**
 
-### Chapter 43 — The Finished Project — Recap and Roadmap
-43.1 What you built, file by file
-43.2 Architecture diagram of the complete system (`rag_graph.png` — the rendered LangGraph)
-43.3 The three failure-memory mechanisms working together (`failed_variants`, `user_thumbdowns`, `learned_qa`)
-43.4 Documentation discipline — one `docs/` folder per codebase, each holding the same five ledgers (`Architecture.md`, `Status.md`, `Decisions.md`, `Bugs.md`, `Research.md`), and keeping every set in sync with its own code
-43.5 Architecture Decision Records (ADRs) — the `Decisions.md` ledger, how to write a new one, and why each codebase numbers its ADRs independently, so IDs must always be cited qualified ("*Memora* ADR-005", never a bare "ADR-005") — see Appendix K
-43.6 The structured bug catalogue — `Bugs.md` with `BUG-XXX` IDs, severity, root cause, and status, replicated per codebase with its own independent numbering — see Appendix C
-43.7 The chronological status log — `Status.md` as a write-once-per-week development diary
-43.8 Known limitations and honest tradeoffs
-43.9 Ten enhancement ideas, ranked by effort
-43.10 Turning the project into a portfolio piece
-43.11 Talking about this system in an interview
+*This Part switches codebases, from `Memora` (single-agent RAG) to `Bhai-To-Bhai` — a LangGraph controller that coordinates existing coding-agent CLIs (Claude Code, Codex) through a six-stage requirements → plan → parallel-code → merge → review → supervise pipeline over a real external Git repository. Same five-ledger discipline (Appendix C.5, K.5), same evidence-over-self-report philosophy as Memora's judge/validator layer — applied to agents that are now other agents, not tool calls.*
+
+### Chapter 42 — Why Multi-Agent Orchestration Is a Different Problem
+42.1 From one reasoning loop to coordinating independent coding-agent CLIs — what actually changes
+42.2 The 35-item requirements checklist — multi-CLI support, dynamic per-stage agent selection, mid-task switching, canonical cross-agent task context, native session resumption, deterministic (non-LLM-judge) completion checks
+42.3 Surveying the field — ten existing orchestration frameworks (Maestro Orchestrate, Claw Orchestrator, Codex Orchestrator, The Pair, Sandbox Agent, AgentOS, Agent Orchestrator, claude-codex-gemini, Session Orchestrator, CLI Continues) and why none fully satisfied the checklist
+42.4 Command Code and OpenHands Agent Canvas — the closest fits, and their shared gap: no dynamic cross-agent routing, no deterministic completion checks
+42.5 The judgment-vs-mechanics split — the design principle that survives every later revision (models choose task boundaries, dependencies, code, verdicts; code derives schedules, applies bounds, and observes Git)
+42.6 Treating agent reports as claims and Git/filesystem observations as evidence — the thesis stated before a line of pipeline code existed
+
+### Chapter 43 — Learning Multi-Agent Primitives First: The Disposable LangGraph Sandbox
+43.1 Why five weeks of architecture documents weren't enough — prior hands-on agent experience was single-agent (Memora), not multi-agent
+43.2 The `yt_tutorial/` sandbox — deliberately disposable, tracked in git, firewalled from `orchestrator/`, on its own virtualenv
+43.3 The hierarchical-supervisor pattern — a research team and a writing team under one top-level router, built from a tutorial walkthrough
+43.4 `make_supervisor_node` and `Command(goto=..., update=...)` — the routing primitive every later adapter rehearses
+43.5 Tutorial-vs-installed API drift — six errors from one root cause (`GraphState` → `StateGraph`, `create_react_agent` → `create_agent`, hand-written `'_end_'` vs the exported `END` constant)
+43.6 The silent no-op — an unknown LangGraph state key is dropped, not rejected, while an unknown edge target fails to compile; a `next` key never in the schema made `update={"next": goto}` a no-op that ran for a full session unnoticed
+43.7 The bug that mattered most — a clean run, no exceptions, `FINISH`, zero documents produced, and why every self-reported completion signal agreed and was wrong
+43.8 Termination as a structural property, not a promptable one — a grammar-constrained small model that cannot stop calling tools while any tool is attached, and why an explicit `finish_work` tool still lost to `write_document`
+43.9 Bounding the loop in code — `ToolCallLimitMiddleware`, `MAX_WORKER_REPORTS`, and why the middleware's terminal stub had to stop masquerading as a worker's report
+43.10 Driving real coding-agent CLIs from code for the first time — a second implementation of every node on the Claude Code CLI, selected by one config flag, with the graph, state, and report format held fixed for direct comparison
+43.11 Exposing project tools to Claude Code over MCP — the async tool-attach race that let a worker plan and report on a turn it had zero tools for
+43.12 Two vendor CLIs running concurrently — Windows-specific subprocess lessons (stdin-only prompt delivery, BOM-prefixed output files, `.cmd`-shim argument re-parsing, reading the last `ERROR:` line instead of the first)
+43.13 The deletion clause that keeps not firing — when a "disposable" sandbox has earned the right to stay, and how to say so honestly in the ledger
+
+### Chapter 44 — Choosing an Orchestration Substrate
+44.1 The execution-layer question — Claw Orchestrator vs. OpenHands Agent Canvas, and why neither reduces the project's own core custom work
+44.2 A blocked hands-on trial as data — treating an untested tool as still-open rather than assumed-fine
+44.3 Maestro-flow and Flow-next — the two frameworks that already solved mid-task delegation to a *different* coding-agent CLI
+44.4 Choosing Maestro — a general delegation primitive over a fixed review pipeline, and why Flow-next remained the documented fallback
+44.5 What Maestro doesn't solve — its decision gates are post-execution only, so a pre-execution checkpoint still has to be hand-assembled, and its own completion signals stay subordinate to this project's deterministic exit-code checks
+44.6 Scoping a delegation tool repo-locally — moving 14 global Claude Code hooks and a statusline into project-scoped `.claude/settings.json`, and why "where the binary lives" and "where the hooks run" are independent decisions
+
+### Chapter 45 — Designing the Six-Stage Pipeline
+45.1 requirements → planner → wave orchestrator → merger → reviewer → supervisor, as one compiled LangGraph state machine
+45.2 The `PipelineState` checkpoint record and its two reducer types — append-only `events`, and a keyed upsert on `(wave, attempt)` for `wave_results`
+45.3 Two bounded feedback loops — reviewer rework (per wave) and supervisor replan (per run) — and why only judgment stages may route the graph backward
+45.4 Optional gates as removed graph nodes, not pass-throughs — `ENABLE_REVIEWER=False` / `ENABLE_SUPERVISOR=False` change the compiled topology itself
+45.5 Semantic routing keys — routers return `rework` / `next_wave` / `done`, and one edge map translates those keys to whatever topology is actually enabled
+45.6 Recording `running` / `completed` / `bounded` / `failed` — a termination guard firing is never reported as success
+
+### Chapter 46 — Requirements Capture and Deterministic Wave Scheduling
+46.1 Why requirements survey and clarification are separate graph nodes — LangGraph re-executes an interrupted node from its first line on resume, and splitting prevents paying for a survey call twice
+46.2 Search-first, narrowly-scoped clarifying questions — asking only what the repository itself cannot answer
+46.3 `user_choices.md` — written by deterministic code from the literal questions asked and answers received, with no room for a model-invented assumption to enter
+46.4 The planner's job vs. the scheduler's job — task boundaries and dependency edges are judgment; grouping independent tasks into waves is arithmetic
+46.5 Deriving waves with Kahn's algorithm in code, rejecting dangling dependencies and cycles, rather than trusting a model-generated wave number
+
+### Chapter 47 — Parallel Coding Dispatch in Isolated Git Worktrees
+47.1 Every task in a wave branches from the same integration SHA — why parallel tasks that don't share a base aren't actually independent
+47.2 Threads, not processes — workers block on external subprocesses, so concurrency happens in the child CLIs and the GIL is released
+47.3 Two independently configurable coding slots (A/B) and stable wave-index assignment — why a reworked task must return to the same slot and session
+47.4 Filesystem evidence over self-report — a successful report with no Git-observed changes becomes `no_changes`, regardless of what the agent claims
+47.5 What a nine-task parallel stress run exposed — prompt-pasted context is not the same thing as shared durable memory, and canonical run files are invisible as files inside a task's own worktree
+
+### Chapter 48 — Merging, Review, and Bounded Rework Loops
+48.1 Sequential merge with no model call on a clean merge — an agent is invoked only for a real conflict
+48.2 Verifying a claimed conflict resolution against both a Git index check and a disk marker scan before staging
+48.3 The reviewer's evidence model — task-attributed claims plus observed files, never an unattributed vibe check
+48.4 Bounded rework — `MAX_REWORK_ROUNDS`, and resuming the same vendor session that made the original mistake
+48.5 The wave-wide rollback trade-off — rejecting one task in an attempt currently discards every task's completed integration from that attempt too, and why selective retention is a planned-not-implemented gap
+48.6 The supervisor's independent requirement-to-evidence audit after every wave is accepted — accept, request a full replan, or escalate to the user
+48.7 A live diagnosed defect the pipeline's own checks never covered — an HTML comment that broke out early and rendered raw text in the browser, approved anyway because nothing in the pipeline looked for it
+
+### Chapter 49 — The Agent Adapter Layer: One Contract, Five Backends
+49.1 `AgentRequest` / `AgentResult` and a closed, non-raising error taxonomy — a supervisor can route around a failed worker, never around a traceback
+49.2 Direct Claude Code and Codex CLI adapters — prompt transport, structured output, session telemetry, and where each vendor's final answer actually lives
+49.3 Maestro delegation as a fifth transport, alongside direct vendor CLIs and the stub
+49.4 The scripted stub adapter — deterministic, cost-free end-to-end tests that deliberately fail any unscripted tag
+49.5 Proving vendor session resume broken on both CLIs, in opposite ways, and fixing both — trading one persisted session file per dispatch for a rework loop that can actually resume the agent that made the mistake
+49.6 Deadlines that survive Windows' npm-shim process trees — why `subprocess.run(timeout=...)` only kills the wrapper, and the process-group + `taskkill /F /T` fix applied to every vendor adapter
+49.7 Scrubbing the subprocess environment once, in one place — the inherited-`PYTHONHOME` `_bz2` import failure traced to a console-script launcher crossing Python installations
+49.8 A local Ollama fallback when a vendor's weekly rate limit hits, routed through the Codex harness — and its own false-completion and fabricated-`learnings.md` failure modes, caught by evidence checks every time
+
+### Chapter 50 — Durable Artifacts, Checkpointing, and Evidence-Based Acceptance
+50.1 The orchestrator repository owns control-plane state; the target repository owns product code — and why that boundary survives an agent checkout or reset
+50.2 SQLite checkpoints keyed by run id — pausing for clarification and resuming a run with `--resume <run-id>`
+50.3 Append-only `events.jsonl` and `learnings.md`, and the OS-locked helper that lets parallel coding agents append findings without corrupting the file
+50.4 Reconstructing the handoff packet on entry from durable artifacts — never depending on an outgoing agent's exit-time summary, because the agent that most needs to hand off is the one a rate limit just killed
+50.5 Why artifacts live outside the target checkout, and what the boundary still doesn't solve — run-scoped rather than project-scoped context across separate runs of the same target
+
+### Chapter 51 — Testing a Multi-Agent Pipeline Without Paying For It
+51.1 The stub transport as a first-class backend, not a mock bolted on afterward
+51.2 197+ tests across ten files — configuration, graph wiring/toggles, CLI behavior, requirements interrupts, deterministic waves, dispatch/worktrees/reverts, merging, reviewing, supervision, terminal bounds
+51.3 What deterministic stub coverage actually proves, and what it structurally cannot — real vendor session mechanics, real rate limits, a browser-rendered defect nothing in the suite ever looked for
+51.4 Reading a live probe log — cost, latency, and a captured session id from one real Claude Code turn
+51.5 The honest gap, stated in the book's own voice — no paid six-agent end-to-end run has yet been both live and defect-free; worktree merge, rework, replan, and recovery remain primarily validated by the stub-backed suite
+
+---
+
+## **PART IX — CLOSING THE BOOK**
+
+### Chapter 52 — Advanced Topics and Extensions
+52.1 Multi-modal RAG — images, tables, audio
+52.2 GraphRAG — knowledge graphs as the retrieval substrate
+52.3 Beyond CLI-orchestrated coding agents — where Part VIII's judgment-vs-mechanics split does and doesn't generalize to other multi-agent shapes (debate, blackboard, market-based)
+52.4 Long-term user memory vs shared organization memory
+52.5 Fine-tuning a small model on your distilled dataset — and what the *Continual Harness* framework adds on top of a static distillation pass
+52.6 Moving from memory injection to true weight-level learning — the SEAL framework (Zweiger et al., NeurIPS 2025): self-edits, ReSTEM, LoRA-based inner loop, and the catastrophic-forgetting caveat
+52.7 Self-RAG and reflection-token approaches
+52.8 Semantic / fuzzy matching for thumbdown lookup (beyond normalized exact match)
+52.9 Process Reward Models for agents — what *ToolPRMBench* measures, and how the same idea applies to both Memora's retrieve/compress/draft/judge phases and Bhai-To-Bhai's plan/code/review/supervise phases
+52.10 Where our memory-injection loop stops and weight-level self-adaptation begins — an honest map of the gap
+
+### Chapter 53 — The Finished Projects — Recap and Roadmap
+53.1 What you built, file by file — both systems
+53.2 Architecture diagram of the complete Memora system (`rag_graph.png` — the rendered LangGraph)
+53.3 The three failure-memory mechanisms working together (`failed_variants`, `user_thumbdowns`, `learned_qa`)
+53.4 Architecture diagram of the complete Bhai-To-Bhai pipeline — the six-stage graph and its two bounded feedback loops
+53.5 Documentation discipline — one `docs/` folder per codebase, each holding the same five ledgers (`Architecture.md`, `Status.md`, `Decisions.md`, `Bugs.md`, `Research.md`), and keeping every set in sync with its own code, across every codebase in this project — not just Memora
+53.6 Architecture Decision Records (ADRs) — the `Decisions.md` ledger, how to write a new one, and why each codebase numbers its ADRs independently, so IDs must always be cited qualified ("*Memora* ADR-005", "*Bhai-To-Bhai* ADR-005" — never a bare "ADR-005") — see Appendix K
+53.7 The structured bug catalogue — `Bugs.md` with `BUG-XXX` IDs, severity, root cause, and status, replicated per codebase with its own independent numbering — see Appendix C
+53.8 The chronological status log — `Status.md` as a write-once-per-session development diary, and what it looks like on a project still mid-validation (Bhai-To-Bhai) versus one considered feature-complete (Memora)
+53.9 Known limitations and honest tradeoffs, per system
+53.10 What one system taught the other — the judgment-vs-mechanics split traces straight back to Memora's LLM-judge/validator layer; the evidence-over-self-report principle traces back to `check_answer_quality`'s groundedness checks
+53.11 Ten enhancement ideas, ranked by effort, per system
+53.12 Turning either project into a portfolio piece
+53.13 Talking about these systems in an interview
 
 ---
 
@@ -662,7 +760,10 @@
   - LangSmith-Masterclass observability sandbox (`langsmith-masterclass/`, see Chapter 38): `1_simple_llm_call.py`, `2_sequential_chain.py`, `3_rag_v1.py`–`3_rag_v4.py`, `4_agent.py`, `5_langgraph.py`, `llm_setup.py` — a progressive ladder of standalone demos showing how a tracing backend renders projects, traces, and runs as complexity grows from one call to a fan-out/fan-in graph
   - Utility scripts: `run_all_workflow_batches.py` (long-lived single-process 100-scenario benchmark runner)
   - Langflow learning project (`Langflow-learning-project/`, see 19.14): no custom application code — a local Langflow 1.10.2 runtime plus exported flow definitions. Started as a cyclic-`Loop`-component experiment (`flows/Basic LLM Prompting.json`, `flows/Basic Prompting.json` + its near-duplicate save, `flows/Simple Agent.json`, `flows/New Flow.json` stub, `data/langflow_cycle_test.csv`), then grew into a full phased port of the Memora RAG system (see K.4 ADR-006): `flows/1.json`–`9.json` (iterative Groq-backed self-learning RAG builds — Chat Input → Memory Base → Groq Generation/Judge/JSON-Repair → discover_files → marker_loader → split_documents → Knowledge Ingest → command/query-variant components — with flow 9 swapping Groq for a local OpenAI-compatible endpoint), `flows/LangGraph RAG Pipeline.json` (a node-for-node reconstruction of `graph.py`/`build_graph()`), and `flows/Vector Store RAG.json` (Langflow's built-in template, used as a node-shape source for the reconstruction)
-  - Bhai-To-Bhai (`Bhai-To-Bhai/`, see 42.3): no code yet — a locally-deployable orchestration platform that coordinates *existing* coding-agent CLIs (Claude Code, Codex, Gemini CLI, OpenCode/Aider) through a planner → implementer → reviewer → fixer workflow, still in its requirements/tool-survey phase (a 35-item requirements checklist evaluated against ten-plus existing orchestration frameworks; provisional target stack is Claw Orchestrator + LangGraph + MongoDB + Git worktrees + Phoenix, with OpenHands Agent Canvas kept open as an alternative execution layer)
+  - Bhai-To-Bhai (`Bhai-To-Bhai/`, see Part VIII): a six-stage LangGraph controller coordinating Claude Code, Codex, Maestro-delegated, and Ollama-fallback coding agents against an external Git repository, production-implemented with 197+ passing tests
+    - Production orchestrator (`orchestrator/`, see Chapters 45–51): `main.py`, `graph.py`, `state.py`, `routes.py`, `config.py`, `artifacts.py`, `parsing.py`, `logging_config.py`, `preflight.py`, `worktrees.py`; `requirements/` (`node.py`, `prompts.py`); `planner/` (`node.py`, `prompts.py`, `waves.py`); `wave_orchestrator/` (`node.py`, `dispatch.py`, `prompts.py`); `merger/` (`node.py`, `merge.py`, `prompts.py`); `reviewer/` (`node.py`, `prompts.py`); `supervisor/` (`node.py`, `prompts.py`); `adapters/` (`base.py`, `claude.py`, `codex.py`, `maestro.py`, `ollama.py`, `stub.py`); `tests/` (10 files: `test_foundation.py`, `test_graph.py`, `test_main.py`, `test_merger.py`, `test_planner.py`, `test_requirements.py`, `test_reverts.py`, `test_reviewer.py`, `test_supervisor.py`, `test_wave_orchestrator.py`)
+    - Learning sandbox (`yt_tutorial/`, see Chapter 43): never imported by production — `main.py`, `config.py`, `prompts.py`, `logging_config.py`; `llm/` (`clients.py`, `invoker.py`, `tgi_compat.py`); `tools/` (`documents.py`, `web.py`, `code.py`); `teams/` (`state.py`, `supervisor.py`, `research.py`, `writing.py`, `orchestrator.py`, `visualization.py`); `claude_agents/` (the Claude-Code-CLI second implementation of every node, plus `cli.py`, `mcp_bridge.py`, `router.py`, `prompts.py`); `temp_agents/` (the tiny concurrent-Claude/Codex demo)
+    - `docs/` ledger (see Appendix C.5, K.5): `Architecture.md`, `Decisions.md` (ADR-001–ADR-025), `Bugs.md` (BUG-001–BUG-041), `Research.md` (28+ numbered topics), `Status.md`
 - **Appendix B** — Full Annotated Dry-Run Trace (every step from question to answer for one real query, including embedding logs, compression telemetry, per-iteration context-size telemetry, the `[CTXSIZE]` greppable lines, and Phoenix + LangSmith span IDs)
 - **Appendix C** — Bug Catalogue, by codebase
   - *How to read this appendix:* every codebase in this project keeps its own `docs/Bugs.md`, and **each one numbers independently from BUG-001**. A bare "BUG-001" is therefore ambiguous — three different bugs carry that ID. Always cite them qualified: *Memora* BUG-001 vs *Document-Loaders* BUG-001 vs *LangSmith-Masterclass* BUG-001.
@@ -681,12 +782,18 @@
   - **C.4 — Langflow-learning-project** (the visual-builder cyclic-execution experiment and Memora port; 19.14)
     - BUG-001 – BUG-005: Docker unable to pull the Langflow image (`lookup auth.docker.io: no such host`), the container exiting on startup without superuser credentials set, `uv venv` failing under Python 3.14, `uv install langflow` failing on an unrecognized subcommand, and `litellm==1.93.0` (pulled by `langflow==1.11.0`) failing to build on Windows for lack of `link.exe`
     - BUG-006 – BUG-011 (from the Memora-port phase): a live Groq API key committed in plaintext across generated flow exports, a fresh import failing Playground pre-flight ("is missing Knowledge" / "is missing Memory Base"), Hugging Face Inference API embeddings hitting SSRF-blocked DNS resolution, an embeddings node with a required-but-empty API key aborting the run before any Chat Output builds, `generate_draft` never running so every query silently fell through to `no_context_answer`, and a local MiniLM label not matching the actual component implementation
-  - **C.5 — Bhai-To-Bhai** (the multi-agent CLI-orchestration platform; 42.3)
-    - No bugs recorded yet — the project is still in the requirements/research phase (see K.5); nothing has been implemented, so nothing has broken
+  - **C.5 — Bhai-To-Bhai** (the multi-agent CLI-orchestration platform; Part VIII) — BUG-001 through BUG-041, spanning the `yt_tutorial/` sandbox and the production `orchestrator/`
+    - Environment / execution-layer bugs (#1–#3): the blocked OpenHands trial (`litellm.InternalServerError` with no isolable cause), a PATH-resolution failure after installing Claude Code, and the preflight's Maestro probe breaking the day Maestro moved from a global to a repo-local install
+    - Sandbox API-drift and routing bugs (#4–#6a): tutorial code written against a pre-1.x LangGraph/LangChain API surface, an `LLMResult` treated as subscriptable, a `next` state key absent from the schema silently no-opping every supervisor routing update, and both halves of the reactive/proactive rate-limit ledger going dark against a `ChatOpenAI`-fronted local endpoint with no log line marking the degradation
+    - TGI wire-format and termination bugs (#7–#13): four inbound protocol deviations plus one outbound (`content: null` → HTTP 500) fixed with a transport-level shim rather than per-call-site patches; `json_schema` structured output returning 500 while `function_calling` works; a grammar-constrained 8B model structurally unable to emit a no-tool-call turn while any tool is attached; a tool-call-limit guard whose terminal stub was misread by the supervisor as a worker's real report; and a supervisor `scope` instruction the router ignored outright, fixed only by a structural repeat cap
+    - The reference bug of the whole project (#10, #15): a sandbox-escaping path bug that was also a rewrite-loop fixed point, and a complete pipeline run that exited 0, decided `FINISH`, and produced no document while every self-reported completion signal claimed success
+    - Tool-layer and infra bugs (#11–#14): a Python REPL tool whose own broad `except` had silently converted a `NameError` into "working" output, Windows cp1252 crashes on em-dash output, file tools that killed an entire run on one hallucinated filename, and a ported logging module that had never once executed until it raised `NameError` on two undefined handler variables
+    - Claude-Code-CLI-adapter bugs (#16–#25): a grammar-constrained repetition loop inside a tool argument burning two minutes of billed generation; two timeouts that structurally could not fire (`LLM_RESPONSE_TIMEOUT_SECONDS` as a per-read timeout against a server holding the socket open); a `ThreadPoolExecutor` context-manager `__exit__` blocking on the very shutdown a timeout existed to escape; one worker's 422 aborting a graph run that had already produced usable output; literal `\n` sequences and a note-taker's outline landing on the deliverable's own filename; an MCP bridge connected asynchronously so a worker planned its first turn against zero available tools; a chart saved into Claude Code's own session scratchpad because its system prompt out-specified the role brief; a package rename to a legal Python identifier that silently broke two runs via a stale interpreter fallback; and a feature flag whose default value contradicted its own inline comment
+    - Production-orchestrator bugs (#26–#28, #29–#41): incomplete merge-context propagation, duplicate requirements-routing logic, and successful-run worktree leakage; a Windows console-script Python-environment mismatch raising `ImportError` on `_bz2` inside a Codex subprocess; vendor session resume proven broken on both Codex (`--ephemeral` discarding the resumable rollout) and Claude Code (`--no-session-persistence` returning an unresumable session id) and fixed on both; an unborn-repository worktree-setup failure and a browser-visible HTML-comment rendering defect the reviewer's checks never covered; a Windows npm-shim process tree surviving `subprocess.run(timeout=...)` and hanging a requirements stage forever; wave-wide rework discarding a wave's already-completed integrated work; run-scoped artifacts inaccessible as shared files to parallel coding worktrees; valid coding-roster choices not accounting for live quota exhaustion; a stale `sonnet-5` model alias in the roster menu; a local Ollama model breaking the JSON-only output contract; a short-lived Ollama-via-Claude-harness routing option removed the same day it failed in production; and local coding-agent models reporting false completion and, once, fabricating a shared `learnings.md` entry — caught by evidence checks in every case and attributed to model capacity rather than the orchestrator
 - **Appendix D** — Data Files and Reference Outputs (`interactions.jsonl`, `failed_variants.json`, `user_thumbdowns.json`, `learned_qa` collection, `rag_graph.png`, `langchain_api_*_debug.log`, `langgraph_api_*_debug.log`, `new_log.txt`, `old_log.txt`)
 - **Appendix E** — Three-Run Stress Test Tables (token counts, query lists, where the model breaks) — plus the `All_flags_True`, `All_flags_True_except_*`, `Post-retrieval-separation` flag-ablation runs, and the 15-batch / 100-scenario workflow benchmark with its per-stage `timing_tracker` JSON (the millisecond-to-12-minute per-stage long-tail)
 - **Appendix F** — Troubleshooting Cookbook (common errors and fixes)
-- **Appendix G** — Glossary of terms (agent, chunk, embedding, RAG, distillation, ReAct, hybrid retrieval, thumbdown, variant, groundedness, relevance, MMR, RRF, NAC, DC, LBC, GraphState, fan-out/fan-in, reducer-typed field, `defer=True` barrier, non-barrier fan-in, multi-verdict judge, Conservative-Grounding Prompt Pattern, `MERGE_SIMILARITY_THRESHOLD`, `LBC_MIN_RETENTION_RATIO`, `DC_WINDOW_SIZE`, `RETRIEVAL_TOP_K`, `RETRIEVAL_TOP_L`, `DOCUMENTS_MIN_SIMILARITY`, `LEARNED_QA_MIN_SIMILARITY`, `LLM_RATE_LIMIT_*`, ambient vs callback tracing, `OpenInference`, `TracerProvider`, span exporter, self-edit, ReSTEM, LoRA, catastrophic forgetting, PRM, …)
+- **Appendix G** — Glossary of terms (agent, chunk, embedding, RAG, distillation, ReAct, hybrid retrieval, thumbdown, variant, groundedness, relevance, MMR, RRF, NAC, DC, LBC, GraphState, fan-out/fan-in, reducer-typed field, `defer=True` barrier, non-barrier fan-in, multi-verdict judge, Conservative-Grounding Prompt Pattern, `MERGE_SIMILARITY_THRESHOLD`, `LBC_MIN_RETENTION_RATIO`, `DC_WINDOW_SIZE`, `RETRIEVAL_TOP_K`, `RETRIEVAL_TOP_L`, `DOCUMENTS_MIN_SIMILARITY`, `LEARNED_QA_MIN_SIMILARITY`, `LLM_RATE_LIMIT_*`, ambient vs callback tracing, `OpenInference`, `TracerProvider`, span exporter, self-edit, ReSTEM, LoRA, catastrophic forgetting, PRM, judgment vs. mechanics, non-raising adapter contract, closed error taxonomy, hierarchical supervisor, `Command(goto=..., update=...)`, dependency wave, Kahn's algorithm, Git worktree isolation, reversible integration branch, wave-wide rollback, handoff packet reconstruction, budget ledger, reactive vs proactive limit detection, vendor session resume, process-tree-safe deadline, MCP bridge, stub transport, deterministic completion check, `bounded` vs `completed` status, …)
 - **Appendix H** — Recommended Reading and Video Resources
   - Foundational: original RAG paper (Lewis et al., 2020), Attention Is All You Need
   - Compression & context management: contextual compression papers
@@ -702,7 +809,7 @@
   - **K.2 — Document-Loaders** (the conversion + chunking evaluation harness; Chapters 5B and 7B) — ADR-001 one comparable script and result directory per loader, ADR-002 standardize the Windows environment on Python 3.12, ADR-003 use PowerShell as the verified execution shell, ADR-004 batch every source file and mirror relative output paths, ADR-005 isolate each loader in its own Python environment, ADR-006 scope chunking to Marker Markdown and keep run reports untracked, ADR-007 normalize Marker clause structure in memory before chunking
   - **K.3 — LangSmith-Masterclass** (the observability teaching scripts; Chapter 38) — ADR-001 embeddings sourced from the Hugging Face Inference Router rather than the local custom LLM endpoint, ADR-002 project `.venv` built on Python 3.12 rather than 3.14, ADR-003 remaining OpenAI-dependent scripts migrated onto the local TGI proxy + HF Router stack, ADR-004 tracking docs moved into `docs/` and no longer Git-ignored
   - **K.4 — Langflow-learning-project** (the visual-builder cyclic-execution experiment and Memora port; 19.14) — ADR-001 run Langflow via a local `uv`/pip install instead of Docker, ADR-002 pin `langflow==1.10.2` with `--only-binary=litellm` instead of latest (1.11.0), ADR-003 use Python 3.12 for the virtual environment instead of 3.14, ADR-004 use Groq (`llama-3.1-8b-instant`) as the flow LLM provider, ADR-005 test cyclic support with the built-in `Loop` component rather than a raw LLM feedback loop, ADR-006 port the Memora RAG architecture into Langflow as one generated Custom-Component flow, ADR-007 use Langflow's `Knowledge` node for retrieval instead of a hand-wired ChromaDB client, ADR-008 drop the `Memory Base` node rather than require one per import, ADR-009 collapse the retry cycle into one deterministic answer path, ADR-010 use a local OpenAI-compatible server for the RAG pipeline
-  - **K.5 — Bhai-To-Bhai** (the multi-agent CLI-orchestration platform; 42.3) — ADR-001 distribute shared skills to CLI agents via explicit prompt injection, not auto-discovery, ADR-002 provisional stack: Claw Orchestrator + LangGraph + MongoDB + Git worktrees + Phoenix, ADR-003 keep OpenHands Agent Canvas open as an alternative execution layer to Claw Orchestrator
+  - **K.5 — Bhai-To-Bhai** (the multi-agent CLI-orchestration platform; Part VIII) — ADR-001 distribute shared skills to CLI agents via explicit prompt injection, not auto-discovery; ADR-002 provisional stack: Claw Orchestrator + LangGraph + MongoDB + Git worktrees + Phoenix (later partly superseded); ADR-003 keep OpenHands Agent Canvas open as an alternative execution layer to Claw Orchestrator (later resolved — neither); ADR-004 adopt Maestro as the external-agent execution/delegation layer; ADR-005 reconstruct the handoff packet on agent entry from durable artifacts, never summarize on exit; ADR-006 model agent budgets as a configured ledger with reactive limit detection as the authoritative signal; ADR-007 install Maestro repo-locally and scope its Claude Code hooks to the project; ADR-008 learn multi-agent primitives in a throwaway LangGraph build (`yt_tutorial/`) before Build Guide Stage 1; ADR-009 reuse `RAG-work`'s LLM call plumbing rather than writing fresh equivalents; ADR-010 absorb the TGI serving stack's protocol divergence in a transport-level shim, not in agent code; ADR-011 guarantee agent-loop termination in code, treat prompt instructions as advisory; ADR-012 reorganize the sandbox into packages with one config module and a separate prompts module; ADR-013 replace the ported logging module rather than repair it, and persist one debug log per run; ADR-014 give every supervisor and worker a second implementation on the Claude Code CLI, selected by configuration; ADR-015 expose the project's own tools to Claude Code through a configurable MCP bridge; ADR-016 bound a worker turn by wall-clock on a daemon thread, and let a failed worker report instead of raising; ADR-017 implement the production workflow as a six-stage LangGraph with two bounded feedback loops; ADR-018 derive waves deterministically and treat each wave as reversible Git integration; ADR-019 normalize every agent backend behind a closed, non-raising adapter contract; ADR-020 make durable artifacts and observable repository state the source of continuity and acceptance; ADR-021 trade session-file persistence for actual vendor resume capability on both the Codex and Claude adapters; ADR-022 scrub and normalize the subprocess environment once, in one place, for every vendor CLI; ADR-023 treat the default backend roster as operational tuning and use a mixed Claude/Codex assignment; ADR-024 dispatch each wave through two stable, independently configurable coding slots; ADR-025 enforce vendor deadlines at the process-tree boundary, not with `subprocess.run(timeout=...)` — and later entries (2026-08-10/11) covering planner-sized coding rosters and the Ollama fallback route
 - **Appendix L** — API Endpoints Reference (the contents of `API_ENDPOINTS.txt`: dual-port LangChain/LangGraph setup, request/response shapes, Postman recipes)
 - **Appendix M** — Concurrency and Rate-Limiting Patterns Cookbook — `ThreadPoolExecutor` timeout wrapper, semaphore-guarded LLM calls, FIFO-queue serializer, capped exponential backoff with jitter, `LLMRateLimitAbortError` handling
 - **Appendix N** — The Five LLM Roles Reference — `llm`, `judge_llm`, `json_fix_llm`, `llm_tool`, `merge_llm`: what each does, which provider serves it in the current build, and how to swap

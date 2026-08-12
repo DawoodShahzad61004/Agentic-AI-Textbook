@@ -445,9 +445,9 @@
     "semantic_hash": "b6a5eb3c99972137c2e79b5ef65a1ace"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Book_Index.md": {
-    "mtime": 1785019514.873022,
-    "ast_hash": "8d84ee5348c5975da81a30794004c510",
-    "semantic_hash": "8d84ee5348c5975da81a30794004c510"
+    "mtime": 1785536952.9508345,
+    "ast_hash": "3d53422951e54b823963c87b523253d2",
+    "semantic_hash": "3d53422951e54b823963c87b523253d2"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\CLAUDE.md": {
     "mtime": 1783815209.5662606,
@@ -1675,39 +1675,39 @@
     "semantic_hash": "a1d3cb4d35d841c5acf197d4a5cace1e"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 34 (July 31).txt": {
-    "mtime": 1785504669.8848934,
+    "mtime": 1785821256.819509,
     "ast_hash": "48cfbe87f60192624527a73fb5635be8",
     "semantic_hash": "48cfbe87f60192624527a73fb5635be8"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\README.md": {
-    "mtime": 1785506859.9617505,
-    "ast_hash": "2bf604fbdda4e1ea88bf0d16a6b402ae",
-    "semantic_hash": "2bf604fbdda4e1ea88bf0d16a6b402ae"
+    "mtime": 1786554000.5592203,
+    "ast_hash": "94d4c0e7e08a4b9496d8d8bfbefccf7d",
+    "semantic_hash": "94d4c0e7e08a4b9496d8d8bfbefccf7d"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\docs\\Architecture.md": {
-    "mtime": 1785506794.740971,
-    "ast_hash": "b27189b41efb8b42644d95a976ed4a6f",
-    "semantic_hash": "b27189b41efb8b42644d95a976ed4a6f"
+    "mtime": 1786302287.6200988,
+    "ast_hash": "5592b4368964ccb708ff9277ff31e1e7",
+    "semantic_hash": "5592b4368964ccb708ff9277ff31e1e7"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\docs\\Bugs.md": {
-    "mtime": 1785506798.2480097,
-    "ast_hash": "2bd9ae4707ad34261ca71c7d2a274fd7",
-    "semantic_hash": "2bd9ae4707ad34261ca71c7d2a274fd7"
+    "mtime": 1786302718.9504838,
+    "ast_hash": "91f8ee992097d0fdfeea24f060556d44",
+    "semantic_hash": "91f8ee992097d0fdfeea24f060556d44"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\docs\\Decisions.md": {
-    "mtime": 1785506763.0763915,
-    "ast_hash": "d74c9d0f8f1e270f7cba252e2408f4e9",
-    "semantic_hash": "d74c9d0f8f1e270f7cba252e2408f4e9"
+    "mtime": 1786302595.7752545,
+    "ast_hash": "19f70e91210afcb208259cc18c82dc28",
+    "semantic_hash": "19f70e91210afcb208259cc18c82dc28"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\docs\\Research.md": {
-    "mtime": 1785506736.9258003,
-    "ast_hash": "99e47101289c55c9a7ffc406e79db068",
-    "semantic_hash": "99e47101289c55c9a7ffc406e79db068"
+    "mtime": 1786302631.7052975,
+    "ast_hash": "173a5e402867898959ab73c3c0b4a08e",
+    "semantic_hash": "173a5e402867898959ab73c3c0b4a08e"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\docs\\Status.md": {
-    "mtime": 1785506813.344154,
-    "ast_hash": "3dc7bbe5fe0179a09896012330c59ec1",
-    "semantic_hash": "3dc7bbe5fe0179a09896012330c59ec1"
+    "mtime": 1786302664.9467235,
+    "ast_hash": "931dc5dbf40b95cf16bc9f3d8a373fd5",
+    "semantic_hash": "931dc5dbf40b95cf16bc9f3d8a373fd5"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\langsmith-masterclass\\docs\\LangSmith Transcript - English.md": {
     "mtime": 1783508695.8265183,
@@ -1783,5 +1783,565 @@
     "mtime": 1785026090.5744884,
     "ast_hash": "8064428dcab8fcda9946e1eb2b07097c",
     "semantic_hash": "8064428dcab8fcda9946e1eb2b07097c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\adapters\\__init__.py": {
+    "mtime": 1786111588.0416985,
+    "ast_hash": "27bc22f03e6e23804d7dee2faa705b05",
+    "semantic_hash": "27bc22f03e6e23804d7dee2faa705b05"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\adapters\\base.py": {
+    "mtime": 1786439568.8830779,
+    "ast_hash": "a1af00dc00ad8b27ad2d345d5a47f521",
+    "semantic_hash": "a1af00dc00ad8b27ad2d345d5a47f521"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\adapters\\claude.py": {
+    "mtime": 1786358187.0166664,
+    "ast_hash": "390daec21332f2cd8488f860bafaa4fd",
+    "semantic_hash": "390daec21332f2cd8488f860bafaa4fd"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\adapters\\codex.py": {
+    "mtime": 1786440000.3431072,
+    "ast_hash": "8feb2f9f9850f476b5c9b4b2d94f38a3",
+    "semantic_hash": "8feb2f9f9850f476b5c9b4b2d94f38a3"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\adapters\\maestro.py": {
+    "mtime": 1786358210.2179384,
+    "ast_hash": "cde8b7e5291877dcd967aaa28611f2ea",
+    "semantic_hash": "cde8b7e5291877dcd967aaa28611f2ea"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\adapters\\ollama.py": {
+    "mtime": 1786452965.246918,
+    "ast_hash": "f561fe4d8e4071901995819eae0cd117",
+    "semantic_hash": "f561fe4d8e4071901995819eae0cd117"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\adapters\\stub.py": {
+    "mtime": 1786358216.3926897,
+    "ast_hash": "3399456a57f0dca25d7c45534b1cd70d",
+    "semantic_hash": "3399456a57f0dca25d7c45534b1cd70d"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\artifacts.py": {
+    "mtime": 1786358292.4924936,
+    "ast_hash": "5cb9fa352f8e89f71d2d322b22dbd526",
+    "semantic_hash": "5cb9fa352f8e89f71d2d322b22dbd526"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\config.py": {
+    "mtime": 1786452991.6863756,
+    "ast_hash": "0aaa7e1f8dbf3b9087aa6f05d2052f01",
+    "semantic_hash": "0aaa7e1f8dbf3b9087aa6f05d2052f01"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\graph.py": {
+    "mtime": 1786171057.010052,
+    "ast_hash": "7f5c03711505bcc00b80a26bcf860be9",
+    "semantic_hash": "7f5c03711505bcc00b80a26bcf860be9"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\logging_config.py": {
+    "mtime": 1786111529.0602498,
+    "ast_hash": "b11ca6362373d89d1e93c93630e6c393",
+    "semantic_hash": "b11ca6362373d89d1e93c93630e6c393"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\main.py": {
+    "mtime": 1786281626.2734096,
+    "ast_hash": "fc26d59375b178dbd4295717094b1a2c",
+    "semantic_hash": "fc26d59375b178dbd4295717094b1a2c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\merger\\__init__.py": {
+    "mtime": 1786112763.3106327,
+    "ast_hash": "e19381257e08bb0c6763961256011bce",
+    "semantic_hash": "e19381257e08bb0c6763961256011bce"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\merger\\merge.py": {
+    "mtime": 1786358710.5159962,
+    "ast_hash": "067ed0feea046f74592a8b08ff3bcb9c",
+    "semantic_hash": "067ed0feea046f74592a8b08ff3bcb9c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\merger\\node.py": {
+    "mtime": 1786358715.8285928,
+    "ast_hash": "028390b15d400a1d5c11defe00af1804",
+    "semantic_hash": "028390b15d400a1d5c11defe00af1804"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\merger\\prompts.py": {
+    "mtime": 1786358679.576393,
+    "ast_hash": "ea79cf3f2c40decc6a541df092ad7bce",
+    "semantic_hash": "ea79cf3f2c40decc6a541df092ad7bce"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\parsing.py": {
+    "mtime": 1786112018.510718,
+    "ast_hash": "18ee2b403201c8a7710f841d98ee7873",
+    "semantic_hash": "18ee2b403201c8a7710f841d98ee7873"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\planner\\__init__.py": {
+    "mtime": 1786358961.307221,
+    "ast_hash": "7a33bf7007c0b7171a6a80f85b8e22b3",
+    "semantic_hash": "7a33bf7007c0b7171a6a80f85b8e22b3"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\planner\\node.py": {
+    "mtime": 1786358510.8395555,
+    "ast_hash": "8c11c303a012dc70b037dfad518e691c",
+    "semantic_hash": "8c11c303a012dc70b037dfad518e691c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\planner\\prompts.py": {
+    "mtime": 1786439569.0364776,
+    "ast_hash": "0c862cdf73722c69c5709e2764f972e7",
+    "semantic_hash": "0c862cdf73722c69c5709e2764f972e7"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\planner\\waves.py": {
+    "mtime": 1786358473.3577588,
+    "ast_hash": "99d6c6bc15b5961ccf9c25d887ad82c8",
+    "semantic_hash": "99d6c6bc15b5961ccf9c25d887ad82c8"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\preflight.py": {
+    "mtime": 1786186591.6132877,
+    "ast_hash": "63c7f418502739939f5b08db3205bcf2",
+    "semantic_hash": "63c7f418502739939f5b08db3205bcf2"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\requirements\\__init__.py": {
+    "mtime": 1786112250.9386337,
+    "ast_hash": "72cce38d3ecce957946c294873060507",
+    "semantic_hash": "72cce38d3ecce957946c294873060507"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\requirements\\node.py": {
+    "mtime": 1786171057.0312872,
+    "ast_hash": "b09eb0476667e419fadf20d56db29980",
+    "semantic_hash": "b09eb0476667e419fadf20d56db29980"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\requirements\\prompts.py": {
+    "mtime": 1786112046.8852954,
+    "ast_hash": "bf541277c026541306b40d2400bf625c",
+    "semantic_hash": "bf541277c026541306b40d2400bf625c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\reviewer\\__init__.py": {
+    "mtime": 1786112979.6836698,
+    "ast_hash": "27cf8e8aa85e42382f3fe644a7c7940c",
+    "semantic_hash": "27cf8e8aa85e42382f3fe644a7c7940c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\reviewer\\node.py": {
+    "mtime": 1786358737.5521674,
+    "ast_hash": "65a44c08d64eb08a6a95959c19a90582",
+    "semantic_hash": "65a44c08d64eb08a6a95959c19a90582"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\reviewer\\prompts.py": {
+    "mtime": 1786358730.870208,
+    "ast_hash": "841019d145448915e03c59be786a8d73",
+    "semantic_hash": "841019d145448915e03c59be786a8d73"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\routes.py": {
+    "mtime": 1786113396.7359955,
+    "ast_hash": "2dbce58cfd877f078eaf2be3a2cec7f2",
+    "semantic_hash": "2dbce58cfd877f078eaf2be3a2cec7f2"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\state.py": {
+    "mtime": 1786358400.6551728,
+    "ast_hash": "979b14c9a64b97144b0ce9b77dc84c08",
+    "semantic_hash": "979b14c9a64b97144b0ce9b77dc84c08"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\supervisor\\__init__.py": {
+    "mtime": 1786113085.0600035,
+    "ast_hash": "3a0245169f7897ce0258612e891859ef",
+    "semantic_hash": "3a0245169f7897ce0258612e891859ef"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\supervisor\\node.py": {
+    "mtime": 1786358758.1090515,
+    "ast_hash": "a5154229ed3231e72002cde232ff9eb3",
+    "semantic_hash": "a5154229ed3231e72002cde232ff9eb3"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\supervisor\\prompts.py": {
+    "mtime": 1786358750.2290516,
+    "ast_hash": "313d1eeb42bcf8e9387643ce0b0eef35",
+    "semantic_hash": "313d1eeb42bcf8e9387643ce0b0eef35"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\tests\\conftest.py": {
+    "mtime": 1786111832.9795878,
+    "ast_hash": "f72fffb51c388eb46afe38c29884d206",
+    "semantic_hash": "f72fffb51c388eb46afe38c29884d206"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\tests\\test_foundation.py": {
+    "mtime": 1786452779.7353978,
+    "ast_hash": "39b8ac3c411cc367a056c247b46ac994",
+    "semantic_hash": "39b8ac3c411cc367a056c247b46ac994"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\tests\\test_graph.py": {
+    "mtime": 1786113408.0035572,
+    "ast_hash": "de9c7290cc18997df9f5a12fcd8972dd",
+    "semantic_hash": "de9c7290cc18997df9f5a12fcd8972dd"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\tests\\test_main.py": {
+    "mtime": 1786113583.8088822,
+    "ast_hash": "92e344fa064afd658b5a080338a90cd7",
+    "semantic_hash": "92e344fa064afd658b5a080338a90cd7"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\tests\\test_merger.py": {
+    "mtime": 1786112871.9975474,
+    "ast_hash": "ca905c9c7674972a3120dd3d14f94e87",
+    "semantic_hash": "ca905c9c7674972a3120dd3d14f94e87"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\tests\\test_planner.py": {
+    "mtime": 1786359000.811783,
+    "ast_hash": "9ceef3f5d84ff2e0e9e6bb4ea56dcb68",
+    "semantic_hash": "9ceef3f5d84ff2e0e9e6bb4ea56dcb68"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\tests\\test_requirements.py": {
+    "mtime": 1786112273.1993616,
+    "ast_hash": "b20eabd34986330a37e5f3518d87efba",
+    "semantic_hash": "b20eabd34986330a37e5f3518d87efba"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\tests\\test_reverts.py": {
+    "mtime": 1786113555.4462059,
+    "ast_hash": "4c6f1d838d212d47aff12d8cc8cdca80",
+    "semantic_hash": "4c6f1d838d212d47aff12d8cc8cdca80"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\tests\\test_reviewer.py": {
+    "mtime": 1786113015.3955438,
+    "ast_hash": "3eced4274790aa09f9e00c68b98ea9c4",
+    "semantic_hash": "3eced4274790aa09f9e00c68b98ea9c4"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\tests\\test_supervisor.py": {
+    "mtime": 1786358848.16361,
+    "ast_hash": "252bbdb01beea4755ca74d82019e15ef",
+    "semantic_hash": "252bbdb01beea4755ca74d82019e15ef"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\tests\\test_wave_orchestrator.py": {
+    "mtime": 1786362340.5506475,
+    "ast_hash": "c8c50a5229e53b9e35bb27f2c8443f16",
+    "semantic_hash": "c8c50a5229e53b9e35bb27f2c8443f16"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\wave_orchestrator\\__init__.py": {
+    "mtime": 1786112559.4213808,
+    "ast_hash": "ce4df6fb1cd07741d772cbb0952111ce",
+    "semantic_hash": "ce4df6fb1cd07741d772cbb0952111ce"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\wave_orchestrator\\dispatch.py": {
+    "mtime": 1786362256.4406502,
+    "ast_hash": "a1c20c41f2e33f5c513a671f2dacc8af",
+    "semantic_hash": "a1c20c41f2e33f5c513a671f2dacc8af"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\wave_orchestrator\\node.py": {
+    "mtime": 1786362264.981188,
+    "ast_hash": "09ab57936cac3ccdd6e4e4ab6ed7196e",
+    "semantic_hash": "09ab57936cac3ccdd6e4e4ab6ed7196e"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\wave_orchestrator\\prompts.py": {
+    "mtime": 1786358573.893578,
+    "ast_hash": "1c67ecca7b8e2817fd37d347d269359d",
+    "semantic_hash": "1c67ecca7b8e2817fd37d347d269359d"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\worktrees.py": {
+    "mtime": 1786113340.5757883,
+    "ast_hash": "89db6ec55b69bded89c7fbf5b658671b",
+    "semantic_hash": "89db6ec55b69bded89c7fbf5b658671b"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\package.json": {
+    "mtime": 1785829177.3320343,
+    "ast_hash": "d618d809c629cfe414a5a1cb6081291a",
+    "semantic_hash": "d618d809c629cfe414a5a1cb6081291a"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\claude_agents\\__init__.py": {
+    "mtime": 1786011778.4283817,
+    "ast_hash": "82d4d79ead302bd1d089de7d95f5c22f",
+    "semantic_hash": "82d4d79ead302bd1d089de7d95f5c22f"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\claude_agents\\agents.py": {
+    "mtime": 1786014695.2831807,
+    "ast_hash": "b15175f0e32940f5678585c35324cada",
+    "semantic_hash": "b15175f0e32940f5678585c35324cada"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\claude_agents\\cli.py": {
+    "mtime": 1786013483.0802205,
+    "ast_hash": "49ef3780c53f125465ab2c6ada373d90",
+    "semantic_hash": "49ef3780c53f125465ab2c6ada373d90"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\claude_agents\\mcp_bridge.py": {
+    "mtime": 1786014702.1242943,
+    "ast_hash": "c4ab3c151191c3a523a89cec3792ba0a",
+    "semantic_hash": "c4ab3c151191c3a523a89cec3792ba0a"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\claude_agents\\prompts.py": {
+    "mtime": 1786014688.211083,
+    "ast_hash": "8f967fcac5f7a092e762956f4ea35590",
+    "semantic_hash": "8f967fcac5f7a092e762956f4ea35590"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\claude_agents\\router.py": {
+    "mtime": 1786011770.6610577,
+    "ast_hash": "95e1d2f42a94c86468c161fe9d3d1880",
+    "semantic_hash": "95e1d2f42a94c86468c161fe9d3d1880"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\config.py": {
+    "mtime": 1786024078.8730648,
+    "ast_hash": "8d9c8ef2c748c2dfc4c5c3f5af2d88ac",
+    "semantic_hash": "8d9c8ef2c748c2dfc4c5c3f5af2d88ac"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\llm\\__init__.py": {
+    "mtime": 1785927824.488168,
+    "ast_hash": "4aa4286a2a12853367dfab8aa2b9e1ef",
+    "semantic_hash": "4aa4286a2a12853367dfab8aa2b9e1ef"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\llm\\clients.py": {
+    "mtime": 1786005857.0345078,
+    "ast_hash": "3d3e69f99c5988a95778e1f5c400446e",
+    "semantic_hash": "3d3e69f99c5988a95778e1f5c400446e"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\llm\\invoker.py": {
+    "mtime": 1786007444.124264,
+    "ast_hash": "6845d9754b631537bea58cbf461a8365",
+    "semantic_hash": "6845d9754b631537bea58cbf461a8365"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\llm\\tgi_compat.py": {
+    "mtime": 1785924374.4129517,
+    "ast_hash": "037e2d77372547de0176ed405dae91fa",
+    "semantic_hash": "037e2d77372547de0176ed405dae91fa"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\logging_config.py": {
+    "mtime": 1786014558.8982832,
+    "ast_hash": "28660c3a9378ba936424cd8949d88867",
+    "semantic_hash": "28660c3a9378ba936424cd8949d88867"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\main.py": {
+    "mtime": 1785928417.475994,
+    "ast_hash": "791cc81a97deb146f2ed97f228afe6b3",
+    "semantic_hash": "791cc81a97deb146f2ed97f228afe6b3"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\prompts.py": {
+    "mtime": 1786005877.6865914,
+    "ast_hash": "e46e23643de09161c8067681a125bfce",
+    "semantic_hash": "e46e23643de09161c8067681a125bfce"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\teams\\__init__.py": {
+    "mtime": 1785927910.4988408,
+    "ast_hash": "7d1945d057ba7505ac069b95854f371c",
+    "semantic_hash": "7d1945d057ba7505ac069b95854f371c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\teams\\orchestrator.py": {
+    "mtime": 1786011879.7154417,
+    "ast_hash": "c90e7941f59557c12dc953b79a750fa4",
+    "semantic_hash": "c90e7941f59557c12dc953b79a750fa4"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\teams\\research.py": {
+    "mtime": 1786011836.6085346,
+    "ast_hash": "df1af0d06a11dffb885487f668a1f767",
+    "semantic_hash": "df1af0d06a11dffb885487f668a1f767"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\teams\\state.py": {
+    "mtime": 1785927830.1173909,
+    "ast_hash": "2275a273ad1f897c8357630b727f01b0",
+    "semantic_hash": "2275a273ad1f897c8357630b727f01b0"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\teams\\supervisor.py": {
+    "mtime": 1786007466.9234464,
+    "ast_hash": "92a5a29a3864a69a68146f31fa20444a",
+    "semantic_hash": "92a5a29a3864a69a68146f31fa20444a"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\teams\\visualization.py": {
+    "mtime": 1785927859.9394093,
+    "ast_hash": "2dd235e9769738f76720c9bbda634002",
+    "semantic_hash": "2dd235e9769738f76720c9bbda634002"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\teams\\writing.py": {
+    "mtime": 1786011868.3828044,
+    "ast_hash": "db299c4d0c157d773bedeb8e1199d9a0",
+    "semantic_hash": "db299c4d0c157d773bedeb8e1199d9a0"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\temp_agents\\__init__.py": {
+    "mtime": 1786022353.109069,
+    "ast_hash": "f685be3994932da7de9fc4b6b7e688ed",
+    "semantic_hash": "f685be3994932da7de9fc4b6b7e688ed"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\temp_agents\\agents.py": {
+    "mtime": 1786023978.4850824,
+    "ast_hash": "0d54d52801388c746b3eda326d605e72",
+    "semantic_hash": "0d54d52801388c746b3eda326d605e72"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\temp_agents\\main.py": {
+    "mtime": 1786023992.2250686,
+    "ast_hash": "24c356a2fb8ab220d0a2077836313439",
+    "semantic_hash": "24c356a2fb8ab220d0a2077836313439"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\temp_agents\\prompts.py": {
+    "mtime": 1786022734.5247145,
+    "ast_hash": "f2c62d17d3145e2d703bcc42c5662295",
+    "semantic_hash": "f2c62d17d3145e2d703bcc42c5662295"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\temp_agents\\runners.py": {
+    "mtime": 1786024093.8940063,
+    "ast_hash": "8aee5bb6a47f7f722fbbdb1984b3b6fb",
+    "semantic_hash": "8aee5bb6a47f7f722fbbdb1984b3b6fb"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\temp_agents\\supervisor.py": {
+    "mtime": 1786023979.851597,
+    "ast_hash": "0a8c96b691cf352f422525e355c2794c",
+    "semantic_hash": "0a8c96b691cf352f422525e355c2794c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\tools\\__init__.py": {
+    "mtime": 1785927791.8789315,
+    "ast_hash": "4b336648d4c2b3f99269ec366c81e1ce",
+    "semantic_hash": "4b336648d4c2b3f99269ec366c81e1ce"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\tools\\code.py": {
+    "mtime": 1785928522.8787253,
+    "ast_hash": "678ef0ae008f9d87cb6e42ced77e3591",
+    "semantic_hash": "678ef0ae008f9d87cb6e42ced77e3591"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\tools\\documents.py": {
+    "mtime": 1786004189.3708112,
+    "ast_hash": "6e4b7edf884317deac3b3b2abdbcd49f",
+    "semantic_hash": "6e4b7edf884317deac3b3b2abdbcd49f"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\tools\\web.py": {
+    "mtime": 1785928516.156321,
+    "ast_hash": "98b1fd7cbda65900d3d149090099ab60",
+    "semantic_hash": "98b1fd7cbda65900d3d149090099ab60"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 35 (Aug 3).txt": {
+    "mtime": 1785821693.4333694,
+    "ast_hash": "5af0aef3b9cab81c6da64a72842ea4af",
+    "semantic_hash": "5af0aef3b9cab81c6da64a72842ea4af"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 35 (Aug 4).txt": {
+    "mtime": 1785877146.5387046,
+    "ast_hash": "73dd4bc6c0ebad865d2c98fee8220e33",
+    "semantic_hash": "73dd4bc6c0ebad865d2c98fee8220e33"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 36 (Aug 5).txt": {
+    "mtime": 1785965590.4552672,
+    "ast_hash": "b1d55c9efbac676c215519b542ea72de",
+    "semantic_hash": "b1d55c9efbac676c215519b542ea72de"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 36 (Aug 6).txt": {
+    "mtime": 1786025216.522026,
+    "ast_hash": "6f77a74f6c93b0c61d249667621d2604",
+    "semantic_hash": "6f77a74f6c93b0c61d249667621d2604"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 37 (Aug 7).txt": {
+    "mtime": 1786130788.9504387,
+    "ast_hash": "f44bd303727ad669c620fef014ec48f3",
+    "semantic_hash": "f44bd303727ad669c620fef014ec48f3"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 37 (Aug 8).txt": {
+    "mtime": 1786223377.04126,
+    "ast_hash": "52b9f903e19e6f197785af10fcf706df",
+    "semantic_hash": "52b9f903e19e6f197785af10fcf706df"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 38 (Aug 10).txt": {
+    "mtime": 1786368466.117807,
+    "ast_hash": "7a82795604a903b382826bbdd45c3be1",
+    "semantic_hash": "7a82795604a903b382826bbdd45c3be1"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 38 (Aug 9).txt": {
+    "mtime": 1786296628.4711092,
+    "ast_hash": "38343b93f6208814afd19a2e873ea684",
+    "semantic_hash": "38343b93f6208814afd19a2e873ea684"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 39 (Aug 11).txt": {
+    "mtime": 1786553314.487616,
+    "ast_hash": "2242712fa8566a03eb9a02ec525a08dc",
+    "semantic_hash": "2242712fa8566a03eb9a02ec525a08dc"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\maestro-flow documentation\\OpenL-2608041124.md": {
+    "mtime": 1785824651.2193446,
+    "ast_hash": "a62986559b0ce37109607471e2a220d1",
+    "semantic_hash": "a62986559b0ce37109607471e2a220d1"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\maestro-flow documentation\\README.en.md": {
+    "mtime": 1785825614.64365,
+    "ast_hash": "2c5c0f045aeafa322aaaf4313581e472",
+    "semantic_hash": "2c5c0f045aeafa322aaaf4313581e472"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\maestro-flow documentation\\command-usage-guide.en.md": {
+    "mtime": 1785824512.8392773,
+    "ast_hash": "92ba1e9b980cce17aa0b24800425a803",
+    "semantic_hash": "92ba1e9b980cce17aa0b24800425a803"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\maestro-flow documentation\\delegate-async-guide.md": {
+    "mtime": 1785825130.7807755,
+    "ast_hash": "3dbddaa8ae263d572a61f676d7c7ec73",
+    "semantic_hash": "3dbddaa8ae263d572a61f676d7c7ec73"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\maestro-flow documentation\\install-guide.md": {
+    "mtime": 1785825390.8592546,
+    "ast_hash": "208c32d78d8ec7c8141faddcc08298f0",
+    "semantic_hash": "208c32d78d8ec7c8141faddcc08298f0"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\maestro-flow documentation\\issue-discover-guide.md": {
+    "mtime": 1785825267.7266872,
+    "ast_hash": "33e046613857fb76792feae97ed9963d",
+    "semantic_hash": "33e046613857fb76792feae97ed9963d"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\maestro-flow documentation\\knowledge-management-guide.md": {
+    "mtime": 1785825606.780275,
+    "ast_hash": "8f6114f66403c361e4a179d170fb0b61",
+    "semantic_hash": "8f6114f66403c361e4a179d170fb0b61"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\maestro-flow documentation\\learn-tools-guide.md": {
+    "mtime": 1785825314.6827147,
+    "ast_hash": "cc90e8bf9c32c741d6132058d80f48ca",
+    "semantic_hash": "cc90e8bf9c32c741d6132058d80f48ca"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\maestro-flow documentation\\maestro-coordinator-guide.en.md": {
+    "mtime": 1785824756.0117023,
+    "ast_hash": "5be9654960c76824e77822441663cfca",
+    "semantic_hash": "5be9654960c76824e77822441663cfca"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\maestro-flow documentation\\quality-pipeline-guide.md": {
+    "mtime": 1785825219.0317984,
+    "ast_hash": "fa04f4bf6e7e15998eb5441ff6c4d620",
+    "semantic_hash": "fa04f4bf6e7e15998eb5441ff6c4d620"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\maestro-flow documentation\\search-system-guide.md": {
+    "mtime": 1785825480.448758,
+    "ast_hash": "99515e9a5a75b09d0b4455ff76f4f4c3",
+    "semantic_hash": "99515e9a5a75b09d0b4455ff76f4f4c3"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\orchestrator\\temp_prompts.txt": {
+    "mtime": 1786441494.8519163,
+    "ast_hash": "ec9c04e5cc3357c39c6a08397a8bafec",
+    "semantic_hash": "ec9c04e5cc3357c39c6a08397a8bafec"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\requirements-dev.txt": {
+    "mtime": 1786113668.7379801,
+    "ast_hash": "980161a53f397631d4c9c741a09a5ed1",
+    "semantic_hash": "980161a53f397631d4c9c741a09a5ed1"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\requirements.txt": {
+    "mtime": 1786111389.7739277,
+    "ast_hash": "806a2da4c597f5fb515fbb2248925f4b",
+    "semantic_hash": "806a2da4c597f5fb515fbb2248925f4b"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\temp\\research_results.txt": {
+    "mtime": 1786018684.513081,
+    "ast_hash": "ae965b003dbf013f6753ee18f09855fe",
+    "semantic_hash": "ae965b003dbf013f6753ee18f09855fe"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\temp_agents\\file_A.txt": {
+    "mtime": 1786024867.0539691,
+    "ast_hash": "ed076287532e86365e841e92bfc50d8c",
+    "semantic_hash": "ed076287532e86365e841e92bfc50d8c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\temp_agents\\file_B.txt": {
+    "mtime": 1786024923.3852067,
+    "ast_hash": "da80959092d3fbbc7b2b04f55638491a",
+    "semantic_hash": "da80959092d3fbbc7b2b04f55638491a"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\video_transcript.txt": {
+    "mtime": 1785876923.2292504,
+    "ast_hash": "736b67601f2430a0579af4d299a833b4",
+    "semantic_hash": "736b67601f2430a0579af4d299a833b4"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Research\\Ollama Coding Agent Working.md": {
+    "mtime": 1786455862.5715718,
+    "ast_hash": "3cdba3aa0de941c36dc247b6b22928e7",
+    "semantic_hash": "3cdba3aa0de941c36dc247b6b22928e7"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\graph_images\\research_graph.png": {
+    "mtime": 1786018631.861738,
+    "ast_hash": "76df91015cc375c089c3d4904096704d",
+    "semantic_hash": "76df91015cc375c089c3d4904096704d"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\graph_images\\super_graph.png": {
+    "mtime": 1786018633.4175093,
+    "ast_hash": "55de9e7149b8489860e819ddec38fba0",
+    "semantic_hash": "55de9e7149b8489860e819ddec38fba0"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Code-bases\\Bhai-To-Bhai\\yt-tutorial\\graph_images\\writing_graph.png": {
+    "mtime": 1786018632.680784,
+    "ast_hash": "5c31d70fb4f8c9fb64a4958a9f0e9c64",
+    "semantic_hash": "5c31d70fb4f8c9fb64a4958a9f0e9c64"
   }
 }

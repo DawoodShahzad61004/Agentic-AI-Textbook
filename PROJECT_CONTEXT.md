@@ -22,7 +22,7 @@ The author has been building this book for **several months** (and expects to co
 2. **Everything gets kept.** Terminal output logs, dry-run traces, research papers studied, full source code (both current and superseded versions), notes, and documentation — all of it goes into this repository. Nothing is written from memory or assumption; everything is grounded in an actual artifact.
 3. **A living index gets rebuilt.** Periodically, all of this raw material is fed to an AI assistant to regenerate `Book_Index.md` — a full table of contents mapping every chapter and section to the real material that will support it.
 4. **Chapters get written one at a time**, in order, each one pulling from the raw material (conversations, code, bugs, decisions, research) that's relevant to that chapter's topic — never invented, always sourced.
-5. **The system documented in this book (Memora) is itself a real, evolving codebase.** It didn't start as a finished design. It started as a simple RAG pipeline and was iteratively rebuilt — through dozens of bugs found and fixed, several architecture pivots, and ongoing tuning — into what it is now. The book's job is to teach readers to build the *same journey*, not just hand them the final answer.
+5. **The system documented in this book is itself a real, evolving codebase.** It didn't start as a finished design. It started as a simple RAG pipeline and was iteratively rebuilt — through dozens of bugs found and fixed, several architecture pivots, and ongoing tuning — into what it is now. The book's job is to teach readers to build the *same journey*, not just hand them the final answer.
 
 This is why the repository contains things a normal software repo wouldn't: months of raw chat transcripts, five structured "ledger" markdown files (`Architecture.md`, `Decisions.md`, `Bugs.md`, `Status.md`, `Research.md`) that compress that history into durable records, dozens of dry-run trace `.txt` files, and multiple generations of the same source files as the system was refactored.
 
@@ -30,13 +30,13 @@ This is why the repository contains things a normal software repo wouldn't: mont
 
 If you need to understand *why* something in the code is the way it is, these five files are the fastest and most reliable path — more reliable than re-reading raw chat transcripts, because they are the **distilled, deliberate record** the author maintains specifically for this purpose:
 
-| File | What it contains |
-|---|---|
-| `Architecture.md` | The current system design — pipelines, phases, data flow |
-| `Decisions.md` | Every architecture decision as a numbered ADR, with context, alternatives considered, and rationale |
-| `Bugs.md` | Every significant bug found, numbered (`BUG-XXX` / `BUG-FXXX`), with root cause and fix |
-| `Status.md` | A chronological development diary — what changed, when, and why |
-| `Research.md` | Findings from external research (papers, docs, tools evaluated) that informed decisions |
+| File                | What it contains                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------- |
+| `Architecture.md` | The current system design — pipelines, phases, data flow                                           |
+| `Decisions.md`    | Every architecture decision as a numbered ADR, with context, alternatives considered, and rationale |
+| `Bugs.md`         | Every significant bug found, numbered (`BUG-XXX` / `BUG-FXXX`), with root cause and fix         |
+| `Status.md`       | A chronological development diary — what changed, when, and why                                    |
+| `Research.md`     | Findings from external research (papers, docs, tools evaluated) that informed decisions             |
 
 **If a `Decisions.md` entry and a raw chat transcript ever seem to disagree, the ledger wins** — it represents the author's considered, later judgment, not a mid-conversation exploration.
 
@@ -53,7 +53,8 @@ When the author asks you to do something in this repository, it almost always fa
 
 - **"Update `Book_Index.md`"** — new files have been added or existing files changed since the index was last generated. Your job is to find what's *new or changed* that isn't yet reflected in the index, and add sections for it — without touching the sections that already cover written chapters (1–10) unless something has factually changed about them.
 - **"Write Chapter N"** — produce the actual chapter content, following the book's established format (Times New Roman, specific margins, definition/analogy/pitfall callout boxes, embedded SVG diagrams, code listings), grounded in the real source material for that chapter's topics — never invented.
-- **"Explain/trace X"** — the author is trying to remember or understand something from months of accumulated material. Use the graph (via `graphify query` / `graphify path` / `graphify explain`) to find it, rather than guessing or asking the author to re-explain something they've likely already documented somewhere in this repo.
+- **"Explain/trace X"** — the author is trying to remember or understand something from months of accumulated material. Use the graph (via `graphify query "<question>"` for codebase questions, `graphify path "<A>" "<B>"` for relationships, `graphify explain "<concept>"` for focused concepts) to find it, rather than guessing or asking the author to re-explain something they've likely already documented somewhere in this repo. These return a scoped subgraph, usually much smaller than `GRAPH_REPORT.md` or raw grep output — read `GRAPH_REPORT.md` only for broad architecture review or when query/path/explain don't surface enough. If `graphify-out/wiki/index.md` exists, prefer it for broad navigation over raw source browsing. After modifying code, run `graphify update .` to keep the graph current.
+- **Writing a chapter** — any task that produces or edits a chapter of this book (as a Word `.docx`, or as source that becomes one) must follow `Chapter_Build_Instructions.md` in full, read before writing, formatting, or generating anything. It is the single source of truth for layout, fonts, margins, diagram rules, and required per-chapter elements — do not infer formatting from memory or from other chapters.
 
 ## 6. A Working Rule
 

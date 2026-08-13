@@ -12,6 +12,11 @@ from docx import Document
 
 
 FILES = {
+    27: ROOT / "Chapters Created So Far" / "Chapter_27_Agent_State_Engineering.docx",
+    26: ROOT / "Chapters Created So Far" / "Chapter_26_Prompt_Engineering_Small_Models.docx",
+    25: ROOT / "Chapters Created So Far" / "Chapter_25_Small_Models_Agentic_Loops.docx",
+    24: ROOT / "Chapters Created So Far" / "Chapter_24_Long_Context_Failure_Cliff.docx",
+    23: ROOT / "Chapters Created So Far" / "Chapter_23_Token_Budget.docx",
     11: ROOT / "Chapters Created So Far" / "Chapter_11_Query_Retrieval_Fundamentals.docx",
     12: ROOT / "Chapters Created So Far" / "Chapter_12_Advanced_Retrieval_Techniques.docx",
     13: ROOT / "Chapters Created So Far" / "Chapter_13_Generating_Answers_with_an_LLM.docx",
@@ -36,6 +41,11 @@ FILES = {
 }
 
 EXPECTED = {
+    27: [f"27.{i}" for i in range(1, 7)],
+    26: [f"26.{i}" for i in range(1, 10)],
+    25: [f"25.{i}" for i in range(1, 8)],
+    24: [f"24.{i}" for i in range(1, 8)],
+    23: [f"23.{i}" for i in range(1, 9)],
     11: ["11.1", "11.2", "11.3", "11.4", "11.5", "11.6", "11.7"],
     12: [f"12.{i}" for i in range(1, 11)],
     13: [f"13.{i}" for i in range(1, 10)],

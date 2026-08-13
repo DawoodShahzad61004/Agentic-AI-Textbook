@@ -5017,7 +5017,542 @@ return {"compressed_docs": combined}''')
     return path
 
 
+def diagram_token_budget_23() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560">'
+        '<rect width="1200" height="560" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["128K total is not 128K of usable input"], size=24, bold_first=True)
+        + svg_labeled_box(160, 90, 880, 100, "llama-3.1-8b-instant context window", ["128,000 tokens total, shared by input and output"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 190, 600, 216)
+        + svg_labeled_box(160, 218, 560, 130, "Usable input budget", ["~120,000 tokens", "system prompt + history + tool", "results + user query"], fill="#F2F2F2")
+        + svg_labeled_box(760, 218, 280, 130, "Reserved output", ["8,000 tokens", "max_tokens ceiling", "for this model"], fill="#D9D9D9")
+        + svg_arrow(440, 348, 440, 374)
+        + svg_labeled_box(160, 376, 880, 120, "MAX_ITERATIONS = 6 caps how much of that 120K a single run can spend", ["without this cap, BUG-F013 ran 40+ iterations and hit Groq's 6,000 TPM limit"], fill="#F2F2F2")
+        + "</svg>"
+    )
+    return svg_to_png("chapter23_token_budget", svg)
+
+
+def diagram_cumulative_growth_23() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520">'
+        '<rect width="1200" height="520" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Cumulative prompt tokens across a real 3-iteration run"], size=24, bold_first=True)
+        + svg_labeled_box(60, 110, 320, 150, "Iteration 1", ["chars=1,959", "prompt_tokens=820", "cum_prompt_tokens=820"], fill="#F2F2F2")
+        + svg_arrow(388, 185, 448, 185)
+        + svg_labeled_box(456, 110, 320, 150, "Iteration 2", ["chars=6,389", "prompt_tokens=1,724", "cum_prompt_tokens=2,544"], fill="#D9D9D9")
+        + svg_arrow(784, 185, 844, 185)
+        + svg_labeled_box(852, 110, 300, 150, "Iteration 3", ["chars=6,507", "prompt_tokens=1,947", "cum_prompt_tokens=4,491"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 268, 600, 320)
+        + svg_labeled_box(210, 322, 780, 130, "Every retrieve_documents call adds messages that never leave history", ["a 6-iteration run without compression keeps climbing toward the 120K usable ceiling"], fill="#F2F2F2")
+        + "</svg>"
+    )
+    return svg_to_png("chapter23_cumulative_growth", svg)
+
+
+def build_chapter_23() -> Path:
+    title = "The Token Budget — What Actually Fits in Your Context Window"
+    doc = configure_document(title)
+    add_cover(doc, 23, title, "PART V — TOKENS, CONTEXT, AND MODEL CHOICE", "A context window does not fill with meaning. It fills with tokens, and every one of them was paid for by something else that could have been there instead.")
+    add_chapter_heading(doc, 23, title)
+    add_body(doc, "Every chapter so far has treated the LLM call as if it simply happens — a query goes in, a response comes out. Underneath every one of those calls sits a hard, finite number: the context window. Part IV built an agent that iterates, retrieves, compresses, drafts, and judges, and every one of those steps either reads from or writes into that same shared, shrinking budget. Part V starts by making the budget itself visible.")
+    add_body(doc, "This chapter grounds the abstract idea of a \"context window\" in the real numbers this project has actually measured: `llama-3.1-8b-instant`'s 128,000-token window, the real per-iteration token counts a dry run logged, and the real bug — a 40-iteration runaway loop that blew through Groq's rate limit — that made token budgeting a first-class design concern rather than an afterthought.")
+    add_body(doc, "By the end of this chapter you will be able to read a model's context window as an actual budget with named line items, distinguish total window size from usable input capacity, trace a real multi-iteration run's cumulative token growth, and connect the `MAX_ITERATIONS` guardrail from Chapter 16 to the specific rate-limit failure it was built to prevent.")
+
+    add_heading(doc, "23.1 What a context window is and what it includes")
+    add_callout(doc, "Definition", "Context window", "The total number of tokens a model can process in a single call, shared between everything sent to it (system prompt, conversation history, tool results, the current user message) and everything it is permitted to generate back.")
+    add_body(doc, "A context window is not a private allowance for the user's question. It is one shared pool that every part of a single LLM call draws from: the system prompt (`_ROLE_AND_RULES` plus `_PROCESS_INSTRUCTIONS`, Chapter 26), the full conversation history accumulated so far (every prior assistant turn, every tool call, every tool result), the current user message, and the space reserved for the model's own response. None of these is free. A system prompt that grows by 500 tokens is 500 tokens the conversation history and the model's answer no longer have.")
+    add_body(doc, "This is why Chapter 22's compression pipeline and this chapter are really the same story told from two directions. NAC, DC, and LBC exist to shrink what goes *into* the window before it is sent. This chapter is about what the window *is* — the fixed container those compression stages are shrinking content to fit inside.")
+    add_body(doc, "It is also worth being precise about *when* the window is consumed. The context window is not a single running total drained gradually over a session the way a bank balance is — it is re-evaluated fresh on every individual API call. Each call to `llm`, `merge_llm`, or `judge_llm` sends its own complete prompt (system prompt plus however much history has accumulated up to that point) and must fit that entire prompt inside the window on its own. A run that has already made four LLM calls does not have a smaller window on its fifth call — it has the same 128,000-token window, now filled with more history than before, competing against the same fixed output reservation.")
+
+    add_body(doc, "`_serialize_messages()` in `agent_query.py` truncates every message's logged content to 600 characters before writing it to the debug log, appending an ellipsis when truncation occurs. This is not a token-budget mechanism for the LLM call itself — the log line never goes near the model — but it is worth noticing as the same discipline applied one layer downstream: even a human-facing debug trace of a multi-iteration run needs its own size discipline, or a single verbose tool result can make the log as unreadable as an unbounded prompt would make the model's actual context.")
+
+    add_heading(doc, "23.2 Total window vs. actually usable input")
+    add_body(doc, "ADR-005 records the two Groq models this project evaluated: `llama-3.1-8b-instant` at 128,000 total tokens with an 8,192-token output ceiling, and `llama-3.3-70b-versatile` at 128,000 total tokens with a 32,768-token output ceiling. Both numbers matter, and they are not the same number. The 128K figure is the *total* window — input plus output combined, in the way most providers document it. The output ceiling is a hard subtraction from that total before a single token of actual conversation history gets to occupy the remainder.")
+    add_body(doc, "For the 8B model, that leaves roughly 120,000 tokens of genuinely usable input space after reserving room for the model's own response — and that number still assumes the full 8,192-token output ceiling is actually needed, which most turns in this pipeline do not require. `_PROCESS_INSTRUCTIONS` caps the final answer at 400 words specifically so the model never needs to reserve anywhere near its full output ceiling, which is itself a token-budget decision as much as a formatting one.")
+    add_table(doc, ["Model", "Total window", "Output ceiling", "Usable input (approx.)"], [
+        ["llama-3.1-8b-instant", "128,000", "8,192", "~119,800"],
+        ["llama-3.3-70b-versatile", "128,000", "32,768", "~95,200"],
+    ], [2.6, 1.3, 1.3, 1.6])
+    add_body(doc, "The 70B model's larger output ceiling actually shrinks its usable input budget relative to the 8B model, at the same total window size. A model swap is never a pure upgrade to the numbers in this table — it trades one constraint for another, and Chapter 25 returns to what the 70B model buys back in exchange.")
+
+    add_heading(doc, "23.3 A worked token budget for a 6-iteration agentic RAG run")
+    add_body(doc, "A real dry-run trace (`Runs/RAG Dry Run (3).txt`) logs a `[CTXSIZE]` line after every LLM call, in the exact format `iter=N msgs=M chars=C prompt_tokens=P cum_prompt_tokens=T`. Iteration 1 opens at 820 prompt tokens with two messages. Iteration 2, after one round of `retrieve_documents` results accumulate into history, jumps to 1,724 tokens for that single call — cumulative 2,544. Iteration 3 adds another 1,947 — cumulative 4,491.")
+    add_code(doc, '''[CTXSIZE] iter=1 msgs=2 chars=1959 prompt_tokens=820  cum_prompt_tokens=820
+[CTXSIZE] iter=2 msgs=6 chars=6389 prompt_tokens=1724 cum_prompt_tokens=2544
+[CTXSIZE] iter=3 msgs=8 chars=6507 prompt_tokens=1947 cum_prompt_tokens=4491''')
+    add_body(doc, "Notice that `cum_prompt_tokens` is a running sum of every prompt sent, not the size of any single prompt — Groq bills and rate-limits by tokens sent per call, so both numbers matter for different reasons: the per-call `prompt_tokens` figure determines whether any single call fits the window, while `cum_prompt_tokens` across a session determines whether the run stays under a rate-limit ceiling before it finishes. This trace's growth rate — roughly 1,700-1,950 tokens added per iteration once retrieval results start accumulating — is exactly the trajectory `MAX_ITERATIONS = 6` was chosen to interrupt before it becomes a problem.")
+    add_body(doc, "A worked projection is now straightforward. This run's own growth rate, unmitigated by compression, would put a run at 4,491 tokens after 3 iterations. `compress_context` (Chapter 22B) replaces the raw retrieval messages with a single formatted context block precisely to break that trajectory — the reason it is a mandatory, not optional, phase transition in the state machine (Chapter 16.3) rather than something the LLM can simply decline to call.")
+
+    add_heading(doc, "23.4 How tool results inflate context fast")
+    add_body(doc, "The single biggest contributor to context growth in this pipeline is not the system prompt or the conversation turns — it is retrieved chunk content arriving as raw tool results. ADR-015 fixed chunk size at 1,000 characters with 200-character overlap, which is roughly 250 tokens per chunk using the conventional chars/4 estimate this project's own `[CONTEXT SIZE @ iter N]` logging block uses for its quick estimate alongside the API's actual reported figure.")
+    add_body(doc, "A single `retrieve_documents` call at `top_k=5` returns five chunks. Five chunks at roughly 250 tokens each is approximately 1,250 tokens of raw chunk text — before the source tags, formatting, and tool-call wrapper JSON that accompany every retrieval result are even counted. `_PROCESS_INSTRUCTIONS` allows 2-3 retrieval calls before compression, plus up to `MAX_TOTAL_RETRIEVALS = 5` across a run if the agent loops back — meaning an uncompressed run can accumulate 5,000-6,000 tokens of raw retrieved text alone, on top of everything else in the window.")
+    add_callout(doc, "Common pitfall", "Counting queries, not tokens", "A retrieval budget expressed only as \"5 calls maximum\" hides the real cost. Five calls at top_k=10 is twice the token load of five calls at top_k=5 for the identical iteration count — the call cap and the per-call top_k both belong in the same budget conversation, not just the call cap alone.")
+
+    add_heading(doc, "23.5 Reading real numbers — the total_prompt_tokens and total_completion_tokens log lines")
+    add_body(doc, "`agent_query.py` accumulates two running counters across the entire `run_agent()` call: `total_prompt_tokens` and `total_completion_tokens`, both initialized to zero and incremented after every LLM response by reading `usage.get(\"prompt_tokens\", 0)` and `usage.get(\"completion_tokens\", 0)` from the API's own usage block — not an estimate, the provider's actual billed count. Both counters are threaded through every return path of the function, including early exits, so a caller always receives an accurate total regardless of which phase the run terminated in.")
+    add_code(doc, '''total_prompt_tokens     = 0
+total_completion_tokens = 0
+...
+total_prompt_tokens     += usage.get("prompt_tokens", 0)
+total_completion_tokens += usage.get("completion_tokens", 0)''')
+    add_body(doc, "This distinction — per-call tokens from `[CTXSIZE]` versus run-total tokens from `total_prompt_tokens` — answers two different questions. Per-call figures answer \"did this specific request fit the window and how close was it to the ceiling.\" The run-total figures answer \"what did this entire user-facing answer actually cost,\" which is the number that scales with usage volume and the one worth watching if a deployment's Groq bill or rate-limit headroom becomes a concern.")
+
+    add_heading(doc, "23.6 The reserved-output problem")
+    add_body(doc, "Every LLM call in this pipeline implicitly reserves space for its response before it is sent, whether or not the caller thinks about it explicitly. A `max_tokens` parameter set too high does not just risk hitting the model's output ceiling — it silently shrinks the *input* budget available to that same call, because provider APIs typically require input plus requested output to fit within the total window.")
+    add_body(doc, "This is why `_PROCESS_INSTRUCTIONS`'s \"Max 400 words\" constraint on the final answer (Chapter 14.9) is not purely a presentation rule. Four hundred words is roughly 550-600 tokens — small enough that reserving output space for it costs almost nothing against a 120,000-token usable input budget, versus reserving room for the model's full 8,192-token output ceiling on every call as an unexamined default.")
+
+    add_heading(doc, "23.7 Budgeting for the judge and merge LLM calls, not just the agent's")
+    add_body(doc, "ADR-018's three-instance design — separate `llm`, `merge_llm`, and `judge_llm` objects — means a single user query's true token cost is not one context window's worth of consumption, but potentially several: the main agent loop's iterations, plus every NAC merge call, every DC redundancy-judge call, every LBC compression call, and the final grounding-judge call, each hitting its own context window independently.")
+    add_body(doc, "None of these secondary calls carry anywhere near the agent loop's accumulated history — a merge call sees only the handful of chunks being merged, not the full conversation — but at scale, across many concurrent users or a high-volume deployment, the aggregate token spend across all three LLM roles is the number that determines actual operating cost, not the agent loop's `total_prompt_tokens` figure in isolation. A budget review that only inspects `run_agent()`'s own counters is looking at one instance out of three.")
+    add_body(doc, "The three-instance design also means the *shape* of token spend differs by role in a way a single aggregate number would hide. The main `llm`'s calls grow across a session as history accumulates, matching the pattern Figure 23.2 traces. `merge_llm` and `judge_llm` calls, by contrast, stay roughly flat in size call to call — a merge call's prompt size depends on how many near-duplicate chunks it is merging, not on how far into the run the session has progressed. A deployment tracking cost trends over time should expect the agent loop's contribution to rise with query complexity while the compression and judging contribution stays comparatively stable, and a budget dashboard that conflates the two into one number obscures which part of the pipeline is actually driving a cost spike.")
+
+    add_heading(doc, "23.8 A token-budget checklist for a new agentic pipeline")
+    add_bullets(doc, [
+        "Know the model's total window AND its output ceiling — subtract the second from the first before calling the remainder \"usable.\"",
+        "Log both an estimated (chars/4) and an actual (API-reported) token count per call — they diverge, and the divergence itself is informative.",
+        "Track a cumulative counter across the whole run, not just per-call figures — rate limits are usually per-minute totals, not per-call ceilings.",
+        "Budget retrieval by tokens-per-call (top_k × chunk size), not call count alone.",
+        "Count every LLM role in the pipeline — agent, merge, judge — not just the one issuing the user-facing answer.",
+        "Cap output length explicitly wherever the answer format allows it — a small `max_tokens` reservation buys back real input budget.",
+    ])
+    add_body(doc, "Figure 23.1 lays the 8B model's window out as a labeled budget, and Figure 23.2 traces that budget being spent, call by call, in a real trace.")
+    add_figure(doc, diagram_token_budget_23(), "Figure 23.1 — The 128K total window splits into a reserved output ceiling and a usable input budget, and MAX_ITERATIONS exists to keep a run inside it.")
+    add_body(doc, "Figure 23.2 makes the abstract growth rate from Section 23.3 concrete: three real iterations, three real cumulative totals, climbing toward the ceiling Figure 23.1 already named.")
+    add_figure(doc, diagram_cumulative_growth_23(), "Figure 23.2 — Cumulative prompt tokens from a real trace, iteration by iteration, before compression intervenes.")
+
+    add_body(doc, "A token budget is not an optimization to bolt on after a pipeline works — it is the reason `MAX_ITERATIONS`, `MAX_TOTAL_RETRIEVALS`, and the compression pipeline exist at all, discovered the hard way when BUG-F013's unguarded loop hit Groq's rate limit at 40-plus iterations. The next chapter asks a related but distinct question: even when a prompt technically fits inside the window, does the model still use all of it well, or does quality quietly degrade long before the token counter actually runs out?")
+
+    path = OUT_DIR / "Chapter_23_Token_Budget.docx"
+    doc.core_properties.title = f"Chapter 23 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_lost_in_middle_24() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560">'
+        '<rect width="1200" height="560" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Attention is not flat across a long prompt"], size=24, bold_first=True)
+        + '<path d="M 140 380 C 340 150, 520 480, 600 460 C 680 480, 860 150, 1060 380" '
+        'fill="none" stroke="#2C3E6B" stroke-width="6"/>'
+        + svg_centered_text(220, 165, ["high attention", "start of prompt"], size=15, gap=20, bold_first=True)
+        + svg_centered_text(980, 165, ["high attention", "end of prompt"], size=15, gap=20, bold_first=True)
+        + svg_centered_text(600, 500, ["low attention — the middle"], size=17, bold_first=True)
+        + svg_labeled_box(70, 440, 260, 95, "0 – 16K tokens", ["GREEN — reliable"], fill="#F2F2F2")
+        + svg_labeled_box(470, 440, 260, 95, "16K – 32K tokens", ["YELLOW — degrading"], fill="#D9D9D9")
+        + svg_labeled_box(870, 440, 260, 95, "32K+ tokens", ["RED — unreliable"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter24_lost_in_middle", svg)
+
+
+def diagram_failure_modes_24() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Three distinct failure modes, three distinct fixes"], size=24, bold_first=True)
+        + svg_labeled_box(40, 100, 350, 300, "Hallucination", ["fabricated answer", "before retrieval ran", "fix: ADR-020"], fill="#F2F2F2")
+        + svg_labeled_box(425, 100, 350, 300, "Instruction drift", ["11,133-char citation", "loop under dilution", "fix: ADR-012"], fill="#D9D9D9")
+        + svg_labeled_box(810, 100, 350, 300, "Runaway loop", ["40+ iterations,", "6,000 TPM exceeded", "fix: BUG-F013"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter24_failure_modes", svg)
+
+
+def build_chapter_24() -> Path:
+    title = "Long-Context Performance and the Failure Cliff"
+    doc = configure_document(title)
+    add_cover(doc, 24, title, "PART V — TOKENS, CONTEXT, AND MODEL CHOICE", "The context window does not fail by refusing a prompt that is too long. It fails quietly, by answering a shorter question than the one that was actually asked.")
+    add_chapter_heading(doc, 24, title)
+    add_body(doc, "Chapter 23 established that a context window has a hard numeric ceiling. This chapter makes a harder claim: quality degrades well before that ceiling is reached, and the degradation is not a single cliff edge but a set of distinct failure modes, each with its own trigger and its own fix, all observed directly in this project's own dry runs and bug ledger rather than inferred from general long-context literature alone.")
+    add_body(doc, "\"Lost in the middle\" is the name commonly given to the empirical finding that transformer-based LLMs attend more reliably to information near the start and end of a long prompt than to information buried in the middle. This chapter grounds that general finding in three specific, project-real events: the `~16K prompt token` degradation onset ADR-005 identified for `llama-3.1-8b-instant`, the 11,133-character citation-repetition failure that motivated ADR-012's prompt restructuring, and BUG-F013's 40-iteration runaway loop that hit Groq's rate limit before the model itself ever \"failed\" in the conventional sense.")
+    add_body(doc, "By the end of this chapter you will be able to name three distinct long-context failure modes and tell them apart by symptom, place a given prompt into an empirically grounded reliability zone for the 8B model, and design a stress test that deliberately grows context size across repeated runs of the identical query to locate where a pipeline's own failure cliff actually sits.")
+
+    add_heading(doc, "24.1 The lost-in-the-middle problem")
+    add_callout(doc, "Definition", "Lost in the middle", "The empirically observed tendency of transformer-based LLMs to attend more reliably to tokens near the beginning and end of a prompt than to tokens in the middle, independent of how relevant the middle content actually is to the task.")
+    add_body(doc, "This is precisely the mechanism ADR-012 names as its rationale: \"transformer attention shows recency bias — the last tokens before the user message receive the highest weight on the next-token decision.\" The fix this project actually shipped — moving `_PROCESS_INSTRUCTIONS` to the very end of the system prompt, after the thumbdown history and blocked-variant injections that used to sit last — is a direct, working exploitation of this bias rather than an attempt to defeat it. Section 24.4 traces the specific failure this fix was built to stop.")
+    add_body(doc, "The practical consequence for a RAG pipeline specifically: content placed in the geometric middle of a long context — often exactly where accumulated tool results and retrieved chunks sit, sandwiched between the system prompt and the current turn — is the content most at risk of being under-weighted by the model relative to its actual relevance. This is a second, independent argument for compression (Chapter 22) beyond the token-budget argument Chapter 23 made: fewer tokens in the middle is not just cheaper, it is also more reliably attended to.")
+
+    add_heading(doc, "24.2 Empirical zones for an 8B model")
+    add_body(doc, "ADR-005 records a specific, measured onset point for `llama-3.1-8b-instant`: \"its instruction-following degrades at ~16K prompt tokens.\" This is not a vendor specification — it is this project's own observation, made during Batch testing (Batches 6, 8, and 10) where \"poor analytical reasoning, acronym confusion, weak synthesis\" were traced back to 8B model limitations at scale. Below that threshold, the model's behavior in this project's own dry runs is reliable; approaching and past it, quality measurably declines.")
+    add_body(doc, "A three-zone reliability model follows directly from that single data point plus the model's own architectural ceiling. Below ~16,000 prompt tokens, treat the model as reliable — the green zone this project's own testing supports directly. Between ~16,000 and the 70B model's 32,768-token output ceiling, treat the model as degrading — instruction-following softens, but the model has not yet run out of window. Above that, deep into territory only the total 128,000-token window technically permits, treat any single call as high-risk — a region this project's own testing never validated as safe to rely on for the 8B model specifically.")
+    add_figure(doc, diagram_lost_in_middle_24(), "Figure 24.1 — Attention is highest at the edges of a prompt; the three reliability zones for the 8B model are grounded in ADR-005's ~16K degradation onset.")
+    add_body(doc, "Figure 24.1's zone boundaries are a project-specific empirical finding, not a universal constant — a different model, a different prompt structure, or a different task would shift where green ends and red begins. What generalizes is the method: measure the actual degradation onset for the specific model in production, rather than assuming the vendor's advertised total window size is a reliability guarantee.")
+
+    add_heading(doc, "24.3 Where the rules start being ignored")
+    add_body(doc, "ADR-013 names a second, more specific ceiling: \"the 8B model's instruction-following ceiling (~1,800 tokens)\" — the point past which thumbdown-history injection into the system prompt risks burying `_PROCESS_INSTRUCTIONS` far enough from the generation point that the recency-bias exploitation from Section 24.1 stops working. This is why ADR-013 recommends capping thumbdown injection to the most recent two records: not an arbitrary conservatism, but a number chosen against a measured instruction-following budget.")
+    add_body(doc, "This 1,800-token figure is smaller than the ~16,000-token general degradation onset from Section 24.2 for a specific reason: instruction-following (correctly obeying \"do NOT batch tool calls,\" for instance) is a narrower, more fragile capability than general reasoning or retrieval quality, and it degrades earlier under context growth than broader task competence does. A model can still retrieve reasonably well at 10,000 tokens of context while simultaneously beginning to ignore a specific procedural constraint stated 1,800 tokens back from the generation point.")
+
+    add_heading(doc, "24.4 Hallucination vs. instruction drift vs. runaway loops")
+    add_body(doc, "Three distinct failure modes are easy to conflate under the single label \"the model got worse,\" but this project's own bug ledger shows they have different triggers and different fixes, and treating them as one problem risks applying the wrong remedy.")
+    add_body(doc, "Hallucination under context pressure looks like the pre-ADR-020 behavior: the 8B model calling `check_answer_quality` in Iteration 1, before any retrieval had occurred, with an answer synthesized from training knowledge rather than retrieved chunks. This is not a context-length problem at all — it happened at minimal context size — but a tool-availability problem, fixed by removing the option entirely rather than by trying to word a constraint the model would reliably obey.")
+    add_body(doc, "Instruction drift is a genuine context-pressure symptom: the 11,133-character citation-repetition degeneration Status.md records, where context dilution caused the model to \"vomit citations in a loop\" despite output-format rules stated in the system prompt. ADR-012's prompt restructuring — moving `_PROCESS_INSTRUCTIONS` last — targets exactly this failure mode.")
+    add_body(doc, "Runaway loops are a third, structurally different failure: BUG-F013's 40-plus-iteration session that exhausted Groq's 6,000-token-per-minute rate limit. This is not the model disobeying an instruction — the model was doing exactly what an unconstrained loop invited it to do, generate another query and try again. The fix was architectural (`MAX_ITERATIONS`, `MAX_TOTAL_RETRIEVALS`, in-batch dedup), not a prompt change, because no wording in a system prompt reliably stops a small model from continuing a pattern that the system itself never told it to stop.")
+    add_body(doc, "Figure 24.2 places all three failure modes side by side specifically so the differing fix column is visible at a glance: a schema change, a prompt restructure, and a hard iteration cap are not interchangeable remedies, and applying the wrong one to a given symptom wastes an engineering cycle without addressing the actual root cause.")
+    add_figure(doc, diagram_failure_modes_24(), "Figure 24.2 — Hallucination, instruction drift, and runaway loops are three distinct failures with three distinct, independently-verified fixes.")
+    add_body(doc, "The practical diagnostic question when a run produces a bad answer is which of these three columns the symptom belongs to. An answer that cites facts absent from any retrieved chunk, appearing early in a session before meaningful retrieval occurred, points to Figure 24.2's leftmost column — a tool-schema problem. An answer that violates a stated output-format rule despite the rule being present somewhere in the prompt points to the middle column — a prompt-ordering problem, addressed in Chapter 26. A session that simply never terminates, or terminates only after burning far more iterations than the query complexity warrants, points to the rightmost column — a missing or miscalibrated guardrail, addressed further in Chapter 27.")
+    add_callout(doc, "Common pitfall", "Treating every quality regression as a prompt problem", "Runaway loops and premature tool calls are architectural failures the prompt cannot reliably fix. Reach for a schema change or a hard guardrail first when the failure is structural, and reserve prompt restructuring (Chapter 26) for genuine instruction-following degradation under real context growth.")
+
+    add_heading(doc, "24.5 Designing a stress test")
+    add_body(doc, "Research topic 25 in this project's own research ledger — \"Configuration Combination Testing Functions As Architectural Stress Testing\" — makes an argument directly applicable here: \"running identical queries through different flag combinations exposed hidden dependencies, undocumented assumptions, and unsupported execution paths that normal testing never exercised.\" The same discipline applies to context size specifically. `run_combinations.py`, built for flag-combination testing, is the right shape of tool to adapt for a context-size sweep: the same query, run repeatedly with deliberately inflated context (via padding history with additional retrieved chunks or synthetic prior turns) at increasing sizes, watching for the specific point where output quality changes.")
+    add_body(doc, "A minimal version of this stress test needs only three runs: one comfortably inside the green zone from Section 24.2, one straddling the 16K yellow-zone boundary, and one deliberately pushed toward the red zone. Comparing the three answers side by side — not just for correctness, but for the specific failure signatures from Section 24.4 (fabricated claims, ignored output-format rules, or unbounded tool-call repetition) — locates a pipeline's actual failure cliff far more precisely than trusting a vendor's advertised window size.")
+
+    add_heading(doc, "24.6 Reading the failure cliff from real logs")
+    add_body(doc, "The `[CTXSIZE]` line Chapter 23.5 introduced is the exact instrument a stress test like Section 24.5's needs: it reports both the estimated and actual prompt-token count for every call, meaning a stress-test run's own log output already contains the data needed to correlate a specific token count with whatever output-quality change is observed at that point in the run. No separate profiling tooling is required — the same logging built for cost tracking doubles as the instrumentation for a reliability boundary search.")
+    add_code(doc, '''[CTXSIZE] iter=N msgs=M chars=C prompt_tokens=P cum_prompt_tokens=T
+# read alongside the generated answer for iteration N:
+#   T inside Figure 24.1's green zone  → treat the answer as trustworthy
+#   T inside the yellow zone           → re-check citations against chunks
+#   T inside the red zone              → treat as unverified, prefer a retry''')
+    add_body(doc, "Annotating a stress-test transcript this way — pairing each `[CTXSIZE]` line with a manual pass/fail judgment on that iteration's output — is what turns Section 24.5's three-run sweep from an anecdote into a reusable calibration table for a specific deployment's actual model, prompt, and corpus, rather than a one-time observation that goes stale the moment any of those three things changes.")
+
+    add_heading(doc, "24.7 What upgrading buys you")
+    add_body(doc, "ADR-005's recommendation of `llama-3.3-70b-versatile` \"for production agentic use\" is not simply about the larger 32,768-token output ceiling from Chapter 23's table — it is specifically about \"much better tool-use and instruction-following,\" which shifts where the yellow and red zones from Figure 24.1 actually begin. A 70B model does not eliminate the lost-in-the-middle effect, but it pushes the degradation onset further out, buying a pipeline more genuinely reliable context before compression becomes strictly necessary rather than merely prudent.")
+    add_body(doc, "This is the upgrade path ADR-018's two-LLM design already anticipated: `judge_llm` — the role most sensitive to faithful, careful reasoning over potentially long compressed context — is the first candidate for a 70B swap, while the main agent `llm`, whose calls stay comparatively short and orchestration-focused, can often remain on the faster 8B model without hitting the failure modes this chapter catalogued.")
+    add_body(doc, "The cost side of that trade is real and worth stating plainly rather than treating the 70B model as a strictly dominant choice. ADR-005 is explicit that the 70B model is \"slower and more expensive\" — a hybrid architecture is a bet that the reliability gained on the judge and merge roles, where a wrong verdict propagates directly into what the user sees, is worth more than the latency and cost saved by running every role on the faster model. For a role like retrieval-query generation, where a single bad query simply costs one wasted retrieval call rather than a wrong final answer, that trade often runs the other way.")
+    add_body(doc, "It is also worth being clear about what upgrading does not fix. None of the three failure modes cataloged in Section 24.4 disappear on a bigger or more capable model — they merely relocate. A 70B model with better instruction-following still needs `MAX_ITERATIONS` as a backstop, because the runaway-loop failure mode is a missing guardrail, not an instruction-following gap the model could reason its way out of on its own. Treating a model upgrade as a substitute for the architectural fixes Section 24.4 already identified would leave BUG-F013's failure mode intact, just delayed to a higher iteration count before the rate limit fires.")
+    add_body(doc, "None of the three failure modes this chapter named are solved by a bigger context window alone. A runaway loop with a 128K-token ceiling instead of a smaller one just takes longer to hit its rate limit. The next two chapters take the opposite approach: rather than asking for a larger, more forgiving window, they ask what a small model specifically needs — in its state tracking and in its prompt structure — to stay reliable inside the window it already has.")
+    add_body(doc, "That question is worth asking precisely because a hybrid architecture is not always available. A deployment constrained to a single model — by cost, by latency requirements, or simply by what a provider offers — cannot buy back reliability with a bigger model on the roles that need it most. For that deployment, understanding exactly why the 8B model struggles, not just that it struggles, is the only lever left, and that is the question Chapter 25 takes up directly.")
+
+    path = OUT_DIR / "Chapter_24_Long_Context_Failure_Cliff.docx"
+    doc.core_properties.title = f"Chapter 24 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_capacity_ceiling_25() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500">'
+        '<rect width="1200" height="500" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Two models, two different instruction-following ceilings"], size=24, bold_first=True)
+        + svg_labeled_box(90, 100, 480, 320, "llama-3.1-8b-instant", ["8B params, ~1,800-tok", "instruction ceiling (ADR-013)", "~16K-tok quality onset", "fast, moderate reliability"], fill="#F2F2F2")
+        + svg_labeled_box(630, 100, 480, 320, "llama-3.3-70b-versatile", ["70B params, much better", "tool-use + instructions", "32K output ceiling", "slower, more expensive"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter25_capacity_ceiling", svg)
+
+
+def diagram_mode_flip_25() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["The text-vs-code mode flip, and its fix"], size=24, bold_first=True)
+        + svg_labeled_box(80, 100, 470, 150, "Prompt asks for JSON", ["\"Return ONLY a JSON array\"", "no negative instruction"], fill="#F2F2F2")
+        + svg_arrow(550, 175, 610, 175)
+        + svg_labeled_box(650, 100, 470, 150, "Model emits Python", ["def is_redundant():", "risk observed under load"], fill="#D9D9D9")
+        + svg_labeled_box(80, 290, 470, 150, "Explicit negative instruction", ["\"You are NOT writing", "software. Do NOT generate", "Python.\" (real prompt text)"], fill="#F2F2F2")
+        + svg_arrow(550, 365, 610, 365)
+        + svg_labeled_box(650, 290, 470, 150, "Model stays in JSON mode", ["reliable structured output"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter25_mode_flip", svg)
+
+
+def build_chapter_25() -> Path:
+    title = "Why Small Models Struggle With Agentic Loops"
+    doc = configure_document(title)
+    add_cover(doc, 25, title, "PART V — TOKENS, CONTEXT, AND MODEL CHOICE", "A small model is not a weaker version of a large one doing the same thing more cautiously. It is a different kind of reasoner, and an agentic loop asks it to be something it was never quite trained to be.")
+    add_chapter_heading(doc, 25, title)
+    add_body(doc, "Chapter 24 catalogued three failure modes and traced each to a specific fix already shipped in this project. This chapter asks the question underneath all three: why does `llama-3.1-8b-instant` specifically — the model this project chose for development speed under ADR-005 — produce these failures in the first place, when the identical pipeline running on `llama-3.3-70b-versatile` largely does not?")
+    add_body(doc, "The honest answer is not a single root cause but five compounding ones, each grounded in a real decision or bug this project's own ledgers recorded: limited working-memory capacity, attention dilution under growing context, instruction-following as a fragile learned behavior rather than a hard rule, no explicit internal state tracking, and a specific failure this project observed directly — the model switching from JSON output into Python code under load.")
+    add_body(doc, "By the end of this chapter you will be able to explain, in concrete architectural terms rather than vague appeals to \"the model is small,\" why an 8B model needs a narrower per-phase tool surface than a 70B model would, and you will understand precisely which of this project's own guardrails exist specifically to compensate for a small model's limitations rather than for any model's limitations in general.")
+
+    add_heading(doc, "25.1 Parameter count as working-memory capacity")
+    add_body(doc, "Parameter count is not merely a speed and cost dial. ADR-005's side-by-side comparison — `llama-3.1-8b-instant` at 128K/8K context versus `llama-3.3-70b-versatile` at 128K/32K, with the larger model rated \"much better tool-use and instruction-following\" at the identical total window size — is evidence that raw context capacity and effective reasoning capacity are two separate resources. Both models can technically accept a 100,000-token prompt; only one of them reliably reasons well across all of it.")
+    add_body(doc, "A useful, if informal, analogy: parameter count behaves less like a bigger notebook and more like a bigger working memory. A larger notebook (more context window) lets you write more down. A bigger working memory (more parameters) lets you hold more of what you wrote down in active consideration at once, weighing it against everything else, while composing the next sentence. The 8B model has plenty of notebook — 128K tokens — but a comparatively small working memory to hold what is written in it under active consideration while generating a response.")
+    add_callout(doc, "Analogy", "The two-notebook test", "Give two people the identical 50-page case file and ask each to draft a decision. Both can physically hold the pages. Only the one with more working memory can keep page 3's constraint active in mind while writing the conclusion on page 50. Context window is the notebook; parameter count is closer to the working memory reading it.")
+    add_body(doc, "The distinction matters for a practical reason beyond metaphor: it explains why simply buying more context window — a bigger notebook — does not fix a small model's agentic-loop struggles on its own. Groq's 128K-token window is already far larger than any single query in this project's own dry runs actually uses. The bottleneck this project's own Batch 6, 8, and 10 testing observed was never \"the prompt didn't fit\" — every one of those runs fit comfortably inside the window. The bottleneck was reasoning quality over what did fit, which is a working-memory constraint, not a notebook-size constraint, and no amount of additional context capacity resolves a working-memory limitation.")
+
+    add_heading(doc, "25.2 Attention dilution as the conversation grows")
+    add_body(doc, "Chapter 24.1 established the lost-in-the-middle effect generally. The small-model-specific version of that story is dilution: as more tool calls, tool results, and turns accumulate in a session, each individual token's share of the model's finite attention budget shrinks, and a smaller model has less budget to begin with. The same 2,000 tokens of accumulated history that a 70B model attends to comfortably can meaningfully crowd out an 8B model's attention to the system prompt's rules, simply because there is less total attention capacity to distribute across a growing number of tokens.")
+    add_body(doc, "This is precisely the mechanism ADR-012 names when describing the failure it fixed: \"as the system prompt grew with injected thumbdown history ... the PROCESS instructions were buried in the middle of the prompt. The 8B model exhibited recency bias — PROCESS instructions far from the generation point were being ignored.\" Dilution and recency bias are two names for the same underlying resource constraint, observed directly in this project's own prompt-engineering history.")
+
+    add_heading(doc, "25.3 Instruction following is learned behavior, not a hard rule engine")
+    add_body(doc, "It is tempting to think of a system prompt's rules as something closer to code — stated once, obeyed absolutely. They are not. Every instruction in `_ROLE_AND_RULES` and `_PROCESS_INSTRUCTIONS` is a soft statistical bias on the model's next-token distribution, competing against every other bias the model learned during training and every other signal present in the current context. A rule stated clearly is more likely to be followed, not guaranteed to be followed — and \"more likely\" is exactly the gap smaller models close less reliably than larger ones.")
+    add_body(doc, "This reframing explains why ADR-010's phase-restricted tool schema — removing `check_answer_quality` from `tool_schemas` entirely during the RETRIEVE phase, rather than merely instructing the model not to call it early — was the fix that actually worked, where a purely prompt-based instruction had not been sufficient on its own. A hard architectural constraint (the tool literally is not offered) cannot be statistically overridden the way a soft instruction can. Chapter 17.3's boundary between \"what the model is offered\" and \"what the model is told\" is the same distinction, and this is the small-model reason that boundary matters as much as it does.")
+    add_body(doc, "The general principle worth extracting: for any constraint where violating it would be expensive — a premature answer synthesized from training knowledge rather than retrieved evidence, a fabricated citation, an unauthorized side effect — prefer removing the capability outright over instructing the model not to use it. Reserve soft prompt instructions for constraints where the cost of an occasional violation is genuinely tolerable, such as a stylistic preference in the final answer's phrasing. Confusing the two categories — treating a removable capability as merely a documented rule, or treating a stylistic preference as if it needed architectural enforcement — either leaves a real risk unguarded or spends engineering effort where a prompt sentence would have sufficed.")
+
+    add_heading(doc, "25.3B Where this leaves prompt engineering")
+    add_body(doc, "None of this makes prompt wording irrelevant — it narrows what prompt wording is actually good for. A soft instruction still meaningfully shifts the model's next-token distribution in the intended direction; it simply cannot be trusted as the sole safeguard against an expensive failure the way a schema-level constraint can. The practical rule this project's own history supports: use prompt instructions to bias behavior in the common case, and use architectural constraints — a narrowed tool schema, a hard iteration cap, a code-level deduplication check — anywhere the failure mode is expensive enough that \"usually obeyed\" is not good enough.")
+
+    add_heading(doc, "25.4 No explicit state tracking")
+    add_body(doc, "An 8B model has no persistent memory of its own prior actions beyond what is literally re-presented to it as text in the current prompt. \"How many times have I already called `retrieve_documents`\" is not a fact the model tracks internally — it is a fact the model must re-derive, every single turn, by re-reading its own accumulated conversation history and counting. Under Section 25.2's dilution, that counting becomes less reliable exactly when history has grown largest — which is precisely when an accurate count matters most.")
+    add_body(doc, "This project's own architecture does not ask the model to count reliably at all. `iterations` is a plain Python integer in `run_agent()`, incremented once per loop pass and compared against `MAX_ITERATIONS` in code — `while iterations < MAX_ITERATIONS:` — entirely outside the model's own reasoning. `seen_queries`, the in-batch deduplication set, is built the same way: a Python `set()` populated and checked by the harness, not a fact the model is trusted to track by re-reading its own transcript. Every hard limit this project enforces on the agentic loop is tracked in code specifically because the alternative — trusting the model's self-reported count — was never a reliable option for an 8B model.")
+    add_code(doc, '''iterations = 0
+...
+while iterations < MAX_ITERATIONS:
+    iterations += 1
+    ...
+    seen_queries: set[str] = set()
+    for tc in resp_tool_calls[:MAX_TOOL_CALLS_PER_ITERATION]:
+        if q in seen_queries:
+            continue  # deduplicated by the harness, not the model''')
+
+    add_heading(doc, "25.5 The text-vs-code mode-flip failure")
+    add_body(doc, "This project's own prompt files carry direct evidence of a specific, observed small-model failure mode: several prompts in `prompts.py` — `_DC_SCAN_PROMPT` and `_REDUNDANCY_JUDGE_PROMPT` among them — contain the identical defensive phrasing: \"You are NOT writing software. You are NOT generating Python. You are NOT solving a coding task.\" That phrasing would not exist, worded that specifically and repeated across multiple prompts, unless the model had genuinely produced Python code in place of the requested JSON output under some observed conditions.")
+    add_body(doc, "The likely mechanism: a small model trained heavily on code alongside natural language can, under context pressure or an ambiguously-phrased instruction, statistically drift toward its code-completion behavior instead of its structured-data-extraction behavior — the two learned patterns are close enough in the model's training distribution that dilution (Section 25.2) can tip the balance. Figure 25.2 traces the failure and the fix side by side.")
+    add_body(doc, "Both `_DC_SCAN_PROMPT` and `_REDUNDANCY_JUDGE_PROMPT` are exactly the prompts where the surrounding instructions are already dense with structural, near-code-like language — nested JSON shapes, bracket-counting rules, indexed arrays — which is itself a plausible contributor to why these two prompts specifically needed the reinforced negative instruction rather than every prompt in the file equally.")
+    add_figure(doc, diagram_mode_flip_25(), "Figure 25.2 — An explicit negative instruction, not a longer positive one, is what closes the text-vs-code mode-flip gap this project's own prompts guard against.")
+    add_body(doc, "The fix pattern is notable for what it is not: it is not a longer or more elaborate positive instruction (\"please return valid JSON matching this schema precisely\"), which this project's prompts already stated. It is an explicit negative instruction naming the specific wrong behavior directly. Chapter 26.8 generalizes this observation into a reusable prompt-engineering principle for small models.")
+
+    add_heading(doc, "25.6 When to upgrade to a 70B model and what changes")
+    add_body(doc, "Figure 25.1 places the two models' relevant ceilings side by side — not as a recommendation to always prefer the larger model, but as a concrete before/after of what actually changes on upgrade. ADR-018's two-LLM design already anticipated a selective answer: `judge_llm` and `merge_llm`, whose calls demand careful, low-error-tolerance reasoning over compressed context, are the natural first candidates for a 70B swap, while the main orchestration `llm` — issuing short, repetitive tool calls — can often stay on the faster, cheaper 8B model without hitting the failure modes this chapter catalogued.")
+    add_figure(doc, diagram_capacity_ceiling_25(), "Figure 25.1 — The 70B model's advantage is specifically in instruction-following reliability, not merely a bigger window at the same total context size.")
+    add_body(doc, "A useful heuristic for deciding which role to upgrade first: ask which role's mistakes are cheapest to recover from. A bad retrieval query costs one wasted call and gets corrected by the next reformulation attempt. A bad judge verdict propagates directly into whether a flawed answer reaches the user. Upgrade the role whose errors are least recoverable first — which is exactly why `judge_llm`, not the orchestrating `llm`, is ADR-018's stated first candidate.")
+    add_body(doc, "It is worth being explicit about the cost side of this decision too, since Chapter 24.7 already raised it: a 70B model is slower and more expensive per call, and a hybrid deployment pays that cost on every judge and merge invocation, not just the ones that would have gone wrong on the 8B model. The upgrade is worth its cost specifically because judge and merge errors are the least recoverable in this pipeline — an unfaithful merge or a wrongly-approved draft has no downstream stage left to catch it — not because a larger model is unconditionally better value for every role in the system.")
+
+    add_heading(doc, "25.7 Why this isn't a case against small models")
+    add_body(doc, "None of Sections 25.1 through 25.5 is an argument that small models are unsuitable for agentic RAG. It is an argument that small models need a narrower job description per turn than a monolithic free-form agent loop gives them — exactly the argument ADR-010 already made and this project already shipped. The 4-phase state machine (RETRIEVE → COMPRESS → DRAFT → JUDGE) does not make the 8B model smarter; it makes each individual decision the model is asked to make smaller and more constrained, which is precisely the kind of task a small model's more limited working memory and less reliable instruction-following can still handle well.")
+    add_body(doc, "This reframes the entire chapter's diagnosis into a design principle: every limitation catalogued here is a reason to narrow what a small model is asked to decide in any single turn, not a reason to abandon it. Chapter 26 takes that principle and applies it specifically to prompt structure — how to phrase, order, and trim what a small model reads so that even within a narrowed phase, its limited attention budget is spent on the instructions that matter most.")
+    add_body(doc, "The five limitations this chapter named — working-memory capacity, attention dilution, fragile instruction-following, absent self-tracking, and the text-vs-code mode flip — are not independent facts to memorize separately. They compound: a model with less working memory (25.1) is more susceptible to dilution as context grows (25.2), which makes its already-probabilistic instruction-following (25.3) less reliable still, at precisely the moment a task that requires self-tracking (25.4) is most likely to be attempted under pressure, and pressure is exactly the condition under which the mode-flip failure (25.5) was observed. Reading the five as one compounding chain, rather than five unrelated bullet points, is what makes the design response in Section 25.7 — narrow the phase, not the model — the correct one rather than a partial patch.")
+
+    path = OUT_DIR / "Chapter_25_Small_Models_Agentic_Loops.docx"
+    doc.core_properties.title = f"Chapter 25 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_prompt_anatomy_26() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620">'
+        '<rect width="1200" height="620" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Prompt anatomy: closest to generation wins recency bias"], size=22, bold_first=True)
+        + svg_labeled_box(350, 78, 500, 85, "_ROLE_AND_RULES", ["role, hard limits, tool descriptions"], fill="#F2F2F2")
+        + svg_arrow(600, 163, 600, 185)
+        + svg_labeled_box(350, 187, 500, 85, "Blocked variants + thumbdown history", ["contextual injection, grows per query"], fill="#D9D9D9")
+        + svg_arrow(600, 272, 600, 294)
+        + svg_labeled_box(350, 296, 500, 85, "_PROCESS_INSTRUCTIONS", ["the numbered steps to follow now"], fill="#D9D9D9")
+        + svg_arrow(600, 381, 600, 403)
+        + svg_labeled_box(350, 405, 500, 85, "Active priority block", ["only when thumbdown feedback exists"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 490, 600, 512)
+        + svg_labeled_box(230, 514, 740, 90, "generation point — the next token the model produces", ["highest attention lands here, closest to the bottom"], fill="#F2F2F2")
+        + "</svg>"
+    )
+    return svg_to_png("chapter26_prompt_anatomy", svg)
+
+
+def diagram_before_after_26() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560">'
+        '<rect width="1200" height="560" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Monolithic prompt vs. recency-split prompt"], size=22, bold_first=True)
+        + svg_centered_text(280, 80, ["BEFORE — _BASE_SYSTEM_PROMPT"], size=17, bold_first=True)
+        + svg_labeled_box(80, 100, 400, 80, "Role + rules", [], fill="#F2F2F2")
+        + svg_labeled_box(80, 188, 400, 80, "PROCESS instructions", ["buried in the middle"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_labeled_box(80, 276, 400, 80, "Thumbdown history", [], fill="#D9D9D9")
+        + svg_centered_text(280, 400, ["ignored under recency bias"], size=15, bold_first=True)
+        + svg_centered_text(920, 80, ["AFTER — split prompt"], size=17, bold_first=True)
+        + svg_labeled_box(720, 100, 400, 70, "_ROLE_AND_RULES", [], fill="#F2F2F2")
+        + svg_labeled_box(720, 178, 400, 70, "Thumbdown history", [], fill="#D9D9D9")
+        + svg_labeled_box(720, 256, 400, 110, "_PROCESS_INSTRUCTIONS", ["closest to generation"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_centered_text(920, 420, ["obeyed reliably"], size=15, bold_first=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter26_before_after", svg)
+
+
+def build_chapter_26() -> Path:
+    title = "Prompt Engineering for Small Models in Long Loops"
+    doc = configure_document(title)
+    add_cover(doc, 26, title, "PART V — TOKENS, CONTEXT, AND MODEL CHOICE", "Where an instruction sits in the prompt is not a formatting choice. For a small model under recency bias, it is closer to deciding whether the instruction exists at all.")
+    add_chapter_heading(doc, 26, title)
+    add_body(doc, "Chapter 25 established that an 8B model's instruction-following is a soft, probabilistic bias rather than a guarantee, and that this bias weakens further as more tokens accumulate. This chapter turns that diagnosis into a concrete, already-shipped set of prompt-engineering techniques — real changes this project made to `prompts.py` and `agent_query.py`, each traceable to a specific ADR and a specific observed failure.")
+    add_body(doc, "Every technique in this chapter answers the same underlying question: given a fixed, limited instruction-following budget (Chapter 25.1's working-memory ceiling), how should a prompt be structured, ordered, and trimmed so that the budget is spent on the instructions that matter most, rather than divided evenly — and therefore thinly — across everything the prompt happens to contain?")
+    add_body(doc, "By the end of this chapter you will be able to reproduce this project's own `_ROLE_AND_RULES` / `_PROCESS_INSTRUCTIONS` split and explain the recency-bias reasoning behind its exact ordering, apply a token-cost calculation to a growing contextual-injection block before it silently crowds out the instructions the model needs most, and recognize when a prompt problem needs a demonstration or a negative instruction rather than a longer positive one.")
+
+    add_heading(doc, "26.1 Section ordering matters")
+    add_callout(doc, "Definition", "Recency bias (prompting)", "The tendency of a transformer's next-token prediction to weight tokens near the end of the input more heavily than tokens further back, meaning the instructions placed closest to the generation point receive disproportionate influence over the immediate next action.")
+    add_body(doc, "ADR-012 states the ordering principle this project settled on directly: role and rules first, contextual injections (blocked variants, thumbdown history) in the middle, and PROCESS instructions last — appended immediately before the user's actual message, the position closest to the point where the model must decide its next action. This is not an arbitrary convention; it is a deliberate exploitation of the exact mechanism Chapter 25.2 described as a liability, turned into a tool.")
+    add_body(doc, "The ordering also encodes a second, quieter principle: put content that is stable across every query first (role, rules, tool descriptions never change turn to turn), and put content that varies by query — and therefore needs to be actively re-read each time — last. Static content the model has effectively \"seen\" in every training-adjacent system prompt benefits less from recency placement than instructions specific to the current call.")
+    add_body(doc, "It is worth being precise about what recency-based ordering does and does not fix. It does not shrink the total token count a small model must process, and it does not repair Chapter 25's underlying working-memory limitation. What it does is spend the model's existing, fixed attention budget more deliberately — placing the highest-value instruction where the model's own architecture already weights attention most heavily, rather than leaving that placement to whatever order a prompt happened to accumulate its sections in over successive edits.")
+
+    add_heading(doc, "26.2 The before-and-after of the prompt split")
+    add_body(doc, "The original design, per Status.md's 2026-05-12 entry, was a single monolithic `_BASE_SYSTEM_PROMPT` block with PROCESS instructions embedded in the middle. ADR-012 replaced it with two named constants — `_ROLE_AND_RULES` and `_PROCESS_INSTRUCTIONS` — assembled by `_build_system_prompt()` with everything else sandwiched between them in a specific, commented order.")
+    add_code(doc, '''parts = [_ROLE_AND_RULES]
+if blocked_variants:
+    parts.append(blocked_block)
+if prior_thumbdowns:
+    parts.append(thumbdown_history_block)   # passive: what went wrong
+# PROCESS goes after the history context and before the active priority block
+parts.append(_PROCESS_INSTRUCTIONS)
+if prior_thumbdowns:
+    parts.append(active_priority_block)     # active: what to seek — last''')
+    add_body(doc, "Notice the final wrinkle: when thumbdown feedback exists, an *active priority block* is appended after `_PROCESS_INSTRUCTIONS`, not before it. This is deliberate — the block restating what the user flagged as wrong needs to be even closer to the generation point than the general PROCESS steps, because it is the single most query-specific, highest-priority instruction the prompt can contain for that particular retry.")
+
+    add_heading(doc, "26.3 Strengthening \"do NOT batch tool calls\"")
+    add_body(doc, "`_PROCESS_INSTRUCTIONS` does not merely state its four-step procedure — it labels itself explicitly: \"PROCESS (follow in this exact order — do NOT batch tool calls)\", then numbers each step and marks GOOD/BAD examples inline for step 1 specifically, the step most prone to the premature-batching failure ADR-012 was written to stop.")
+    add_code(doc, '''1. FIRST, call retrieve_documents 2-3 times with SHORT, semantically different queries.
+   Wait for results before doing anything else. Do NOT call compress_context yet.
+   GOOD: short noun-phrase queries from different angles of the topic.
+   BAD:  rephrasings of the same angle ("what causes X", "X causes", "causes of X") — forbidden.''')
+    add_body(doc, "Numbering the steps and naming the anti-pattern explicitly (\"do NOT batch tool calls\") rather than describing the desired behavior only in the positive (\"call tools one purpose at a time\") is itself an application of Chapter 25.5's finding: a small model responds more reliably to an explicitly named failure mode than to an implicit contrast it must infer.")
+
+    add_heading(doc, "26.4 Compressing blocked-variants and thumbdown sections — the token-cost math")
+    add_body(doc, "ADR-013 records the number that makes this section necessary: thumbdown history injection reached \"up to ~1,800 tokens in Run 3\" — coincidentally very close to the entire instruction-following ceiling ADR-013 separately measured for the 8B model. A contextual injection block that grows unboundedly can, on its own, consume the model's entire reliable instruction-following budget before `_PROCESS_INSTRUCTIONS` is even reached.")
+    add_body(doc, "The math is straightforward per record: each injected prior-failure entry in `_build_system_prompt()` includes the original query, the user's feedback text, up to a 300-character bad-answer snippet, every reformulation tried, and up to two retrieved-chunk previews (200 characters each) per reformulation. A single richly-populated thumbdown record can easily run 400-600 tokens; three or four such records, uncapped, reconstructs ADR-013's 1,800-token problem from a handful of prior sessions alone.")
+    add_body(doc, "This is the same per-item budgeting discipline Chapter 23.4 applied to retrieved chunks, now applied to a different kind of injected content. Both cases share the identical shape: a per-item token cost, multiplied by however many items a naive design would inject without an explicit cap, compared against a measured ceiling the model actually respects. Once that comparison is made explicit, the cap stops looking like an arbitrary conservatism and starts looking like the only number consistent with the model's own measured limits.")
+
+    add_heading(doc, "26.5 Capping how many prior-failure records to inject")
+    add_body(doc, "ADR-013's stated remedy is a cap: \"Cap on thumbdown injection (most recent 2) recommended to prevent prompt bloat beyond the 8B model's instruction-following ceiling.\" This is Section 26.4's token math translated directly into a policy — not \"inject everything relevant,\" but \"inject only as much as the measured ceiling can actually absorb without crowding out `_PROCESS_INSTRUCTIONS`.\"")
+    add_callout(doc, "Common pitfall", "Optimizing for recall over budget", "Injecting every prior thumbdown record feels like it should help — more history, more context to avoid repeating a mistake. Past the instruction-following ceiling, additional records actively hurt, by diluting attention away from the procedural rules the model needs most. Two well-chosen records reliably obeyed beat five records that push PROCESS instructions past the model's effective ceiling.")
+    add_body(doc, "Choosing \"most recent\" as the selection criterion for which records survive the cap, rather than some notion of \"most similar\" or \"most severe,\" is itself a deliberate simplicity choice: recency of the thumbdown event is trivially computable from the record's own timestamp, requires no additional judge call to rank by relevance, and in practice correlates reasonably well with what a user is likely to still consider an open, unresolved complaint about this exact question.")
+
+    add_heading(doc, "26.6 Shorter tool schema descriptions reclaim instruction-following budget")
+    add_body(doc, "Tool schema descriptions are easy to overlook as a budget line item because they are not part of the system prompt text itself — but they are still tokens the model reads on every call. This project's own `retrieve_documents` and `compress_context` descriptions in `tools.py` each restate procedural rules — \"Call this 2-3 times first,\" \"Call this EXACTLY ONCE, AFTER your retrieve_documents calls are done\" — that `_PROCESS_INSTRUCTIONS` already states in full, numbered detail.")
+    add_body(doc, "This duplication is worth naming honestly rather than presenting as already resolved: it is a real, present opportunity in this codebase, not a shipped optimization. A tool description's job is to convey what the tool does and what arguments it needs — the *when* and *how many times* belong in `_PROCESS_INSTRUCTIONS`, stated once, where Section 26.1's recency placement already gives it maximum weight. Trimming each tool description to its minimal, non-duplicated form would reclaim real tokens from a section of the prompt the model reads on every single call, without removing any rule the model does not already receive elsewhere.")
+    add_body(doc, "There is a second cost to the duplication beyond raw token count, worth naming for the same reason Chapter 25.3 flagged conflicting soft instructions as a risk: two descriptions of the identical rule, worded slightly differently in the tool schema versus `_PROCESS_INSTRUCTIONS`, create an opportunity for the two to drift out of sync as either one is edited independently over time. A single source of truth for a procedural rule — stated once, in the place recency bias weights most heavily — is not only cheaper in tokens but also safer against the two descriptions silently disagreeing after a future edit touches one and not the other.")
+
+    add_heading(doc, "26.7 Demonstration over description")
+    add_body(doc, "Several of this project's own prompts do not merely describe the desired output shape — they show it. `_CHUNK_MERGE_PROMPT` and `_DC_SCAN_PROMPT` both include a full worked EXAMPLE INPUT paired with the exact EXAMPLE OUTPUT expected, using the project's own ASD-domain content as the example material rather than a generic placeholder.")
+    add_code(doc, '''EXAMPLE INPUT:
+[Source: a.pdf]
+ASD affects 1 in 36 children. Early diagnosis improves outcomes.
+
+EXAMPLE OUTPUT:
+{{"content": "ASD affects approximately 1 in 36 children [Source: a.pdf]...",
+  "sources": ["a.pdf"], "merged_from": 2}}''')
+    add_body(doc, "A worked example is a stronger signal than a schema description for the identical reason Chapter 25.3 gave for preferring architectural constraints over soft instructions: describing a JSON shape in prose asks the model to translate a rule into an output; showing the exact shape asks the model to pattern-match, which is closer to what next-token prediction already does well. This is precisely the mechanism available to fix Chapter 25.5's text-vs-code mode-flip failure at its root, rather than only patching it after the fact with a negative instruction.")
+
+    add_heading(doc, "26.8 Adding negative instructions when small models drift")
+    add_body(doc, "Chapter 25.5 already showed the artifact: \"You are NOT writing software. You are NOT generating Python. You are NOT solving a coding task.\" repeated verbatim across `_DC_SCAN_PROMPT` and `_REDUNDANCY_JUDGE_PROMPT`. This section states the general rule that specific fix instantiates: when a small model's failure mode has a name — a specific wrong output format, a specific premature action — state that failure by name and forbid it explicitly, rather than trusting a positive instruction to rule it out implicitly.")
+    add_body(doc, "The two techniques from Sections 26.7 and 26.8 are not competitors; this project's own prompts use both together. `_DC_SCAN_PROMPT` pairs its negative instruction with worked GOOD/BAD redundancy examples in the same prompt. A positive demonstration shows the model what correct output looks like; a negative instruction rules out the single most likely wrong path a small model drifts toward under pressure. Neither alone reliably prevents both failure directions.")
+    add_body(doc, "Figure 26.1 draws together every ordering decision from Sections 26.1 through 26.5 into a single picture: it is the actual layout `_build_system_prompt()` assembles, top to bottom, with each block's recency-driven placement made visually explicit rather than left implicit in the function's control flow.")
+    add_figure(doc, diagram_prompt_anatomy_26(), "Figure 26.1 — Static role and rules lead; query-specific context sits in the middle; the exact procedure to follow now sits last, closest to the generation point.")
+
+    add_heading(doc, "26.9 Measuring the fix")
+    add_body(doc, "ADR-012's own stated impact is concrete and falsifiable, not merely theoretical: the split prompt structure, combined with the OUTPUT FORMAT constraints added afterward, was a direct response to \"the 11,133-char repetition-degeneration failure observed when context dilution caused the model to vomit citations in a loop.\" The before/after in Figure 26.2 is not a hypothetical comparison — it is this project's own actual prompt-architecture history, one version replaced by another after a specific, logged failure.")
+    add_figure(doc, diagram_before_after_26(), "Figure 26.2 — The monolithic prompt buried PROCESS instructions where recency bias could not reach them; the split prompt places them last, deliberately.")
+    add_body(doc, "The honest caveat worth stating: none of these techniques change what the model fundamentally is. They change where the model's limited, probabilistic attention is spent, given that it will always be limited and probabilistic for a model this size. Chapter 25.3's distinction — soft instruction versus hard architectural constraint — still applies underneath every technique in this chapter; a well-placed instruction is more likely to be obeyed, never guaranteed to be.")
+    add_body(doc, "Prompt structure alone cannot substitute for state the system itself must track reliably regardless of what the model reads or ignores on a given turn. The next chapter turns to exactly that: the state-engineering mechanisms — tool-result injection, hard filters, history scrubbing — that keep an agentic loop correct even when a small model's attention to any single instruction cannot be fully guaranteed.")
+    add_body(doc, "Taken together, Sections 26.1 through 26.8 describe a single coherent discipline rather than eight independent tricks: identify what the model most needs to obey right now, place it where recency bias gives it maximum weight, keep everything sharing that budget as small as the measured ceiling allows, and prefer showing or explicitly forbidding over merely describing when a specific failure mode has already been observed. Every one of this project's own prompt-engineering decisions in `prompts.py` and `agent_query.py` traces back to one of these four moves, applied to a specific, logged failure rather than to a generic best practice borrowed unmodified from elsewhere.")
+    add_body(doc, "This is also why the chapter opened with a caveat worth repeating at the close: none of these techniques are a substitute for the architectural constraints Chapter 25.3 already argued for. A well-ordered, well-trimmed prompt makes an 8B model's *soft* instruction-following meaningfully more reliable — Section 26.9's before/after is real evidence of that — but it remains soft. Any constraint where an occasional violation would be genuinely costly still belongs one layer down, enforced in code rather than merely well-placed in the prompt the model happens to read.")
+
+    path = OUT_DIR / "Chapter_26_Prompt_Engineering_Small_Models.docx"
+    doc.core_properties.title = f"Chapter 26 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_state_layers_27() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620">'
+        '<rect width="1200" height="620" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["State engineering: soft prompt text to hard code enforcement"], size=22, bold_first=True)
+        + svg_labeled_box(60, 90, 520, 105, "System prompt (Chapter 26)", ["stated once, read every call", "soft — can be diluted"], fill="#F2F2F2")
+        + svg_labeled_box(620, 90, 520, 105, "Tool-result injection (27.2)", ["\"Retrieval limit reached\"", "returned as the call's own result"], fill="#F2F2F2")
+        + svg_labeled_box(60, 220, 520, 105, "Retry user message (27.3)", ["appended fresh each re-loop", "\"Do NOT repeat...\" + the reason"], fill="#D9D9D9")
+        + svg_labeled_box(620, 220, 520, 105, "Hard tool-layer filter (27.4)", ["checked in code before the model", "ever sees the duplicate query"], fill="#D9D9D9")
+        + svg_arrow(600, 340, 600, 366)
+        + svg_labeled_box(160, 368, 880, 130, "agent_state — single source of truth (27.5 / 27.6)", ["iterations, total_retrievals, seen_queries, accumulated chunks", "every layer above reads from or writes to this one dict"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter27_state_layers", svg)
+
+
+def diagram_single_source_27() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["One counter, three readers vs. three counters, three answers"], size=22, bold_first=True)
+        + svg_labeled_box(80, 90, 460, 110, "agent_state[\"total_retrievals\"]", ["one integer, incremented once"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(310, 200, 310, 240)
+        + svg_labeled_box(80, 242, 460, 190, "Tool filter · retry message · final log", ["all three read the SAME value", "always agree with each other"], fill="#F2F2F2")
+        + svg_labeled_box(660, 90, 460, 110, "Three separate ad-hoc counters", ["one per consumer, tracked apart"], fill="#D9D9D9")
+        + svg_arrow(890, 200, 890, 240)
+        + svg_labeled_box(660, 242, 460, 190, "Each can drift from the others", ["a fixed cap in one place, forgotten", "in another — silent inconsistency"], fill="#D9D9D9")
+        + "</svg>"
+    )
+    return svg_to_png("chapter27_single_source", svg)
+
+
+def build_chapter_27() -> Path:
+    title = "Agent State Engineering Beyond the System Prompt"
+    doc = configure_document(title)
+    add_cover(doc, 27, title, "PART V — TOKENS, CONTEXT, AND MODEL CHOICE", "The most reliable instruction in an agentic loop is the one the model never has to remember, because the system never let it forget in the first place.")
+    add_chapter_heading(doc, 27, title)
+    add_body(doc, "Chapter 26 optimized what the system prompt says and where it says it. This chapter asks a different question: what happens to correctness when even a well-placed, well-worded instruction still isn't obeyed on some fraction of turns, because Chapter 25's underlying limitation — soft, probabilistic instruction-following — never fully goes away no matter how well the prompt is engineered?")
+    add_body(doc, "The answer this project's own `agent_query.py` already gives, in code written well before this book named the pattern, is to stop relying on the system prompt as the sole place state lives. Retrieval counts, tried queries, and retry context are tracked in Python variables and re-injected into the conversation at exactly the moments the model needs them — not trusted to the model's own memory of a system prompt read many tokens ago.")
+    add_body(doc, "By the end of this chapter you will be able to name four distinct places agent state can live between a system prompt and pure code, each with a different reliability guarantee, and you will recognize this project's own `total_retrievals` cap, `seen_queries` dedup set, and INSUFFICIENT-retry message as three concrete instances of a single underlying principle: state a system depends on for correctness belongs in code, not in the hope that a model remembers what it read earlier.")
+
+    add_heading(doc, "27.1 Why \"remind the model from the system prompt\" stops working at scale")
+    add_body(doc, "A tempting first response to Chapter 25's failures is to add more reminders to the system prompt — restate the iteration count, restate which queries are already tried, restate the retrieval cap, every single turn. Chapter 23.4 already quantifies why this does not scale: every reminder is itself tokens, competing for the same limited instruction-following budget Chapter 24.3 measured at roughly 1,800 tokens for the 8B model. A system prompt that grows to hold a full, ever-lengthening restatement of \"here is everything that has happened so far\" eventually becomes the exact bloated, diluted prompt ADR-012 was written to fix.")
+    add_body(doc, "The alternative this project's own code demonstrates is not \"remind harder\" but \"remind precisely, at the moment of use, in the channel most likely to be read.\" Rather than one growing system-prompt block trying to cover every possible future need, state is injected in small, targeted pieces exactly where and when a specific decision depends on it — which is Section 27.2 through 27.4's actual subject.")
+    add_body(doc, "This distinction is worth stating as a general design rule, not just a description of one codebase's choices: a system prompt is written once per session and read on every subsequent call, which makes it the wrong place for anything that changes turn to turn. State that changes — how many retrievals have run, which queries already failed, what the last verdict said — belongs in a location that updates itself automatically as the loop progresses, not in a block of static text a developer would otherwise need to manually rewrite on every iteration just to keep it current.")
+
+    add_heading(doc, "27.1B What counts as state versus what counts as instruction")
+    add_body(doc, "It helps to draw a sharp line between two things this chapter's mechanisms both touch: instructions (how the model should behave, established once in Chapter 26's prompt structure) and state (facts about what has already happened, which change every turn). `_ROLE_AND_RULES` and `_PROCESS_INSTRUCTIONS` are instructions — they do not change within a session. `total_retrievals`, `all_tried_queries`, and the current iteration count are state — they change on nearly every turn of the loop. Conflating the two, by trying to encode changing facts as if they were static instructions, is precisely what produces the token-bloat problem Section 27.1 already diagnosed.")
+
+    add_heading(doc, "27.2 Injecting retrieval state into every tool result")
+    add_body(doc, "`_handle_retrieve_documents_call()` in `agent_query.py` does not merely return retrieved chunks — when a limit is reached, it returns state directly as the tool's own result text: `\"Retrieval limit reached. Use what you have to answer.\"` when `total_retrievals >= MAX_TOTAL_RETRIEVALS`. This is state injection at the single most recency-favorable position available: a tool result is, by construction, among the most recent tokens the model reads before its next decision — Chapter 26.1's recency-bias placement, achieved automatically, for free, as a side effect of how tool calls work.")
+    add_code(doc, '''if total_retrievals >= MAX_TOTAL_RETRIEVALS:
+    result = "Retrieval limit reached. Use what you have to answer."
+    logger.warning(f"  [SKIPPED] retrieval cap ({MAX_TOTAL_RETRIEVALS}) reached")
+    return result''')
+    add_body(doc, "The same pattern appears in the retrieval judge's sidecar message, appended as its own `{\"role\": \"tool\", ...}` entry whenever a retrieval verdict is FAIL or PARTIAL — `[RETRIEVAL JUDGE] The retrieval tracks were validated separately...` — a second, independent channel carrying state (this batch's relevance quality) into the conversation at the moment it is most actionable, rather than folded into a system-prompt paragraph the model would need to actively recall several turns later.")
+    add_body(doc, "Both messages share a structural property worth naming: they are self-terminating. `\"Retrieval limit reached. Use what you have to answer.\"` does not merely inform — it closes off a path, functioning simultaneously as Section 27.4's hard filter and as the state signal explaining why that filter fired. A model reading this text has both the fact (the cap was hit) and the consequence (stop retrieving, proceed to answer) delivered in the same nine words, at the exact turn where both pieces of information are needed and nowhere else.")
+
+    add_heading(doc, "27.3 The per-iteration state-summary message")
+    add_body(doc, "When the JUDGE phase returns INSUFFICIENT with retrieval budget still remaining, `run_agent()` does not simply loop back to RETRIEVE silently — it appends a fresh `{\"role\": \"user\", ...}` message summarizing exactly what happened and what to do differently, built fresh on every re-loop rather than accumulated as one growing block.")
+    add_code(doc, '''retry_msg = (
+    f"Your previous answer was judged INSUFFICIENT by the quality checker.\\n"
+    f"Reason: {reason}\\n\\n"
+    f"Please call retrieve_documents again with 1-2 NEW, SEMANTICALLY DIFFERENT "
+    f"query variants that approach the topic from a fresh angle. "
+    f"Do NOT repeat any query you have already tried."
+)
+messages.append({"role": "user", "content": retry_msg})''')
+    add_body(doc, "This message plays the identical role a status update plays in a long conversation between two people who keep losing the thread: it does not ask the model to recall the whole history, it hands the model a compact, current summary of exactly the two facts it needs right now — why the last attempt failed, and what to try differently — placed at the exact point recency bias weights most heavily, immediately before the decision it should inform.")
+    add_callout(doc, "Analogy", "The relay runner's baton, not the full race recap", "A relay runner does not need to hear a replay of every prior leg of the race before taking the baton — only the current pace and what's left to run. `retry_msg` is the baton handoff: the reason for the last failure and the next concrete instruction, nothing more, passed at exactly the moment it matters.")
+
+    add_heading(doc, "27.4 Hard filters at the tool layer")
+    add_callout(doc, "Definition", "Hard filter", "A check performed in code, before a request ever reaches the model's decision-making, that refuses or short-circuits an action outright — as distinct from a soft instruction that merely asks the model not to take that action.")
+    add_body(doc, "The retrieval-cap message from Section 27.2 and the duplicate-query message below it in the same function are not merely informational text — they are the visible surface of a hard filter that has already made its decision before the model's prior instruction-following even comes into play. `all_tried_queries` is a Python set, checked with a normalized string comparison, before the model's chosen query is ever sent to the retriever.")
+    add_code(doc, '''q_normalized = args["query"].strip().lower()
+if q_normalized in all_tried_queries:
+    return "You already tried this exact query. Try a genuinely different angle."
+all_tried_queries.add(q_normalized)''')
+    add_body(doc, "This is Chapter 25.3's soft-versus-hard distinction applied at the smallest possible granularity: `_PROCESS_INSTRUCTIONS`'s \"Never repeat a query already tried\" is the soft version of this exact rule, stated in the system prompt as a bias on the model's behavior. The `all_tried_queries` check is the hard version — the query is rejected regardless of whether the model's instruction-following held on this particular turn. Reliability here does not depend on the prompt working; the prompt and the filter work together, with the filter as the guarantee and the prompt as the reason the filter rarely has to intervene at all.")
+    add_body(doc, "The `MAX_TOTAL_RETRIEVALS` check from Section 27.2 is the identical pattern at the level of a whole session rather than a single query: `_ROLE_AND_RULES` states the soft version — \"retrieve_documents: max 5 calls total\" — and the code-level comparison `if total_retrievals >= MAX_TOTAL_RETRIEVALS` is the hard version underneath it. Both this and the query-deduplication filter share the same shape: a stated rule in the prompt, and an unconditional check in code that holds even on the turn the model's instruction-following happens to fail.")
+    add_body(doc, "It is worth being precise about what a hard filter actually buys, because it is not \"the model never tries the forbidden action.\" The model can and sometimes will emit a duplicate query or attempt a sixth retrieval call — Chapter 25's soft instruction-following limits do not disappear just because a filter exists downstream. What the filter buys is that the *action never takes effect*: the duplicate query never reaches the retriever, the sixth retrieval attempt never consumes a real API call. The model's mistake becomes harmless, caught and neutralized in code, rather than something the prompt has to somehow prevent from happening in the first place.")
+
+    add_heading(doc, "27.5 Compressing tool results before appending to history")
+    add_body(doc, "`compress_context()`'s chat-history scrubbing — replacing every raw `retrieve_documents` tool-result message with `COMPRESSED_PLACEHOLDER` once compression runs — is itself a state-engineering move, not merely a token-budget one. Leaving stale raw retrieval results in history after they have already been superseded by a compressed, consolidated context is a second source of truth the model could accidentally read from instead of the canonical compressed version — precisely the kind of drift Section 27.6 argues against.")
+    add_body(doc, "The token-cost side of this replacement is real and worth estimating concretely, even without a project-recorded percentage figure to cite directly. ADR-015 fixes chunk size at roughly 250 tokens; a single raw `retrieve_documents` result carrying five chunks costs on the order of 1,250 tokens (Chapter 23.4's own calculation), while `COMPRESSED_PLACEHOLDER` is a fixed, short sentence of well under 50 tokens. Replacing even one such message is a reduction on the order of 95% for that specific message alone — the aggregate savings across a multi-retrieval session scales with however many raw results compression is able to retire from history at once.")
+    add_body(doc, "A session with the full 2-3 pre-compression retrieval calls `_PROCESS_INSTRUCTIONS` permits, each carrying roughly 1,250 tokens of raw chunk text, holds 2,500-3,750 tokens of now-superseded content in history right up until `compress_context` runs. Scrubbing that content is not optional bookkeeping — left in place, it is exactly the kind of middle-of-prompt bulk Chapter 24.1's lost-in-the-middle effect predicts the model will attend to unreliably, made worse by the fact that this particular bulk is not merely low-value but actively stale, describing chunks the compressed context has already superseded.")
+
+    add_heading(doc, "27.6 The single-source-of-truth principle")
+    add_body(doc, "Every mechanism in this chapter reads from or writes to the same place: `agent_state`, `total_retrievals`, `all_tried_queries`, and `iterations` are each tracked exactly once, in code, and every consumer — the tool-result filter, the retry message, the final answer's iteration-count log line — reads that single value rather than maintaining its own separate count. Figure 27.2 makes the contrast explicit: one counter with three readers cannot disagree with itself; three independent ad-hoc counters, one per consumer, can silently drift the moment any single one of them is updated without updating the others.")
+    add_figure(doc, diagram_single_source_27(), "Figure 27.2 — A single counter shared by every consumer cannot disagree with itself; separately tracked counters can silently drift apart.")
+    add_body(doc, "Figure 27.1 places all four mechanisms from this chapter on one spectrum, from the softest (a system-prompt sentence, Chapter 26) to the hardest (a code-level filter that never even surfaces as text, Section 27.4), with `agent_state` as the shared foundation every layer above it ultimately reads from or writes to.")
+    add_figure(doc, diagram_state_layers_27(), "Figure 27.1 — Four state-engineering layers, ordered from softest to hardest, all grounded in the same underlying agent_state.")
+
+    add_body(doc, "The principle generalizes well beyond this specific pipeline: any fact a system depends on for correctness — a count, a flag, a set of things already tried — should have exactly one authoritative home. The system prompt, tool results, and retry messages are all legitimate *channels* for surfacing that fact to the model at the right moment, per Chapter 26's recency discipline, but none of them should be where the fact actually *lives*. That distinction — one source of truth, many channels for communicating it — is the thread running through every guardrail this project's own agentic loop relies on, and it closes the argument Part V opened with Chapter 23's token budget: a small model operating inside a finite window stays reliable not because it remembers everything correctly, but because the system around it was engineered to need it to remember as little as possible.")
+    add_body(doc, "Every mechanism this chapter named — hard filters, injected state, a single authoritative counter — governs state that lives and dies with one query's `run_agent()` call. Part VI turns to a different, longer-lived kind of state: what a system remembers across sessions, once a query is finished and the next user arrives asking something the system may already, in some sense, have learned.")
+    add_body(doc, "That shift matters because none of the within-session guarantees this chapter built — the single counter, the hard filter, the self-terminating tool result — automatically extend across a session boundary. A `total_retrievals` count reset to zero at the start of the next query is correct behavior for that variable's actual scope. Part VI's subject is a different question entirely: not how a single run stays internally consistent, but what, if anything, should persist once that run ends and be available the next time a related question arrives.")
+
+    path = OUT_DIR / "Chapter_27_Agent_State_Engineering.docx"
+    doc.core_properties.title = f"Chapter 27 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
 BUILDERS = {
+    27: build_chapter_27,
+    26: build_chapter_26,
+    25: build_chapter_25,
+    24: build_chapter_24,
+    23: build_chapter_23,
     11: build_chapter_11,
     18: build_chapter_18,
     20: build_chapter_20,

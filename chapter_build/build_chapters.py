@@ -4379,10 +4379,638 @@ def build_chapter_20b() -> Path:
     add_body(doc, "That measured cost gradient is what proved the layered design earns its complexity: deterministic parsing resolves the large majority of real cases in under half a millisecond, and only a minority ever pay the LLM-repair tier's cost at all. The same suite is also what surfaced Chapter 20.11's fabrication bug in the first place — every Python-class-syntax case returning `{}` instead of escalating, every bare-refusal case producing a populated object instead of signaling absence, found because the harness ran all forty catalogued failure modes against real schemas and logged exactly where each one landed, not because anyone suspected those specific cases in advance.")
     add_body(doc, "A test harness built from a failure-mode catalogue rather than from whatever inputs happened to be on hand is the difference between \"this passed the tests I thought to write\" and \"this was checked against every failure this project has ever actually seen.\" The second claim is the only one worth making about a repair pipeline whose entire job is surviving inputs nobody could fully anticipate.")
 
-    add_body(doc, "`fix_llm_output.py` closes the loop this Part opened: Chapter 18 built an agent that could act, Chapter 19 and 19B gave it a graph to act within, Chapter 20 gave it a judge to check what it produced, and this chapter gave every structured call in between a way to survive its own model's imperfect grip on syntax. None of it makes the underlying model more reliable — it makes the system around an unreliable model reliable instead, which is the only kind of reliability a project that does not control model weights ever actually gets to build. Part V turns from correctness to memory: how a system that already retrieves, generates, and judges well begins to learn from its own validated interactions over time.")
+    add_body(doc, "`fix_llm_output.py` closes the structural half of the loop this Part opened: Chapter 18 built an agent that could act, Chapter 19 and 19B gave it a graph to act within, Chapter 20 gave it a judge to check what it produced, and this chapter gave every structured call in between a way to survive its own model's imperfect grip on syntax. None of it makes the underlying model more reliable — it makes the system around an unreliable model reliable instead, which is the only kind of reliability a project that does not control model weights ever actually gets to build. Chapter 20 checked whether an answer is grounded; Chapter 21 asks the narrower, easier-to-miss question sitting right next to it — whether the answer is even about what was asked.")
 
     path = OUT_DIR / "Chapter_20B_Structured_Output_Reliability.docx"
     doc.core_properties.title = f"Chapter 20B — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_relevance_gate_21() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700">'
+        '<rect width="1200" height="700" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["A cheap filter earns the right to an expensive one"], size=24, bold_first=True)
+        + '<ellipse cx="600" cy="100" rx="180" ry="42" fill="#FFFFFF" stroke="#000000" stroke-width="3"/>'
+        + svg_centered_text(600, 100, ["query + answer"], size=19, bold_first=True)
+        + svg_arrow(600, 142, 600, 168)
+        + svg_labeled_box(390, 170, 420, 100, "Cosine Smoke-Test", ["embed both texts, compare vectors", "near-zero marginal cost"], fill="#F2F2F2")
+        + svg_arrow(600, 270, 600, 296)
+        + '<polygon points="600,298 760,360 600,422 440,360" fill="#D9D9D9" stroke="#000000" stroke-width="3"/>'
+        + svg_centered_text(600, 360, ["Above", "threshold?"], size=18, gap=24, bold_first=True)
+        + svg_arrow(752, 345, 828, 313)
+        + svg_centered_text(800, 318, ["no"], size=15, bold_first=True)
+        + svg_labeled_box(830, 288, 330, 100, "IRRELEVANT", ["short-circuit — no LLM call spent"], fill="#FFFFFF", dashed=True)
+        + svg_arrow(600, 422, 600, 448)
+        + svg_centered_text(630, 440, ["yes"], size=15, bold_first=True)
+        + svg_labeled_box(410, 450, 380, 110, "LLM Judge", ["RELEVANT / PARTIAL / IRRELEVANT", "+ one-sentence reason"], fill="#808080", text_fill="#FFFFFF")
+        + svg_arrow(600, 560, 600, 586)
+        + '<ellipse cx="600" cy="624" rx="200" ry="38" fill="#2C3E6B" stroke="#000000" stroke-width="4"/>'
+        + svg_centered_text(600, 624, ["verdict routes the loop"], size=17, fill="#FFFFFF", bold_first=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter21_relevance_gate", svg)
+
+
+def diagram_cosine_failures_21() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420">'
+        '<rect width="1200" height="420" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Two ways cosine similarity alone gets it wrong"], size=24, bold_first=True)
+        + svg_labeled_box(60, 100, 520, 180, "High Similarity, Wrong Answer", ["shares vocabulary with the query", "states an incorrect fact confidently", "cosine score: high"], fill="#D9D9D9")
+        + svg_labeled_box(620, 100, 520, 180, "Low Similarity, Correct Answer", ["terse, uses different words than the query", "fully correct and grounded", "cosine score: low"], fill="#D9D9D9")
+        + svg_labeled_box(150, 310, 900, 85, "Cosine measures word-choice overlap, not correctness",
+                           ["a smoke-test, never the only gate"], fill="#FFFFFF", dashed=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter21_cosine_failures", svg)
+
+
+def build_chapter_21() -> Path:
+    title = "Answer-Relevance Verification (Separate From Groundedness)"
+    doc = configure_document(title)
+    add_cover(doc, 21, title, "PART IV — FROM RAG TO AGENTIC RAG", "A fully grounded answer to the wrong question is still the wrong answer.")
+    add_chapter_heading(doc, 21, title)
+    add_body(doc, "Chapter 20 built a judge that checks whether an answer's claims trace back to retrieved evidence. That judge, as built, is silent on a distinct question: does the answer actually address what the user asked? An answer can cite real, faithfully-represented chunks and still miss the question entirely — grounded and irrelevant are not opposites, and a pipeline that only checks the first can ship a great deal of the second.")
+    add_body(doc, "Memora's own `GROUNDING_PROMPT` already gestures at this — its `OFF_TOPIC` verdict and its original \"relevance\" criterion both exist because groundedness alone was never going to be sufficient — but relevance and groundedness are folded into one judge call rather than verified as two separable concerns. This chapter takes that folded-together check apart, using patterns this project has already proven elsewhere: a cheap filter before an expensive one, a rubric with a reason attached to every verdict, and thresholds tuned from real interaction logs instead of guessed.")
+    add_body(doc, "By the end of this chapter you will be able to name the specific ways an answer can be irrelevant without being ungrounded, build a two-stage relevance gate that spends an LLM call only when a cheap smoke-test can't resolve the question on its own, and keep relevance and groundedness legible as separate failure axes even inside a single agent loop.")
+
+    add_heading(doc, "21.1 Three distinct failure modes")
+    add_callout(doc, "Definition", "Answer relevance", "Whether a generated answer actually addresses the question that was asked, independent of whether its claims are individually true or traceable to evidence — a property an answer can fail even when every sentence in it is accurate.")
+    add_table(doc, ["Failure mode", "What it looks like"], [
+        ["Topic drift", "The answer wanders from the question's actual subject into adjacent, better-evidenced territory"],
+        ["Question-type mismatch", "A \"why\" question answered with a \"what\"; a yes/no question answered with a description"],
+        ["Hallucination", "The answer invents content — the one mode groundedness already catches on its own"],
+    ], [1.85, 4.15])
+    add_body(doc, "Only the third mode is groundedness's job. Topic drift and question-type mismatch can both happen with every claim in the answer perfectly traceable to real retrieved text — the retriever found real evidence, the generator wrote real sentences from it, and none of it actually answers what was asked. A judge with only one axis has no vocabulary to distinguish \"this is wrong\" from \"this is true but not what you asked.\"")
+    add_body(doc, "Topic drift is the retrieval-shaped version of this failure: a query with two plausible readings — Chapter 12's example of \"ASD\" meaning either autism spectrum disorder or adjustable-speed-drive is the recurring case throughout this project's own corpus — retrieves real, well-grounded chunks about the wrong reading entirely, and an answer built faithfully from those chunks drifts with them. Question-type mismatch is a narrower, almost mechanical failure: a \"why does X happen\" question answered with a well-grounded description of *what* X is, never touching the causal mechanism the question actually asked about. Neither failure requires the model to invent anything — both can happen with a generator behaving exactly as instructed, working from exactly the evidence it was given.")
+
+    add_heading(doc, "21.2 Why pure cosine similarity is the wrong tool on its own")
+    add_body(doc, "Embedding the question and the answer and comparing them with cosine similarity is the obvious first instinct, and it fails in both directions at once. A fluent, on-topic-*sounding* answer that shares heavy vocabulary with the question scores a high cosine similarity regardless of whether its actual content is correct — the embedding captures topical proximity, not factual correctness. A short, correct answer that happens to use different words than the question — a common outcome of good paraphrase — can score a *lower* cosine similarity than a wordier, wrong one.")
+    add_figure(doc, diagram_cosine_failures_21(), "Figure 21.1 — Cosine similarity between query and answer measures vocabulary overlap, which correlates with but does not equal relevance.")
+    add_body(doc, "This is the same shallow-signal problem Chapter 13.8 and Chapter 20.5 already named from two other angles — a cheap, retrieval-derived number is a real, useful signal, but only for what it actually measures. Cosine similarity between query and answer measures word-choice proximity. Relevance is a judgment about content. Treating the first as a substitute for the second fails exactly the two ways Figure 21.1 shows, in both directions.")
+    add_body(doc, "Both failure directions are worth sitting with because they push a naive threshold in opposite ways. Set the threshold high enough to catch every high-similarity-wrong-answer case, and the low-similarity-correct-answer case starts failing the smoke-test too, rejecting good answers for the crime of being concise. Set it low enough to let every good terse answer through, and confidently wrong, vocabulary-matched answers start passing through unchallenged. There is no single threshold that solves both directions at once with cosine similarity alone — which is precisely the argument for demoting it to a smoke-test rather than asking it to be the whole gate.")
+
+    add_heading(doc, "21.3 The two-stage gate — similarity smoke-test plus LLM judge")
+    add_body(doc, "The fix is not to abandon cosine similarity — it is to demote it to what it is actually good at: a cheap first filter that resolves the easy cases and defers only the ambiguous ones to an LLM call. This is the identical shape as Chapter 20B's layered repair pipeline and ADR-050's pre-retrieval cosine filter — try the inexpensive signal first, escalate only when it can't resolve the question on its own.")
+    add_figure(doc, diagram_relevance_gate_21(), "Figure 21.2 — A smoke-test below threshold short-circuits to IRRELEVANT; only the ambiguous middle ever reaches the judge.")
+    add_code(doc, '''def relevance_gate(query, answer, embed, judge_llm, smoke_threshold=0.2):
+    similarity = cosine(embed(query), embed(answer))
+    if similarity < smoke_threshold:
+        return {"verdict": "IRRELEVANT", "reason": "below similarity smoke-test floor"}
+    return relevance_judge(query, answer, judge_llm)   # Section 21.4''')
+    add_body(doc, "The threshold in Figure 21.2 is set deliberately low — this stage exists to catch only the confidently, unambiguously off-topic cases cheaply, not to make the real relevance call. Anything above it, including plenty of genuinely irrelevant answers that merely share some vocabulary with the question, still reaches the judge. A smoke-test that tries to do the judge's job ends up with the judge's failure modes at the smoke-test's level of precision.")
+
+    add_heading(doc, "21.4 Designing the relevance rubric")
+    add_body(doc, "Every judge already built in this project shares one shape: a constrained verdict enum plus a mandatory one-sentence reason, never a bare label alone. A relevance judge follows the identical pattern `RetrievalJudgeSchema` (Chapter 20B.6) already established, applied to a different question.")
+    add_code(doc, '''class RelevanceJudgeSchema(_BaseStrict):
+    verdict: Literal["RELEVANT", "PARTIAL", "IRRELEVANT"]
+    reason: str
+
+RELEVANCE_JUDGE_PROMPT = """You are judging whether an ANSWER addresses a QUESTION —
+not whether the answer is factually correct or well-grounded, only whether it
+responds to what was actually asked.
+
+QUESTION: {query}
+ANSWER: {answer}
+
+RELEVANT: directly and substantially addresses the question.
+PARTIAL: addresses part of the question, or addresses it only tangentially.
+IRRELEVANT: does not address the question asked, regardless of its own accuracy.
+
+Return ONLY a JSON object: {{"verdict": "...", "reason": "<one sentence>"}}"""''')
+    add_callout(doc, "Common pitfall", "Letting the relevance prompt drift into grounding", "A relevance judge that starts asking \"is this true\" or \"is this supported by evidence\" has stopped measuring relevance and started re-measuring Chapter 20's axis, at greater cost and with two judges now disagreeing about the same thing. The prompt above states its exclusion explicitly — *not whether the answer is factually correct* — for exactly this reason. Keep the two judges' questions as narrow and non-overlapping as their names promise.")
+
+    add_heading(doc, "21.5 Tuning the cosine threshold from real interaction data")
+    add_body(doc, "A smoke-test threshold picked by intuition is a threshold picked wrong in one direction or the other. This project has already run the correct methodology twice — ADR-050 derived its `0.95` inter-variant dedup threshold from 775 real variant pairs pulled from `interactions.jsonl`, and the `DOCUMENTS_MIN_SIMILARITY`/`LEARNED_QA_MIN_SIMILARITY` retrieval floors were revised from `0.50` to `0.53`/`0.57` after an A/B comparison across real debug logs measured LLM-call counts and verdict quality at each candidate value directly, rather than picking one and hoping.")
+    add_bullets(doc, [
+        "Pull a sample of real (query, answer, human-or-judge-labeled relevance) triples from your own interaction log.",
+        "Compute cosine similarity for every pair and plot the distribution split by label.",
+        "Pick the smoke-test floor from the low tail of the RELEVANT distribution, not its center — the smoke-test's job is to catch only confident IRRELEVANT cases, not to separate RELEVANT from PARTIAL.",
+        "Re-derive the threshold whenever the embedding model changes — Chapter 11.1's warning about comparing vectors from two different models applies here exactly as it did to retrieval.",
+    ])
+    add_body(doc, "The discipline matters more than the specific number. Both of this project's real precedents — the 0.95 dedup threshold and the 0.53/0.57 retrieval floors — were revised at least once after the first empirically-derived value turned out to be slightly wrong in production, not accepted permanently on the first measurement. Treat a smoke-test threshold the same way: a starting point to monitor and revisit as real answer traffic accumulates, not a constant to set once in `config.py` and forget.")
+
+    add_heading(doc, "21.6 What to do when relevance fails — retry or admit the gap")
+    add_body(doc, "An `IRRELEVANT` or `PARTIAL` verdict deserves the same budget-aware treatment Chapter 18.5 and Chapter 20.4 already built for groundedness failures — not an automatic retry, and not silent acceptance. If retrieval budget remains, the retry message should say specifically that the *question wasn't addressed*, not that the answer was ungrounded — a model told the wrong thing about its own failure will often fix the wrong thing.")
+    add_code(doc, '''if relevance_verdict == "IRRELEVANT" and budget_remaining:
+    retry_message = (
+        "Your answer did not address the question asked. "
+        "Re-read the question and answer it directly, using the retrieved context."
+    )
+elif relevance_verdict == "IRRELEVANT":
+    return honest_gap_answer(query)   # Chapter 20.6's graceful degradation, same principle''')
+    add_body(doc, "A `PARTIAL` verdict is the more common real-world case and deserves its own branch rather than collapsing into the same handling as `IRRELEVANT` — a retry message for a partially-relevant answer should ask the model to *complete* its coverage, not start over, the same distinction Chapter 20.7 drew between `OVERCLAIMED` and `PARTIALLY_FABRICATED` for groundedness. Two verdicts that both mean \"not good enough yet\" can still call for two different next actions.")
+    add_body(doc, "Admitting the gap is not a failure state to minimize — it is the correct outcome once budget is genuinely exhausted, and Chapter 20.6 already made the case for why a canned, honest refusal beats a padded answer built from whatever evidence happened to be on hand. The same logic applies here with one addition specific to relevance: a gap admission triggered by an `IRRELEVANT` verdict should say so plainly — \"the available information does not directly address this question\" reads very differently from a generic \"I don't know,\" and gives the user an accurate reason to reformulate their own question rather than assume the knowledge base is simply empty.")
+
+    add_heading(doc, "21.7 Keeping relevance separate from groundedness in the agent loop")
+    add_body(doc, "Memora's actual `GroundingJudgeSchema` bundles both concerns into one verdict enum — `OFF_TOPIC` sits alongside `PARTIALLY_FABRICATED` and `OVERCLAIMED` in a single field, decided by a single judge call. That design is a defensible cost tradeoff, not an oversight: one LLM call is cheaper than two, and Chapter 20's judge already asks the model to consider relevance as one of its rules. The architectural point this chapter makes is not that the call must be split — it is that the *concepts* must stay separable in how failures are reasoned about and routed, whether or not they are separable in how many API calls it takes to check them.")
+    add_body(doc, "Chapter 20.8 named exactly the risk of collapsing distinct failure axes into one verdict: a judge that can only say pass or fail has no way to tell a caller *which* rule actually broke, and a retry strategy built on a single collapsed signal ends up guessing at a fix instead of targeting one. `OFF_TOPIC` as its own named value — not folded silently into a generic `FAILED` — is what makes it possible to route a topic-drift failure toward \"try genuinely different query angles\" and a fabrication failure toward \"retry with stricter grounding constraints,\" even from inside one judge call. The lesson generalizes past this one schema: whenever a verdict enum grows past two values, ask whether each value routes somewhere different — if it doesn't, the distinction is decoration, and if it does, the distinction is load-bearing and deserves exactly the visibility `OFF_TOPIC` already has here.")
+
+    add_body(doc, "There is a real cost argument for splitting the call anyway, worth naming even though Memora itself did not make that choice: a combined judge asks one model to hold two different rubrics in mind simultaneously, and Chapter 14.3 already flagged the general tension between a judge's output-format discipline and the reasoning depth a harder question deserves. A relevance-only judge and a groundedness-only judge each have a narrower, more mechanically checkable job — closer to Chapter 20B.6's schema-per-concern discipline than a single verdict enum straining to cover both axes. Whether that extra clarity is worth a second LLM call is a real tradeoff a project should make deliberately, the same way Chapter 13B.13's tiered SLM/LLM architecture made deliberate tradeoffs between judgment quality and call cost elsewhere in this pipeline — not a default either direction should be assumed without weighing it.")
+    add_body(doc, "Groundedness answers \"is this true, given the evidence.\" Relevance answers \"is this an answer to the question.\" A pipeline needs both judgments, needs to know which one it is making at any given moment, and needs to route a failure of one differently from a failure of the other — whether that means two judges or one judge with a rich enough verdict space to keep the distinction alive. Chapter 22 turns from judging answers to watching the whole pipeline that produces them: building a full dry-run trace detailed enough that a failure like the ones this chapter and the last one describe is visible in the log the moment it happens, not inferred after the fact from a bad answer alone.")
+
+    path = OUT_DIR / "Chapter_21_Answer_Relevance_Verification.docx"
+    doc.core_properties.title = f"Chapter 21 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_trace_layers_22() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800">'
+        '<rect width="1200" height="800" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["One query, five logged layers"], size=25, bold_first=True)
+        + svg_labeled_box(310, 100, 580, 115, "Step-Numbered Blocks", ["STEP 1 — USER QUERY RECEIVED", "one numbered header per pipeline stage"], fill="#F2F2F2")
+        + svg_arrow(600, 215, 600, 241)
+        + svg_labeled_box(310, 243, 580, 115, "Message Serialization", ["FULL MESSAGE SENT TO LLM", "every role, every tool_call, every arg"], fill="#D9D9D9")
+        + svg_arrow(600, 358, 600, 384)
+        + svg_labeled_box(310, 386, 580, 115, "Context-Size Telemetry", ["[CONTEXT SIZE @ iter N] + [CTXSIZE]", "messages, chars, ~tokens, real prompt tokens"], fill="#808080", text_fill="#FFFFFF")
+        + svg_arrow(600, 501, 600, 527)
+        + svg_labeled_box(310, 529, 580, 115, "Tool Dispatch + Retrieval", ["AGENT ACTION, QUERY → EMBEDDING,", "score-ranked docs with source + preview"], fill="#D9D9D9")
+        + svg_arrow(600, 644, 600, 670)
+        + svg_labeled_box(310, 672, 580, 115, "Validation + Merge", ["VALIDATE-RETRIEVAL, CHUNK MERGE,", "VALIDATE-MERGE — every verdict and reason"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter22_trace_layers", svg)
+
+
+def diagram_log_routing_22() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["One log call, two thresholds"], size=25, bold_first=True)
+        + '<ellipse cx="600" cy="105" rx="200" ry="42" fill="#FFFFFF" stroke="#000000" stroke-width="3"/>'
+        + svg_centered_text(600, 105, ["logger.debug(...)"], size=19, bold_first=True)
+        + svg_arrow(500, 140, 340, 200)
+        + svg_arrow(700, 140, 860, 200)
+        + svg_labeled_box(120, 202, 440, 130, "Console Handler", ["setLevel(logging.INFO) — default", "the full trace is invisible here"], fill="#F2F2F2")
+        + svg_labeled_box(640, 202, 440, 130, "Debug File Handler", ["setLevel(logging.DEBUG) — unconditional", "*.debug.log carries the entire trace"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_labeled_box(150, 360, 900, 90, "Turning the trace on costs one argument",
+                           ["setup_logging(console_level=logging.DEBUG) — no code change, no redeploy"], fill="#FFFFFF", dashed=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter22_log_routing", svg)
+
+
+def build_chapter_22() -> Path:
+    title = "Observability: Building a Full Dry-Run Trace"
+    doc = configure_document(title)
+    add_cover(doc, 22, title, "PART IV — FROM RAG TO AGENTIC RAG", "An agent you cannot watch think is an agent you can only guess about.")
+    add_chapter_heading(doc, 22, title)
+    add_body(doc, "Every mechanism in Chapters 18 through 21 — the phase state machine, the retry budgets, the multi-verdict judge, the relevance gate — was diagnosed, built, and fixed by someone reading a log. Not a metrics dashboard, not a sampled trace in a hosted observability product: a plain-text `.debug.log` file, dense enough that a specific wrong chunk, a specific malformed verdict, or a specific runaway retry is visible in it directly, without inference.")
+    add_body(doc, "This chapter builds that log. Not as an afterthought bolted onto a finished pipeline, but as the same kind of first-class artifact the answer itself is — because in this project, it was: bugs from Chapter 18's premature-compression guard through Chapter 20's missing-gate finding were all found by reading trace output first and working backward to the code, never the other way around.")
+    add_body(doc, "By the end of this chapter you will be able to build step-numbered, layered console output across an entire agentic pipeline, log an embedding call, a retrieval, a tool dispatch, and a validation verdict in enough detail to reconstruct what happened without rerunning anything, and turn that entire trace on or off with one function argument instead of a code change.")
+
+    add_heading(doc, "22.1 Why observable agents beat \"magic\" agents")
+    add_callout(doc, "Definition", "Dry-run trace", "A complete, human-readable log of everything an agent run did — every prompt sent, every tool called, every score computed, every verdict reached — captured at the moment it happened, so a failure can be diagnosed by reading rather than by re-running with guesses about what to instrument next.")
+    add_body(doc, "A RAG pipeline that only exposes its final answer is a black box with a good user interface. When that answer is wrong, the only available question is \"why,\" and the only available method is to re-run the query while guessing what to add a `print` statement to — which is itself a bet that the failure will reproduce identically on the second try, a bet that is often wrong for anything involving a nondeterministic model call.")
+    add_body(doc, "An observable agent makes the opposite trade: pay the (cheap, DEBUG-level, disk-only) cost of logging everything on every run, so that when a run does go wrong, the answer to \"why\" is already sitting in a file. Every named bug across Chapters 18 through 21 that had a \"Found Date\" and a debug-log filename attached to it in this project's own records was found this way — by reading, not by re-instrumenting.")
+    add_body(doc, "\"Magic\" is not a compliment applied to an agent's behavior; it is an admission that nobody watching it can currently explain what it just did. A demo that works is not evidence a pipeline is reliable — it is one sample, and a nondeterministic model call means the next run is a different sample from the same distribution, possibly a much worse one. Observability does not make an agent more reliable by itself. It makes every failure that does occur legible enough to actually fix, which over enough runs is the difference between a project whose defect count trends downward and one that re-discovers the same class of bug indefinitely because nobody could ever quite reproduce it.")
+
+    add_heading(doc, "22.2 Step-numbered console output")
+    add_body(doc, "The trace is organized as a sequence of numbered, boxed headers — `STEP 1 — USER QUERY RECEIVED`, and onward through the pipeline — so a reader scanning a long log can locate a specific stage of a specific run without parsing every line between headers.")
+    add_code(doc, '''══════════════════════════════════════════════════════════════════════
+  STEP 1 — USER QUERY RECEIVED
+══════════════════════════════════════════════════════════════════════
+  Input : "What is an adjustable speed drive and how does it control motor speed?"
+  Length: 70 chars
+══════════════════════════════════════════════════════════════════════''')
+    add_body(doc, "A heavy rule (`═`) above and below each header, a thin rule (`─`) around each sub-block within a step — Chapter 14.15's delimiter discipline applied to logs instead of prompts. The visual weight is deliberate: a human eye scanning a terminal or a log file finds a doubled rule far faster than it finds an ordinary line of text, which is the entire value of the convention.")
+
+    add_heading(doc, "22.3 Logging the embedding step")
+    add_body(doc, "Chapter 11.1 introduced `_embed_and_log` as the retriever's own record of what a query vector actually looked like. The dry-run trace is where that logging pays for itself directly — a wrong or empty embedding is visible in the trace at the exact moment it happens, not inferred later from a retrieval that returned nothing.")
+    add_code(doc, '''──────────────────────────────────────────────────────────────────────
+  STEP: QUERY → EMBEDDING
+──────────────────────────────────────────────────────────────────────
+  Query        : "adjustable speed drive"
+  Model        : all-MiniLM-L6-v2
+  Shape        : (384,)
+  First 8 vals : [0.011542, 0.063031, 0.005661, ...]
+  L2 norm      : 1.000000  (1.0 = fully normalised)
+──────────────────────────────────────────────────────────────────────''')
+    add_body(doc, "An L2 norm that isn't 1.0 is the single fastest thing to check when retrieval quality looks wrong for no visible reason — it means the embedding model changed, or normalization broke, before a single similarity score was ever computed.")
+
+    add_heading(doc, "22.4 Per-retrieval logging")
+    add_body(doc, "Every retrieval call logs its ranked results in full — score, source file, and a content preview per chunk — so a reader can judge retrieval quality against the actual question without re-running the query themselves.")
+    add_code(doc, '''  Merged & ranked 5 doc(s) after dedup/threshold filter:
+    Doc 0 — score: 0.8260  [..\\data\\Adjustable Speed Drive.txt]
+            preview: Adjustable Speed Drives provide precise control over motor speed…
+    Doc 1 — score: 0.8153  [..\\data\\Adjustable Speed Drive.txt]
+            preview: Ultimately, Adjustable Speed Drives are not merely devices for…''')
+    add_body(doc, "This is the same score-band vocabulary Chapter 11.4 established — 0.7+ strong, 0.4–0.7 related — made legible at a glance across every chunk a run actually touched, which is what turns \"the answer seems off\" into \"chunk 1 scored 0.815 but is barely on-topic, and here is exactly why.\"")
+
+    add_heading(doc, "22.5 Serializing the messages list")
+    add_body(doc, "Before every model call, the trace prints the entire message list the model is about to receive — not a summary, the actual payload, role by role.")
+    add_code(doc, '''══════════════════════════════════════════════════════════════════════
+  FULL MESSAGE SENT TO LLM  [Iteration 1 / max 6]
+══════════════════════════════════════════════════════════════════════
+  [0] role=system
+      content: You are a research assistant. Answer ONLY from retrieved chunks…
+  [1] role=user
+      content: What is an adjustable speed drive and how does it control motor speed?
+
+  Tool schemas available: ['retrieve_documents', 'check_answer_quality']
+══════════════════════════════════════════════════════════════════════''')
+    add_body(doc, "This is the ground truth for every question Chapter 18.9's message-scrubbing mechanism raises — did the placeholder actually replace the raw chunk text, does the `tool_call_id` pairing actually hold, is the system prompt actually what `_build_system_prompt` was supposed to produce this run. A serialized message list answers all three by inspection, with no assumption that the code did what it was supposed to.")
+
+    add_heading(doc, "22.6 Per-iteration tool-call logs")
+    add_body(doc, "Every tool call the model requests is logged twice — once as the model's raw request, once as the orchestrator's dispatch of it — so a reader can see both what the model asked for and what actually ran.")
+    add_code(doc, '''  tool_calls requested (3):
+    → name : retrieve_documents
+      id   : h8qzjxhdv
+      args : {"query": "adjustable speed drive", "top_k": 5}
+
+──────────────────────────────────────────────────────────────────────
+  AGENT ACTION — calling tool: retrieve_documents
+──────────────────────────────────────────────────────────────────────
+  args: {"query": "adjustable speed drive", "top_k": 5}''')
+    add_body(doc, "Logging the request and the dispatch as two separate blocks, rather than one, is deliberate — Chapter 18.4's args-mutation pitfall is exactly the gap between what the model asked for and what actually executed, and a trace that only logs one side of that gap cannot catch a mutation happening between them.")
+
+    add_heading(doc, "22.7 Chunks versus retrieval calls — a distinction worth keeping straight")
+    add_body(doc, "`total_retrievals` and the length of `accumulated_document_chunks` are two different counters tracking two different things, and a trace — or a stats line built carelessly from one instead of the other — can silently conflate them. A single `retrieve_documents` call increments the retrieval counter by exactly one, regardless of whether it returns five chunks, one chunk, or zero.")
+    add_callout(doc, "Common pitfall", "Reporting one counter as if it were the other", "\"3 retrievals\" and \"3 chunks\" look interchangeable in a casual log line and are not: three calls that each returned one surviving chunk after threshold filtering leave the agent with three chunks total and three calls spent, while one call that returned five chunks leaves it with five chunks and one call spent — the same visible number, two entirely different retrieval budgets consumed. Label every count in a trace with what it is actually counting — `total_retrievals=` and `accumulated_documents=` as separate, explicitly named fields — rather than a bare number a reader has to guess the meaning of.")
+    add_body(doc, "The distinction matters most exactly where Chapter 18.5's budget arithmetic lives: `MAX_TOTAL_RETRIEVALS` caps calls, not chunks, so a trace that only reports chunk counts cannot explain why the loop stopped retrieving with plenty of room left in the answer's evidence.")
+    add_body(doc, "The same ambiguity can hide inside a single word in a status message. \"Retrieved 5 results\" is genuinely unclear without context — five chunks from one call, or one chunk apiece from five calls, read identically in casual phrasing and mean very different things for how close the run is to its retrieval ceiling. A trace built for debugging should never make a reader do that translation from memory; every count it prints should name, in the same line, exactly what it counted.")
+
+    add_heading(doc, "22.8 The [CONTEXT SIZE @ iter N] telemetry block")
+    add_body(doc, "After every model call, the trace reports exactly how large the payload that was just sent actually was — message count, character count, an estimated token count, and the real prompt-token count the provider's own response reported.")
+    add_code(doc, '''  [CONTEXT SIZE @ iter 2]
+    messages in payload    : 6
+    total content chars    : 6,389
+    ~tokens (chars/4 est.) : 1,597
+    actual prompt tokens   : 1,724  (from API)
+    cumulative prompt tok  : 2,544''')
+    add_body(doc, "Two numbers are worth comparing every time: the cheap chars/4 estimate against the real, API-reported token count. When they diverge substantially — code-heavy or non-English content typically pushes real tokens well above the character-based estimate — that divergence itself is a signal Chapter 23's token-budget planning needs to account for, not an error to explain away.")
+
+    add_heading(doc, "22.9 The [CTXSIZE] greppable log line")
+    add_body(doc, "Every `[CONTEXT SIZE @ iter N]` block is immediately followed by a second, single-line, machine-parseable restatement of the same numbers.")
+    add_code(doc, '''[CTXSIZE] iter=2 msgs=6 chars=6389 prompt_tokens=1724 cum_prompt_tokens=2544''')
+    add_body(doc, "The human-readable block above it exists for a person reading the log top to bottom during a single debugging session. This line exists for `grep`, `awk`, or a small offline script pulling every `[CTXSIZE]` line out of a hundred stored logs to plot prompt-token growth across a whole benchmark run — the same telemetry, in a second format chosen for a second, entirely different consumer. Logging one fact once, in whichever format is easiest to write, optimizes for the person writing the log line and against everyone who has to read it later at scale.")
+
+    add_heading(doc, "22.10 Reading a real dry-run trace from start to finish")
+    add_body(doc, "Reading a trace in order tells a coherent story, not a pile of disconnected log lines. A real run: `STEP 1` receives the question. The full message list is serialized and its `[CONTEXT SIZE]` reported. The model responds with three parallel `retrieve_documents` calls. Each dispatches through `AGENT ACTION`, embeds via `STEP: QUERY → EMBEDDING`, and returns five scored, sourced, previewed chunks. `VALIDATE-RETRIEVAL` judges them PASS at 3-of-5 relevant and names which two were dropped and why. Two surviving chunks are flagged as near-duplicates by cosine similarity, `CHUNK MERGE` consolidates them, and `VALIDATE-MERGE` confirms the merge FAITHFUL with zero fabricated or dropped claims.")
+    add_figure(doc, diagram_trace_layers_22(), "Figure 22.1 — Five layers, read top to bottom, reconstruct exactly what one query actually did.")
+    add_body(doc, "Figure 22.1 is that same story compressed into five bands. Reading a trace well is reading it in this order every time — structure first (which step, which iteration), then payload (what was actually sent), then cost (how big was it), then action (what did the model ask for and what ran), then judgment (what did each validator decide, and why). A reader who jumps straight to the final answer and works backward only when it looks wrong is reading the trace as a last resort; a reader who reads it this way by habit usually catches the wrong chunk before it ever reaches the answer at all.")
+
+    add_heading(doc, "22.11 Turning trace output on and off cleanly")
+    add_body(doc, "None of this detail costs anything in production by default, because it never reaches the console. `setup_logging` wires two handlers to the same logger hierarchy at two different thresholds: a console handler defaulting to `logging.INFO`, and a file handler fixed to `logging.DEBUG`, unconditionally, regardless of what the console is showing — Figure 22.2 traces both paths from the same call site.")
+    add_figure(doc, diagram_log_routing_22(), "Figure 22.2 — The same log call reaches both handlers; only the threshold decides which one keeps it.")
+    add_code(doc, '''def setup_logging(log_dir=DEFAULT_LOG_DIR, app_name=None, console_level=logging.INFO):
+    console_handler.setLevel(console_level)      # quiet by default
+    debug_handler.setLevel(logging.DEBUG)        # the full trace, always, to disk''')
+    add_body(doc, "Every `logger.debug(...)` call in this chapter's examples is filtered out of the console by default and written to `{app_name}_{timestamp}.debug.log` regardless — the trace is always being captured, whether or not anyone is watching it live. Turning it on for a live session costs exactly one keyword argument, `setup_logging(console_level=logging.DEBUG)`, no code change and no redeploy — the same discipline Chapter 20's severity-level audit enforced in the other direction, making sure a message's assigned level actually matches how urgently a human needs to see it.")
+
+    add_body(doc, "A trace this detailed is not free — it is disk space, and it is a discipline every new log line has to earn by being written at the right level with the right label. What it buys in return is the thing every chapter since Chapter 18 has depended on without saying so directly: every bug in this book that has a root cause instead of a guess was found by someone reading exactly this kind of log. Chapter 22B goes one level deeper into the busiest part of that trace — the compression pipeline's own NAC, DC, and LBC stages, and the semantic reasoning behind why retrieved context needs compressing at all.")
+
+    path = OUT_DIR / "Chapter_22_Observability_Dry_Run_Trace.docx"
+    doc.core_properties.title = f"Chapter 22 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_nac_dc_lbc_22b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400">'
+        '<rect width="1200" height="400" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 40, ["Three stages, three different questions"], size=27, bold_first=True)
+        + svg_labeled_box(30, 110, 350, 150, "NAC", ["“same source, adjacent chunks?”", "merges neighbor runs"], fill="#F2F2F2")
+        + svg_labeled_box(425, 110, 350, 150, "DC", ["“same fact, different chunks?”", "removes cross-chunk redundancy"], fill="#D9D9D9")
+        + svg_labeled_box(820, 110, 350, 150, "LBC", ["“relevant to THIS query?”", "drops off-topic sentences"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(380, 185, 423, 185)
+        + svg_arrow(775, 185, 818, 185)
+        + svg_labeled_box(150, 300, 900, 80, "Each stage assumes the one before it already ran",
+                           ["light structural cleanup first, query-focused judgment last"], fill="#FFFFFF", dashed=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter22b_nac_dc_lbc", svg)
+
+
+def diagram_intra_chunk_guard_22b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Two sentences from one chunk are not cross-chunk redundancy"], size=22, bold_first=True)
+        + svg_labeled_box(60, 100, 520, 190, "Invalid — Intra-Chunk", ["member 1: chunk_index=2", "member 2: chunk_index=2", "same chunk, flagged as “redundant”", "✗ rejected before the judge even runs"], fill="#F2F2F2")
+        + svg_labeled_box(620, 100, 520, 190, "Valid — Cross-Chunk", ["member 1: chunk_index=1", "member 2: chunk_index=3", "two different chunks, same fact", "✓ forwarded to validate_redundancy"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_labeled_box(150, 320, 900, 90, "unique_chunk_indices must have length >= 2",
+                           ["a group with only one distinct chunk_index is dropped before validation"], fill="#FFFFFF", dashed=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter22b_intra_chunk_guard", svg)
+
+
+def build_chapter_22b() -> Path:
+    title = "Semantic Compression of Retrieved Context"
+    doc = configure_document(title)
+    add_cover(doc, "22B", title, "PART IV — FROM RAG TO AGENTIC RAG", "Retrieval finds evidence. Compression decides how much of it the model actually needs to read.")
+    add_chapter_heading(doc, "22B", title)
+    add_body(doc, "A retriever tuned the way Chapters 11 and 12 describe returns real, relevant, well-scored chunks — and still hands the model far more redundancy than it needs. Overlapping chunk boundaries repeat the same sentence twice. Multiple source documents state the same fact in different words. A chunk that scored 0.8 on the whole is often only one sentence relevant to this specific question, with the rest along for the ride.")
+    add_body(doc, "This chapter builds the answer: a three-stage compression pipeline — Neighbor-Aware Compression, Deduplication Compression, and LLM-Based Compression — each one narrower and more expensive than the last, each one guarded by its own LLM-as-judge validator so that compression can never quietly delete a fact it was supposed to preserve. Every mechanism here is real, shipped code from `context_compression.py` and `validators.py`, including the guard conditions that exist because an earlier version got exactly one of these steps wrong.")
+    add_body(doc, "By the end of this chapter you will be able to build a layered compression pipeline that merges, deduplicates, and query-filters retrieved context in that order, pair every compression stage with a validator that can reject its own output, and recognize the specific structural bugs — intra-chunk false positives, greedy-regex extraction failures, unchecked over-compression — that a compression pipeline like this one will eventually produce if left unguarded.")
+
+    add_heading(doc, "22B.1 Why retrieved chunks are redundant by design")
+    add_callout(doc, "Definition", "Context redundancy", "Retrieved content that repeats information already present elsewhere in the same context window — across chunk boundaries, across source documents, or within a single chunk relative to the specific question being asked — costing prompt tokens without adding evidence.")
+    add_body(doc, "Redundancy is not a retrieval bug; it is a direct, intended consequence of decisions made two chapters ago for good reasons. Chapter 7's `chunk_overlap=200` exists specifically so that a fact sitting near a chunk boundary is never lost to a single unlucky split — and the same overlap that prevents loss guarantees that consecutive chunks share real, repeated text. Multiple source documents describing the same underlying fact — Chapter 14.2's merge-prompt example shows two different files both stating \"1 in 36 children\" almost verbatim — compound the effect further, entirely independent of chunking.")
+    add_body(doc, "None of this is a reason to chunk differently or retrieve less. It is a reason to add a stage between retrieval and generation whose only job is deciding what the model actually needs to read, now that the evidence has already been found.")
+
+    add_heading(doc, "22B.2 The three-stage compression hierarchy")
+    add_body(doc, "NAC, DC, and LBC run in a fixed order, each addressing a narrower and more expensive question than the one before it — and each stage's output is exactly what the next stage's input assumes it will receive.")
+    add_figure(doc, diagram_nac_dc_lbc_22b(), "Figure 22B.1 — Structural cleanup runs before semantic judgment; cheap, mechanical fixes come first.")
+    add_code(doc, '''def compress_context_pipeline(chunks, query, llm, embedding_manager, judge_llm):
+    if ENABLE_NAC_COMPRESSION:
+        chunks = compress_neighbor_chunks(chunks, llm, embedding_manager, judge_llm)
+    if ENABLE_DC_COMPRESSION:
+        chunks = deduplicate_compression(chunks, llm, judge_llm)
+    if ENABLE_LBC_COMPRESSION:
+        chunks = llm_based_compression(chunks, query, llm, judge_llm)
+    return chunks''')
+    add_body(doc, "The ordering in Figure 22B.1 is deliberate, not arbitrary. NAC runs first because it needs no query at all — it only needs `chunk_seq` metadata, so it can restore document flow before anything else touches the content. DC runs second because deduplication across a merged, flow-restored set of chunks finds cleaner redundancy than deduplication across raw, boundary-split fragments would. LBC runs last, and is the only stage that reads the query, because query-focused filtering only makes sense once the chunks it is filtering already represent the corpus's own best, least-redundant statement of the facts.")
+
+    add_heading(doc, "22B.3 Neighbor-Aware Compression (NAC)")
+    add_callout(doc, "Definition", "Neighbor-Aware Compression", "Merging consecutive chunks from the same source document — identified by adjacent `chunk_seq` values — into one consolidated chunk before any other compression runs, restoring continuity that fixed-size chunking split apart.")
+    add_body(doc, "NAC's premise is narrow and mechanical: two chunks from the same file, with consecutive sequence numbers, are very likely two halves of one continuous passage that chunking happened to cut. Merging them is safe precisely because it needs no judgment about content — only two facts already sitting in the metadata.")
+
+    add_heading(doc, "22B.3.1 Detecting neighbor runs via chunk_seq metadata", level=2)
+    add_body(doc, "Chunks are split into those carrying an integer `chunk_seq` and those that don't — a learned-QA chunk, for instance, has no sequence position to merge by — and only the eligible set is scanned. Sorted by source and sequence, a run is any maximal stretch where each chunk's sequence number is exactly one more than the last.")
+    add_code(doc, '''eligible.sort(key=lambda x: (x[1]["source"], x[1]["chunk_seq"]))
+runs, current_run = [], [eligible[0]]
+for orig_idx, chunk in eligible[1:]:
+    prev = current_run[-1][1]
+    if chunk["source"] == prev["source"] and chunk["chunk_seq"] == prev["chunk_seq"] + 1:
+        current_run.append((orig_idx, chunk))
+    else:
+        runs.append(current_run)
+        current_run = [(orig_idx, chunk)]
+runs.append(current_run)''')
+    add_body(doc, "A run of length one is a singleton and passes through untouched — NAC never forces a merge where there is no neighbor to merge with.")
+
+    add_heading(doc, "22B.3.2 The NAC merge prompt and validate-merge loop", level=2)
+    add_body(doc, "Every run longer than one chunk is handed to the same `_CHUNK_MERGE_PROMPT` Chapter 14.2 already introduced — consolidate, preserve every fact, cite every source inline — and its output is checked by `validate_merge` (Section 22B.6.2) before being accepted.")
+    add_code(doc, '''candidate = _merge_similar_chunks(source_chunks_for_merge, llm, embedding_manager, feedback=feedback)
+check = validate_merge(source_chunks=source_chunks_for_merge, merged_chunk=candidate, judge_llm=judge_llm)
+if check["verdict"] == "FAITHFUL":
+    merged = candidate   # accepted''')
+
+    add_heading(doc, "22B.3.3 Retry-with-feedback when the merge is unfaithful", level=2)
+    add_body(doc, "An `UNFAITHFUL` verdict does not discard the run — it feeds the judge's own fabricated- and dropped-claim lists back into the prompt as explicit correction instructions, and retries up to `LLM_RESPONSE_RETRY_LIMIT` times before giving up.")
+    add_code(doc, '''issues = [f"- FABRICATED: \\"{c}\\"" for c in check["fabricated_claims"]]
+issues += [f"- DROPPED: \\"{c}\\"" for c in check["dropped_claims"]]
+feedback = "\\n".join(issues) or check["overall_reason"]''')
+    add_body(doc, "If every attempt is rejected, NAC does not force a bad merge through — it abandons the merge entirely and keeps the run's original chunks unmerged. A compression stage that can only make things smaller, never wrong, has an easy fallback: do nothing.")
+
+    add_heading(doc, "22B.4 Deduplication Compression (DC)")
+    add_callout(doc, "Definition", "Deduplication Compression", "Scanning a sliding window of chunks for sentences in different chunks that state the same fact, confirming genuine redundancy with a judge, and removing all but one instance of each confirmed duplicate.")
+    add_body(doc, "Where NAC merges whole chunks by metadata alone, DC works at sentence granularity and requires actual semantic judgment — two sentences can share a topic without sharing a fact, and only the second is safe to remove.")
+
+    add_heading(doc, "22B.4.1 The sliding-window scanner and the DC scan prompt", level=2)
+    add_body(doc, "Chunks are scanned in fixed-size windows (`DC_WINDOW_SIZE = 3`) rather than all at once — a window keeps the scan prompt small and lets redundancy detection scale to large chunk counts without a single, ever-growing context.")
+    add_code(doc, '''for window_start in range(0, len(result), window_size):
+    window = result[window_start : window_start + window_size]
+    prompt = _DC_SCAN_PROMPT.format(chunks_block=chunks_block)
+    flagged = llm_invoke(llm, [...], caller_tag="DC")   # proposed redundancy groups''')
+    add_body(doc, "`_DC_SCAN_PROMPT` (Chapter 14.2) is deliberately paranoid about what counts as redundant — same subject, same claim, same meaning, with worked GOOD and BAD examples distinguishing genuine duplication from merely-related content — because this scan is a proposal stage, not a final decision.")
+
+    add_heading(doc, "22B.4.2 The redundancy judge and validate_redundancy", level=2)
+    add_body(doc, "Every group the scanner proposes is re-checked by `validate_redundancy` (Section 22B.6.3) before anything is removed — the scanner and the judge are deliberately two separate LLM calls with two separate prompts, so a scanner's overeager proposal has an independent check to survive.")
+
+    add_heading(doc, "22B.4.3 The intra-chunk group bug and the cross-chunk guard", level=2)
+    add_body(doc, "An early version of the scanner occasionally proposed a \"redundancy\" group whose members were two sentences from the *same* chunk — which is not cross-chunk redundancy at all, just a chunk repeating itself, and removing one instance would corrupt that chunk's own content for no real gain.")
+    add_figure(doc, diagram_intra_chunk_guard_22b(), "Figure 22B.2 — A group needs members from at least two distinct chunks to count as redundancy worth removing.")
+    add_code(doc, '''unique_chunk_indices = {m["chunk_index"] for m in clean_members}
+if len(unique_chunk_indices) < 2:
+    logger.debug("group dropped — intra-chunk repetition, not cross-chunk redundancy")
+    continue''')
+    add_body(doc, "The guard in Figure 22B.2 runs before the group ever reaches `validate_redundancy` — an intra-chunk group is structurally invalid regardless of what a judge would say about it, so there is no reason to spend a judge call finding that out.")
+
+    add_heading(doc, "22B.4.4 Bracket-counting JSON extraction", level=2)
+    add_body(doc, "The DC scanner's output is parsed through the same `_extract_balanced_json` bracket-counting logic Chapter 20B.4 built in full — a greedy regex would happily swallow past a scanner's true closing bracket into trailing prose, exactly the failure mode a sentence-level redundancy scan is prone to producing when the model adds a closing remark after its JSON array.")
+
+    add_heading(doc, "22B.4.5 Verdict deduplication and out-of-range index guards", level=2)
+    add_body(doc, "Two more defensive checks run before a confirmed group is trusted: the first verdict returned for a given `group_index` wins if the judge somehow emits duplicates, and any `group_index` outside the range of groups actually submitted is discarded as a hallucinated reference rather than trusted.")
+    add_code(doc, '''if g_idx < 0 or g_idx >= len(groups):
+    logger.warning(f"ignoring out-of-range group_index={g_idx}")
+    continue
+if g_idx not in verdict_map:   # first verdict wins
+    verdict_map[g_idx] = (verdict, reason)''')
+    add_body(doc, "Any group the judge never mentions at all defaults to `REJECTED` — the same fail-closed discipline Chapter 20.7's multi-verdict judge chose over the binary judge's fail-open `OK` default, applied here to a per-group decision instead of a whole-answer one.")
+
+    add_heading(doc, "22B.5 LLM-Based Compression (LBC)")
+    add_callout(doc, "Definition", "LLM-Based Compression", "Rewriting a chunk to retain only the sentences that bear on the current query, using an LLM to judge relevance sentence by sentence, guarded by a minimum-retention floor and a faithfulness validator so the rewrite can never fabricate or over-delete.")
+    add_body(doc, "LBC is the only stage that is query-aware, the most expensive of the three, and the last to run — by the time a chunk reaches LBC, NAC has already restored its continuity and DC has already removed what redundancy could be found without reference to the specific question being asked.")
+
+    add_heading(doc, "22B.5.1 The LBC compress prompt and the __IRRELEVANT__ sentinel", level=2)
+    add_body(doc, "Each chunk is compressed independently against `_LBC_COMPRESS_PROMPT` (Chapter 14.2), which returns either a trimmed version of the chunk or a literal sentinel string when nothing in the chunk survives the query filter.")
+    add_code(doc, '''if compressed_text == "__IRRELEVANT__":
+    logger.debug(f"chunk {idx}: marked __IRRELEVANT__ — dropping chunk")
+    irrelevant_dropped += 1
+    continue''')
+    add_body(doc, "A sentinel string, rather than an empty string, is the deliberate choice here — an empty `compressed` field is ambiguous between \"nothing is relevant\" and \"the model produced no output,\" while `__IRRELEVANT__` can only mean the first.")
+
+    add_heading(doc, "22B.5.2 LBC_MIN_RETENTION_RATIO — guarding against over-compression", level=2)
+    add_body(doc, "Two structural guards run before any judge call: a retention floor rejects a compression that kept less than `LBC_MIN_RETENTION_RATIO = 0.35` of the original character count, and a symmetric check rejects a \"compressed\" output that somehow grew *longer* than the original — the exact fabrication pattern Chapter 20B.5 already warned a tolerant repair tool can produce.")
+    add_code(doc, '''retention = len(compressed_text) / max(len(original_content), 1)
+if retention < min_retention_ratio:
+    result.append(chunk); continue          # over-compression guard
+if len(compressed_text) > len(original_content):
+    result.append(chunk); continue          # over-expansion guard''')
+
+    add_heading(doc, "22B.5.3 validate_lbc — detecting fabricated and dropped claims", level=2)
+    add_body(doc, "Only a compression that clears both structural guards reaches `validate_lbc` (Section 22B.6.4) at all — the judge's SAFE / OVER_COMPRESSED / FABRICATED verdict is the last line of defense, not the first, because a judge call is the most expensive check in the stage and the two cheap guards above it catch the two most common failure shapes before spending it.")
+
+    add_heading(doc, "22B.6 Building validators.py")
+    add_body(doc, "Four validators, one shared shape: build a prompt from the thing being checked, call `judge_llm`, parse the verdict through `fix_llm_output` (Chapter 20B), and fail closed — `UNKNOWN`, `REJECTED`, or the original unmodified content — on any parse or call failure, never silently accept.")
+    add_table(doc, ["Validator", "Verdicts", "Guards"], [
+        ["`validate_retrieval`", "PASS / PARTIAL / FAIL / UNKNOWN", "Chapter 12's judge — per-chunk relevance"],
+        ["`validate_merge`", "FAITHFUL / UNFAITHFUL / UNKNOWN", "Fabricated + dropped claim lists"],
+        ["`validate_redundancy`", "CONFIRMED / REJECTED per group", "Fail-open call error → all REJECTED (safe default)"],
+        ["`validate_lbc`", "SAFE / OVER_COMPRESSED / FABRICATED / UNKNOWN", "Fabricated claims + lost relevant facts"],
+    ], [1.85, 2.45, 2.10])
+
+    add_heading(doc, "22B.6.1 validate_retrieval — PASS / PARTIAL / FAIL per chunk", level=2)
+    add_body(doc, "Every chunk gets an individual `relevant: true/false` verdict with a one-sentence reason, and the overall PASS/PARTIAL/FAIL verdict is meant to summarize them — Chapter 22.7's counting discipline and the top-level-versus-per-chunk consistency risk it implies apply directly here.")
+
+    add_heading(doc, "22B.6.2 validate_merge — FAITHFUL / UNFAITHFUL with claim lists", level=2)
+    add_body(doc, "The verdict itself is derived, not trusted as emitted: `\"UNFAITHFUL\" if (fabricated or dropped) else \"FAITHFUL\"` — the judge's own top-level verdict field is never read at all, only its two claim lists, closing off the exact top-level-disagrees-with-detail risk Section 22B.6.1's validator is still exposed to.")
+
+    add_heading(doc, "22B.6.3 validate_redundancy — CONFIRMED / REJECTED per group", level=2)
+    add_body(doc, "The only validator in this set that fails open in one narrow, deliberate sense and fails closed in every other: a judge-call error marks every proposed group `REJECTED` rather than `UNKNOWN` — for a stage whose entire job is *removing* content, treating an unresolvable judgment as \"don't remove it\" is the safe direction to fail in.")
+
+    add_heading(doc, "22B.6.4 validate_lbc — SAFE / OVER_COMPRESSED / FABRICATED", level=2)
+    add_body(doc, "Three real verdicts plus `UNKNOWN`, and every non-`SAFE` outcome — including `UNKNOWN` — routes to the same place: keep the original chunk. A compression judge only ever gets to make content shorter when it can positively confirm the result is safe, never by default.")
+
+    add_heading(doc, "22B.7 Extracting compression into its own module")
+    add_body(doc, "`context_compression.py` exports exactly four public functions — `compress_context_pipeline`, `format_context_for_llm`, `format_precedence_context_for_llm`, and `merge_similar_chunks` — and nothing else needs to reach into its internals. `agent_query.py` never calls NAC, DC, or LBC directly; it calls the pipeline function and trusts the module to sequence its own stages.")
+    add_body(doc, "This is the same module-boundary discipline Chapter 19B.13 named for `nodes/` versus `services/` — a caller that needs only the pipeline's result should never be able to accidentally couple itself to which internal stage produced it.")
+
+    add_heading(doc, "22B.8 The compress_context tool")
+    add_body(doc, "Compression reaches the agent loop as `compress_context`, one of exactly two tools the model can call (Chapter 17.5) — retrieve, then signal that compression should run. Chapter 18.9's message-scrubbing mechanism lives inside this same tool call: once compression succeeds, every earlier `retrieve_documents` result in the message history is replaced with `COMPRESSED_PLACEHOLDER`, because the raw chunks it scrubs are precisely the chunks this chapter's pipeline just condensed.")
+
+    add_heading(doc, "22B.9 Wiring into agent_query.py and the state machine")
+    add_body(doc, "Chapter 18.7's COMPRESS phase is where this chapter's pipeline actually runs inside the loop: if the model never called `compress_context` itself, the orchestrator injects the call synthetically (Chapter 18.8.2) before advancing to ANSWER. `agent_state[\"compress_done\"]` is the single flag that tracks whether this has happened yet for the current retrieval round, reset to `False` only when the JUDGE phase sends the loop back to RETRIEVE for another pass.")
+
+    add_heading(doc, "22B.10 Measuring the token savings")
+    add_body(doc, "LBC reports its own before-and-after character counts on every run, not as a separate benchmark step but as a normal part of its logging.")
+    add_code(doc, '''saved_chars = total_chars_before - total_chars_after
+pct = (saved_chars / max(total_chars_before, 1)) * 100
+logger.debug(f"chars: {total_chars_before:,} -> {total_chars_after:,} (-{saved_chars:,} = {pct:.1f}%)")''')
+    add_body(doc, "Measured in testing at roughly 27.6% average reduction, LBC's savings compound with whatever NAC and DC already removed upstream — three stages each trimming a smaller, cleaner input than the one before, rather than three independent measurements of the same original context.")
+
+    add_heading(doc, "22B.11 Known failure modes and tuning knobs")
+    add_table(doc, ["Knob", "Value", "Controls"], [
+        ["`DC_WINDOW_SIZE`", "3", "Chunks scanned together per redundancy pass"],
+        ["`LBC_MIN_RETENTION_RATIO`", "0.35", "Floor below which LBC's own output is distrusted"],
+        ["`MERGE_SIMILARITY_THRESHOLD`", "0.90", "Cosine floor for proposing an intra-retrieval chunk merge"],
+    ], [2.45, 1.25, 2.70])
+    add_body(doc, "Two real, observed failure modes remain worth naming precisely because their guards are partial, not complete. LBC has fabricated entire paragraphs of plausible-sounding content from citation-only fragments as short as 77 characters — caught only by the length-ratio guard (Section 22B.5.2), a blunt heuristic rather than a semantic check, so a same-length fabrication would pass undetected. DC has permanently deleted a real, query-relevant statistic by wrongly judging it a duplicate of an unrelated, more general sentence — `validate_redundancy` correctly rejected the group afterward, but too late, because DC's string-replace deletion runs before the judge's verdict is even available, and no code path restores content once removed.")
+    add_body(doc, "Neither failure means the pipeline is unsafe to run — both were caught by the same observability discipline Chapter 22 built, in logs specific enough to show exactly which chunk, which sentence, and which stage. It does mean a compression pipeline this aggressive needs a rollback path its current guards don't yet have: DC's deletion-before-judgment ordering is the more urgent of the two, since fabrication has a length-ratio backstop and destructive deletion currently has none.")
+
+    add_body(doc, "Three stages, four validators, and a consistent principle underneath all of them: compression may only ever make content shorter when it can prove the shorter version is still faithful, never as a default outcome of running out of budget or attempts. Chapter 22C takes this exact pipeline and asks what changes when it has to run twice at once — once for retrieved documents, once for the self-learning `learned_qa` track — inside the parallel graph Chapter 19B already built.")
+
+    path = OUT_DIR / "Chapter_22B_Semantic_Compression.docx"
+    doc.core_properties.title = f"Chapter 22B — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_action_judgment_22c() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560">'
+        '<rect width="1200" height="560" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Action and judgment as two separate graph nodes"], size=24, bold_first=True)
+        + svg_labeled_box(310, 100, 580, 115, "execute_dc_documents", ["runs the DC scan", "stashes dc_groups_per_window_documents"], fill="#F2F2F2")
+        + svg_arrow(600, 215, 600, 241)
+        + '<polygon points="600,243 760,305 600,367 440,305" fill="#D9D9D9" stroke="#000000" stroke-width="3"/>'
+        + svg_centered_text(600, 305, ["Validation", "enabled?"], size=17, gap=22, bold_first=True)
+        + svg_arrow(752, 290, 828, 258)
+        + svg_centered_text(800, 263, ["no"], size=15, bold_first=True)
+        + svg_labeled_box(830, 218, 330, 100, "LBC_documents", ["skip straight to the next stage"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 367, 600, 393)
+        + svg_centered_text(630, 385, ["yes"], size=15, bold_first=True)
+        + svg_labeled_box(310, 395, 580, 115, "validate_dc_documents", ["reads the stashed groups", "re-checks each one independently"], fill="#D9D9D9")
+        + "</svg>"
+    )
+    return svg_to_png("chapter22c_action_judgment", svg)
+
+
+def diagram_precedence_join_22c() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Precedence is an ordering decision, not a merge"], size=24, bold_first=True)
+        + svg_labeled_box(310, 100, 580, 90, "[CONFLICT RESOLUTION RULE]", ["prefer learned QA when the two tracks disagree"], fill="#F2F2F2")
+        + svg_arrow(600, 190, 600, 216)
+        + svg_labeled_box(310, 218, 580, 90, "[LEARNED QA CONTEXT — HIGH PRIORITY]", ["placed first, always"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 308, 600, 334)
+        + svg_labeled_box(310, 336, 580, 90, "[DOCUMENT CONTEXT — SECONDARY]", ["placed second, always"], fill="#D9D9D9")
+        + "</svg>"
+    )
+    return svg_to_png("chapter22c_precedence_join", svg)
+
+
+def build_chapter_22c() -> Path:
+    title = "Two-Track Parallel Compression in the LangGraph Rewrite"
+    doc = configure_document(title)
+    add_cover(doc, "22C", title, "PART IV — FROM RAG TO AGENTIC RAG", "Two tracks that never trust each other's chunks can still trust each other's order.")
+    add_chapter_heading(doc, "22C", title)
+    add_body(doc, "Chapter 22B built one compression pipeline. Chapter 19B's graph runs two of them, genuinely concurrently, because `documents` and `learned_qa` were never one corpus pretending to be two — they are two collections with different noise profiles, different trust levels, and, as this chapter shows, different amounts of compression work worth doing on each.")
+    add_body(doc, "Everything in this chapter is the same NAC/DC/LBC machinery Chapter 22B already built, ported node by node the way Chapter 19B ported the agent loop itself — with one real architectural difference the two tracks can't share, and one precedence rule at the join point that decides what happens when they disagree.")
+    add_body(doc, "By the end of this chapter you will be able to split a single compression pipeline into two independently-tuned parallel tracks, separate a compression stage's action from its judgment into two distinct, conditionally-skippable graph nodes, and assemble two tracks' output at a join point with an explicit, stated precedence rather than an implicit one.")
+
+    add_heading(doc, "22C.1 Why split into two tracks")
+    add_body(doc, "`documents` chunks are noisy in a specific way: overlapping boundaries, redundant restatement across source files, and no guarantee any given chunk was ever seen or vetted before this exact query retrieved it. `learned_qa` chunks are noisy in a different, much smaller way: they are the project's own distilled, previously-validated question-answer pairs — Chapter 15's self-learning loop already ran a quality gate before anything reached this collection at all. Treating both tracks with identical compression intensity either under-cleans the noisy track or over-processes the already-clean one.")
+    add_body(doc, "There is a second, independent reason to keep the tracks apart that has nothing to do with compression intensity: provenance. A document chunk and a learned-QA chunk answer a fundamentally different question about themselves — one says \"here is what a source file states,\" the other says \"here is what this system previously concluded and validated.\" Compressing them through one shared pipeline that has no notion of which track a chunk came from would make it structurally impossible to apply Chapter 22C.10's precedence rule at the end, because by the time two tracks' chunks are compressed together, the information about which track each one belonged to is already gone.")
+    add_body(doc, "Chapter 11.5 made this same argument at the retrieval boundary — `retrieve_separate` returns two lists, never one merged and re-ranked list, for exactly this reason. Everything downstream of retrieval, compression included, inherits that same discipline: two tracks stay two tracks until an explicit, visible join point decides how to combine them, never through an implicit merge buried inside a shared processing step.")
+
+    add_heading(doc, "22C.2 The state-schema split")
+    add_body(doc, "`GraphState` (Chapter 19B.4) declares the two tracks as parallel field families from the moment chunks are retrieved through the moment they're compressed, never merging early.")
+    add_code(doc, '''retrieved_document_chunks:    Annotated[list[dict], operator.add]
+retrieved_learned_qa_chunks:  Annotated[list[dict], operator.add]
+validated_document_chunks:    list[dict]
+validated_learned_qa_chunks:  list[dict]
+dedup_merged_document_chunks:   list[dict]
+dedup_merged_learned_qa_chunks: list[dict]
+nac_output_document_chunks:  list[dict]     # documents only — Section 22C.4
+dc_output_document_chunks:   list[dict]
+compressed_document_chunks:  list[dict]
+dc_output_learned_qa_chunks:  list[dict]
+compressed_learned_qa_chunks: list[dict]
+compressed_docs: list[dict]                 # the join — Section 22C.9''')
+    add_body(doc, "Every field name carries its track in its own spelling — `_document_chunks` or `_learned_qa_chunks` — so a node reading the wrong track's field is a visible typo in a code review, not a silent cross-contamination bug waiting to be found in a debug log.")
+
+    add_heading(doc, "22C.3 The document track — the full pipeline")
+    add_body(doc, "Documents run all three stages Chapter 22B built: `NAC_documents → DC_documents → LBC_documents`, in the graph exactly as `compress_context_pipeline` ran them in sequence. Nothing about the logic changes in the port — only its home, from three function calls inside one Python function to three registered graph nodes connected by edges.")
+    add_body(doc, "Running the full three-stage pipeline on documents specifically, and not on learned QA, is a direct consequence of where each collection's noise actually comes from. A document chunk's redundancy is structural — it comes from how the source was split and how many source files happen to restate the same fact — which is exactly the class of noise NAC and DC exist to remove. Nothing about a distilled Q&A pair carries that same structural redundancy, because nothing split it from a longer document in the first place.")
+
+    add_heading(doc, "22C.4 The learned_qa track — DC then LBC, NAC skipped")
+    add_body(doc, "Learned-QA chunks skip NAC entirely, for a reason grounded directly in what NAC actually needs: neighbor merging requires a `chunk_seq` position within a source document, and a distilled Q&A pair — synthesized whole by `self_learner.py`, never split from a longer document — has no sequence to merge by. `execute_dc_learned_qa` reads straight from `dedup_merged_learned_qa_chunks`, the same field position `execute_dc_documents` reaches only after `nac_output_document_chunks` has already run.")
+    add_code(doc, '''# documents track
+chunks = state.get("nac_output_document_chunks") or []
+# learned_qa track — one stage earlier, no NAC output to read from
+chunks = state.get("dedup_merged_learned_qa_chunks") or []''')
+    add_body(doc, "This is the asymmetric depth Figure 19B.2 already visualized structurally — three stages against two — grounded here in exactly why the depths differ: not an arbitrary optimization, but NAC having literally nothing to operate on for a track whose chunks were never chunked in the first place.")
+
+    add_heading(doc, "22C.5 Extracting each stage into its own node file")
+    add_body(doc, "`nac.py`, `dc.py`, and `lbc.py` each hold both tracks' logic side by side — `dc.py` contains `execute_dc_documents` and `execute_dc_learned_qa` as two functions in one file, sharing a private `_run_dc` helper, rather than two separate files that would duplicate the scanning logic itself. `dedup_merge.py` and `combine_tracks.py` round out the set — one file per compression concept, not one file per track, which keeps the actual DC algorithm defined exactly once even though it runs on two independent inputs.")
+    add_table(doc, ["File", "Document-track exports", "Learned-QA-track exports"], [
+        ["`nac.py`", "`execute_nac_documents`, `validate_nac_documents`", "— (skipped, Section 22C.4)"],
+        ["`dc.py`", "`execute_dc_documents`, `validate_dc_documents`", "`execute_dc_learned_qa`, `validate_dc_learned_qa`"],
+        ["`lbc.py`", "`execute_lbc_documents`, `validate_lbc_documents`", "`execute_lbc_learned_qa`, `validate_lbc_learned_qa`"],
+        ["`dedup_merge.py`", "`validate_dedup_merge_documents`", "`validate_dedup_merge_learned_qa`"],
+        ["`combine_tracks.py`", "the single fan-in barrier for both tracks", "the single fan-in barrier for both tracks"],
+    ], [1.35, 2.45, 2.50])
+    add_body(doc, "One file per stage rather than one file per track is a real design choice with a real cost avoided: a bug found in the DC scanning logic gets fixed once, in `_run_dc`, and both tracks inherit the fix on their next run. Splitting into `dc_documents.py` and `dc_learned_qa.py` would have made that same fix a two-file, easy-to-desynchronize change — the exact class of drift Chapter 19B.12's \"maintain both pipelines side-by-side\" discipline exists to prevent at the package level, recreated here at the file level if the split had gone the other way.")
+
+    add_heading(doc, "22C.6 The execute_X / validate_X pattern")
+    add_callout(doc, "Definition", "Action/judgment node split", "Separating a compression stage's mechanical work (execute_X) from its verdict-checking (validate_X) into two distinct graph nodes, connected by a conditional edge, rather than one node that always does both.")
+    add_body(doc, "`execute_dc_documents` runs the scan and stashes its proposed redundancy groups into state (`dc_groups_per_window_documents`) without judging them at all. `validate_dc_documents` is a separate node entirely, reading that stashed state and running the actual judge calls. Splitting the two is what makes Section 22C.7's routing possible — a graph can only conditionally skip a stage if that stage is its own node with its own edge, and Chapter 22B's validators were never optional inside one Python function the way they are optional here.")
+
+    add_heading(doc, "22C.7 Per-stage routing functions")
+    add_body(doc, "Three routing functions, one per compression-stage boundary, all sharing the identical shape: check the `ENABLE_COMPRESSION_VALIDATION` switch and route to the validator or skip straight past it.")
+    add_figure(doc, diagram_action_judgment_22c(), "Figure 22C.1 — Validation is a real graph node, conditionally reachable, never a step a disabled switch quietly no-ops inside.")
+    add_code(doc, '''def route_dc_documents_to_validator(state: GraphState) -> str:
+    return "validate_DC_documents" if get_switches(state)["ENABLE_COMPRESSION_VALIDATION"] else "LBC_documents"
+
+def route_dc_learned_qa_to_validator(state: GraphState) -> str:
+    return "validate_DC_learned_qa" if get_switches(state)["ENABLE_COMPRESSION_VALIDATION"] else "LBC_learned_qa"''')
+    add_body(doc, "Figure 22C.1's diamond is the same conditional-edge primitive Chapter 19.7 introduced, applied here per compression stage per track — six routing decisions total across both tracks' full pipelines, each one independently able to skip its validator without touching any other stage's wiring.")
+
+    add_heading(doc, "22C.8 Fan-out from query_variants to retrieve")
+    add_body(doc, "Both tracks begin from the identical fan-out Chapter 19B.8 already built: `fan_out_retrievals` sends one `Send(\"retrieve\", ...)` per query variant, and each parallel `retrieve` call queries *both* collections with one embedding via `retrieve_separate` (Chapter 11.5), writing into both tracks' reducer-typed fields simultaneously. The two tracks don't fan out separately — one fan-out populates both, and only diverge once `post_retrieval_filter` and the per-track validators run.")
+    add_body(doc, "This shared fan-out point is worth noticing precisely because it is the *only* place the two tracks' execution is still coupled. From `post_retrieval_filter` onward, a document-track node and a learned-QA-track node share no data dependency at all — `execute_dc_documents` and `execute_dc_learned_qa` could run on entirely different machines and neither would need to know the other exists. LangGraph's scheduler exploits exactly this: with no edge connecting the two tracks' internal nodes, nothing forces them into the same superstep, and the framework is free to run whichever track's next node is ready first.")
+
+    add_heading(doc, "22C.9 Fan-in at combine_tracks")
+    add_body(doc, "Both tracks' compression pipelines end at the same `defer=True` barrier Chapter 19B.10 built — `combine_tracks` waits for both `validate_LBC_documents` and `validate_LBC_learned_qa` to finish, regardless of which track's shorter path gets there first, then assembles one combined list.")
+    add_code(doc, '''learned_qa = state.get("compressed_learned_qa_chunks") or []
+documents  = state.get("compressed_document_chunks") or []
+combined = [*learned_qa, *documents]
+return {"compressed_docs": combined}''')
+
+    add_heading(doc, "22C.10 The conflict-resolution header")
+    add_body(doc, "`compressed_docs` isn't just concatenated — the text handed to the model is wrapped with an explicit precedence rule and section labels, `format_precedence_context_for_llm` (Chapter 22B.7) applied at exactly this join point.")
+    add_figure(doc, diagram_precedence_join_22c(), "Figure 22C.2 — Learned QA is labeled and placed first, every time, not merely listed first by coincidence of concatenation order.")
+    add_body(doc, "The ordering in Figure 22C.2 is the entire mechanism — no code branch decides per-query which track \"wins\" a conflict. The instruction is stated once, in the context itself, and the model resolves any actual conflict at generation time using the stated rule. Placing the instruction and the higher-priority section first is Chapter 14.1's recency-and-primacy discipline applied to context assembly instead of a system prompt: what the model reads first about how to treat a conflict is what it treats as authoritative.")
+    add_body(doc, "Why learned QA outranks documents, specifically, is worth stating rather than leaving implicit: a learned-QA entry is not raw source material — it is a record of a question this system has already answered and had validated, by the same quality machinery Chapter 20 built. Preferring it over a freshly-retrieved document chunk when the two genuinely disagree is a bet that a previously-checked answer is more trustworthy than an unvalidated passage of source text, not a bet that learned QA is simply newer or more convenient to read. That reasoning is exactly what \"HIGH PRIORITY\" is standing in for in three words a prompt has room for, and it is worth remembering the full version the next time this precedence rule needs revisiting.")
+
+    add_heading(doc, "22C.11 The _THIN separator and per-track telemetry")
+    add_body(doc, "Every node in both tracks logs through the same `_THIN` rule Chapter 22.2 established, and every log line names its track explicitly in its own tag — `[COMPRESS] running DC_documents on N chunk(s)` beside `[COMPRESS] running DC_learned_qa on N chunk(s)` — so two genuinely parallel streams of execution remain readable as two streams in one interleaved log file, rather than one confusing stream where a reader has to guess which track produced which line.")
+    add_body(doc, "This is Chapter 22.6's per-iteration tool-call logging lesson generalized to true parallelism: a trace built for a sequential loop only ever had one thing happening at a time to label. A trace built for a graph with genuine concurrent branches has to label *which branch*, every time, or the trace stops being a reconstruction of what happened and becomes a shuffled deck of lines from two different stories.")
+    add_body(doc, "The practical test is whether a reader can `grep` one track's story out of a run that interleaved both. `grep learned_qa run.debug.log` should return a coherent, ordered account of that track alone — every stage it passed through, every verdict its validators reached — with the document track's lines simply absent, not interspersed in a way that breaks the narrative. That property does not happen by accident; it happens because every node in both tracks was written, from the first line, to name its own track in every message it emits, the same discipline `caller_tag` (Chapter 13B.7) applies to LLM calls, extended here to cover an entire parallel branch instead of a single call site.")
+
+    add_body(doc, "None of this — the field-name discipline, the shared-file-per-stage layout, the explicit routing, the stated precedence — was strictly required for the pipeline to produce a correct-looking answer on a happy path. A single merged track with no precedence rule would often return something reasonable too, right up until the one query where the two tracks genuinely disagreed and nothing in the system had ever decided, in advance, which one should be believed. Every seam this chapter added is a seam drawn before that moment arrives, not after a bad answer already shipped and someone had to reconstruct, after the fact, which track the wrong claim had actually come from.")
+    add_body(doc, "Two tracks, one shared compression algorithm, one explicit precedence rule at the point they finally meet. Nothing about splitting documents from learned QA required inventing new compression logic — it required deciding, deliberately, which parts of Chapter 22B's pipeline the two tracks could share (the DC and LBC algorithms themselves) and which parts they couldn't (NAC's need for a sequence to merge by, and ultimately, which track's evidence wins when they disagree). Part V turns from the mechanics of one query to the resource every mechanism in this book has been spending all along: the token budget a context window actually has room for.")
+
+    path = OUT_DIR / "Chapter_22C_Two_Track_Parallel_Compression.docx"
+    doc.core_properties.title = f"Chapter 22C — {title}"
     doc.core_properties.subject = "Self-Learning Agentic RAG System"
     doc.core_properties.author = ""
     doc.save(path)
@@ -4394,6 +5022,10 @@ BUILDERS = {
     18: build_chapter_18,
     20: build_chapter_20,
     "20B": build_chapter_20b,
+    21: build_chapter_21,
+    22: build_chapter_22,
+    "22B": build_chapter_22b,
+    "22C": build_chapter_22c,
     19: build_chapter_19,
     "19B": build_chapter_19b,
     12: build_chapter_12,

@@ -1,4 +1,5 @@
 # Self-Learning Agentic RAG System
+
 ### A Step-by-Step Guide to Learn and Create
 
 *Scope note: the book teaches two things built by the same hands-on, evidence-first methodology — an agentic, self-learning RAG system (Parts I–VII, the `Memora` codebase) and multi-agent orchestration of coding-agent CLIs (Part VIII, the `Bhai-To-Bhai` codebase). "Agentic" in the title covers both: agents that decide their own retrieval, and agents that coordinate other agents.*
@@ -10,6 +11,7 @@
 ---
 
 ### **Preface**
+
 - How to read this book
 - Prerequisites (Python, basic ML familiarity)
 - The project you will build by the end
@@ -21,6 +23,7 @@
 ## **PART I — FOUNDATIONS**
 
 ### Chapter 1 — Why RAG? The Problem with Plain LLMs
+
 1.1 What Large Language Models actually are (decoder-only Transformers in one diagram)
 1.2 Tokens, embeddings, attention, and the "predict the next token" objective
 1.3 Why the output is a probability distribution — the seed of the hallucination problem
@@ -32,6 +35,7 @@
 1.9 Where RAG fits in the landscape — what it fixes and what it does not fix
 
 ### Chapter 2 — Anatomy of a Retrieval-Augmented Generation System
+
 2.1 The two pipelines: ingestion (offline) and retrieval (online)
 2.2 The library cataloguer and the librarian — the working analogy
 2.3 The five-step retrieval flow — embed → search → augment → generate → return
@@ -40,6 +44,7 @@
 2.6 Limits of "traditional" RAG — the case for something smarter
 
 ### Chapter 3 — Setting Up Your Development Environment
+
 3.1 Checking if your laptop is RAG-ready (CPU, RAM, GPU, storage)
 3.2 Python versions and why 3.10–3.12 is the sweet spot
 3.3 Virtual environments: `venv` vs `uv` vs `conda`
@@ -54,12 +59,14 @@
 ## **PART II — BUILDING THE INGESTION PIPELINE**
 
 ### Chapter 4 — The Document Structure
+
 4.1 What a `Document` object really is
 4.2 `page_content` vs `metadata` — and why metadata matters
 4.3 Enriching metadata (source, page, timestamp, author, doc-type)
 4.4 Why clean metadata pays dividends downstream
 
 ### Chapter 5 — Data Loading From Multiple Sources
+
 5.1 Text files with `TextLoader`
 5.2 PDFs with `PyPDFLoader` vs `PyMuPDFLoader` — speed and fidelity tradeoffs
 5.3 Directory loading with `DirectoryLoader` and glob patterns
@@ -70,6 +77,7 @@
 5.8 Building a unified file-discovery helper across multiple data roots
 
 ### Chapter 5B — Evaluating Document-Conversion Engines: Docling, Unstructured, and Marker-PDF
+
 5B.1 Why revisit loading — when `UnstructuredLoader` output isn't faithful enough for layout-dependent documents (contracts, RFTs, engineering drawings)
 5B.2 The comparison harness — one script and one result tree per loader, recursive source discovery, and mirrored relative paths (`source/**/*` → `<loader>_results/**/*.md`) so outputs sit side by side for inspection
 5B.3 Docling — `DocumentConverter.export_to_markdown()`, model-backed layout/OCR analysis, and first-run asset download
@@ -82,6 +90,7 @@
 5B.10 What this leaves for later — the converted Markdown still has to be chunked, and its unreliable heading/list structure breaks the structure-aware splitters of Chapter 7; that thread is picked up in Chapter 7B
 
 ### Chapter 6 — When RAG Is the Wrong Tool: The Two-Track Problem
+
 6.1 The CSV-stats trap — why "give me the average age" can't be answered by similarity search
 6.2 Semantic retrieval vs aggregation — a fundamental mismatch
 6.3 The two-track architecture — RAG for prose, pandas for structured data
@@ -90,6 +99,7 @@
 6.6 When to keep CSVs in RAG anyway (lookups, narrow joins, denormalized rows)
 
 ### Chapter 7 — Chunking Strategies
+
 7.1 Why chunk at all? Context windows and retrieval precision
 7.2 Fixed-size chunking
 7.3 `RecursiveCharacterTextSplitter` — the sensible default
@@ -102,6 +112,7 @@
 7.10 Experimenting: how chunking choices visibly change retrieval quality
 
 ### Chapter 7B — Chunking Converted Documents: Repairing Structure Before Splitting
+
 7B.1 The problem this chapter inherits — Chapter 5B's converters emit Markdown whose heading and list structure is inconsistent, and Chapter 7's structure-aware splitters depend on exactly that structure being trustworthy
 7B.2 Scoping the experiment — chunking only `marker_results/`, so splitter comparisons aren't confounded by three loaders' different output conventions
 7B.3 Preserving traceability — attaching source identity and per-source sequence numbers to every chunk (the `chunk_seq` metadata later relied on by neighbor-aware compression, §22B.3.1)
@@ -116,6 +127,7 @@
 7B.12 Baseline vs custom splitter — why the committed recursive splitter remained the baseline and the custom heading/table/list prototype was rejected as a replacement
 
 ### Chapter 8 — Embeddings Deep Dive
+
 8.1 Dense vectors as compressed meaning
 8.2 How sentence-transformers produce a 384-d vector
 8.3 Where the model comes from — Hugging Face Hub and local caching
@@ -128,6 +140,7 @@
 8.10 Why vectors are L2-normalized and what `||v|| = 1.0` actually means
 
 ### Chapter 9 — Vector Databases
+
 9.1 What a vector DB actually stores
 9.2 Cosine similarity, L2 distance, dot product — pick one
 9.3 ChromaDB for local development
@@ -138,6 +151,7 @@
 9.8 Backups, migrations, and versioning your index
 
 ### Chapter 10 — Putting Ingestion Together: `ingest.py`
+
 10.1 File discovery across multiple roots
 10.2 Avoiding double-ingestion — why a parent root that contains your child roots will silently duplicate every chunk
 10.3 Routing each file to the right loader
@@ -150,6 +164,7 @@
 ## **PART III — BUILDING THE RETRIEVAL PIPELINE**
 
 ### Chapter 11 — Query Retrieval Fundamentals
+
 11.1 From question to query embedding
 11.2 Similarity search mechanics, step by step
 11.3 Top-k selection, score thresholds, and `MIN_SIMILARITY` heuristics
@@ -159,6 +174,7 @@
 11.7 Why the retriever caches its last chunks (and who consumes that cache)
 
 ### Chapter 12 — Advanced Retrieval Techniques
+
 12.1 The upgrade ladder — cosine → MMR → BM25 hybrid → cross-encoder rerank
 12.2 Hybrid search — dense + sparse (BM25) combined
 12.3 Reciprocal Rank Fusion (RRF) — merging ranked lists from multiple methods
@@ -171,6 +187,7 @@
 12.10 Contextual compression — extracting only relevant sentences from chunks
 
 ### Chapter 13 — Generating Answers with an LLM
+
 13.1 The augmentation step — prompt + context + question
 13.2 Choosing a hosted LLM (Groq, OpenAI, Anthropic, local via Ollama)
 13.3 Groq with `langchain-groq` — fast and cheap for dev (`llama-3.3-70b-versatile`, `llama-3.1-8b-instant`)
@@ -182,6 +199,7 @@
 13.9 Streaming, citations, and conversational history (the enhanced pipeline)
 
 ### Chapter 13B — Centralized LLM Invocation and Error Handling
+
 13B.1 Why every LLM call should flow through one wrapper — the case for `llm_caller.py`
 13B.2 The `LLMResult` dataclass and the `LLMErrorKind` enum
 13B.3 The Groq error taxonomy — `BadRequestError`, `RateLimitError`, `AuthenticationError`, `PermissionDeniedError`, `NotFoundError`, `UnprocessableEntityError`, `InternalServerError`, `APIConnectionError`, `APITimeoutError`, `APIStatusError`
@@ -203,6 +221,7 @@
 13B.19 The `LLMRateLimitAbortError` — when to stop retrying and surface the failure
 
 ### Chapter 14 — Prompt Engineering for RAG
+
 14.1 Anatomy of a good prompt — role, instruction, context, constraints
 14.2 Zero-shot, one-shot, few-shot prompting
 14.3 Chain-of-Thought and self-consistency
@@ -225,6 +244,7 @@
 ## **PART IV — FROM RAG TO AGENTIC RAG**
 
 ### Chapter 15 — What "Agentic" Really Means
+
 15.1 The fixed pipeline limitation of traditional RAG
 15.2 Definition — autonomous agents making dynamic retrieval decisions
 15.3 The four agent decisions: *when*, *what*, *where*, and *how many times* to retrieve
@@ -232,6 +252,7 @@
 15.5 When you actually need an agent (and when you don't)
 
 ### Chapter 16 — Designing the Agent Loop
+
 16.1 The reasoning loop: decide → retrieve → evaluate → answer
 16.2 Why tool-calling is the core primitive
 16.3 Iteration caps and termination conditions (`MAX_ITERATIONS`, `MAX_TOTAL_RETRIEVALS`, `MAX_TOOL_CALLS_PER_ITERATION`)
@@ -239,6 +260,7 @@
 16.5 The minimal agent in pseudocode
 
 ### Chapter 17 — Tool Use and Function Calling
+
 17.1 What a "tool" is from the LLM's perspective
 17.2 Writing tool schemas (JSON Schema style)
 17.3 Hiding server-side parameters from the LLM (the `context` injection pattern)
@@ -248,6 +270,7 @@
 17.7 Safety: validating and sandboxing tool inputs
 
 ### Chapter 18 — Implementing the Agent with `llm.invoke(tools=…)`
+
 18.1 `response.content` vs `response.tool_calls` — the two shapes of a reply
 18.2 Executing tool calls in your loop
 18.3 Feeding tool results back as `role: "tool"` messages
@@ -256,14 +279,16 @@
 18.6 Writing `agent_query.py`
 18.7 From open loop to phase state machine — the RETRIEVE → COMPRESS → CAQ pipeline
 18.8 Synthetic-injection — what to do when the LLM skips a required phase
-  - 18.8.1 LLM emits final answer without retrieving — inject retrieve + compress + CAQ and re-emit
-  - 18.8.2 LLM calls CAQ but skips compression — inject `compress_context` first, then proceed
-  - 18.8.3 The user-role nudge after synthetic injections — getting the model to re-emit cleanly
-18.9 Message-list scrubbing without breaking the assistant↔`tool_call_id` pairing
-18.10 The `_judge` sidecar message — keeping validator output retrievable but out of the live retrieval surface
-18.11 Token-usage accounting per iteration — accumulating `total_prompt_tokens` and `total_completion_tokens`
+
+- 18.8.1 LLM emits final answer without retrieving — inject retrieve + compress + CAQ and re-emit
+- 18.8.2 LLM calls CAQ but skips compression — inject `compress_context` first, then proceed
+- 18.8.3 The user-role nudge after synthetic injections — getting the model to re-emit cleanly
+  18.9 Message-list scrubbing without breaking the assistant↔`tool_call_id` pairing
+  18.10 The `_judge` sidecar message — keeping validator output retrievable but out of the live retrieval surface
+  18.11 Token-usage accounting per iteration — accumulating `total_prompt_tokens` and `total_completion_tokens`
 
 ### Chapter 19 — Orchestration with LangGraph
+
 19.1 Why graph-based orchestration — the case against ever-growing `agent_query.py` loops
 19.2 Nodes, edges, and conditional edges — the three primitives
 19.3 The `GraphState` TypedDict — declaring every field the graph will ever touch
@@ -280,6 +305,7 @@
 19.14 No-code comparison — testing cyclic execution in Langflow's visual builder (the `Loop` component, its guaranteed stop condition, and the "automatic data cycle" vs "interactive cycle" distinction) as a side-by-side against LangGraph's hand-coded conditional edges, and — once that experiment was satisfied — porting the entire Memora agentic RAG pipeline into Langflow as a generated Custom-Component flow to see how far a visual builder can carry a real agent loop before hand-written nodes become necessary — see the `Langflow-learning-project` codebase (Appendix A, C.4, K.4)
 
 ### Chapter 19B — Porting the Agent to a LangGraph State Machine
+
 19B.1 The migration plan — from `agent_query.py` loop to a node-per-phase graph
 19B.2 One module per node — `user_input.py`, `query_variants.py`, `retrieve.py`, `validate_retrieval.py`, `post_retrieve.py`, `dedup_merge.py`, `nac.py`, `dc.py`, `lbc.py`, `combine_tracks.py`, `generate_draft.py`, `check_answer_quality.py`, `generate_answer.py`, `no_context_answer.py`, `commands.py`, `auto_distillation.py`
 19B.3 The `graph.py` module — assembling nodes, edges, and entry/exit points
@@ -296,6 +322,7 @@
 19B.14 Circular imports across `nodes/` — how mixed absolute/relative import styles load the same module under two identities, and how to detect it
 
 ### Chapter 20 — Quality Control and Self-Correction
+
 20.1 The check_answer_quality heuristic — red-flag refusal phrases, length floor, meaningful-overlap counting
 20.2 Why heuristic groundedness checks are brittle (the magic 15-word stop-list threshold)
 20.3 LLM-as-judge evaluation — and why the judge should *not* be the same call that produced the answer
@@ -309,6 +336,7 @@
 20.11 Fabrication under repair — when the JSON-repair tier invents plausible values for inputs with no real answer data
 
 ### Chapter 20B — Structured Output Reliability with `fix_llm_output.py`
+
 20B.1 The thirty failure modes — prefix prose, code fences, function-call wrappers, Python literals, escaped strings, comments, trailing commas, single quotes, unquoted keys, truncated JSON, multiple candidates, hallucinated reasoning, XML-instead-of-JSON, infinite repetition, and more
 20B.2 The layered repair pipeline — preprocess → balanced-extract → `json.loads` → `json_repair` → Pydantic validation
 20B.3 Preprocessing — `_strip_code_fences`, `_strip_blockquotes`, `_unwrap_function_call`, `_strip_json_comments`, `_fix_python_literals`, thinking-preamble stripping
@@ -322,6 +350,7 @@
 20B.11 Test harness — `test_output_fixes.py` and the catalogue of malformed inputs
 
 ### Chapter 21 — Answer-Relevance Verification (Separate From Groundedness)
+
 21.1 The three distinct failure modes — topic drift, question-type mismatch, hallucination
 21.2 Why pure cosine similarity between query and answer is the wrong tool — high-similarity-wrong-answer and low-similarity-correct-answer cases
 21.3 The two-stage gate — similarity smoke-test + LLM judge
@@ -331,6 +360,7 @@
 21.7 Keeping relevance separate from groundedness in the agent loop
 
 ### Chapter 22 — Observability: Building a Full Dry-Run Trace
+
 22.1 Why observable agents beat "magic" agents
 22.2 Step-numbered console output across the entire pipeline
 22.3 Logging the embedding step — model, shape, first-8-vals, L2 norm
@@ -344,34 +374,37 @@
 22.11 Turning trace output on and off cleanly
 
 ### Chapter 22B — Semantic Compression of Retrieved Context
+
 22B.1 Why retrieved chunks are redundant by design — and why that wastes tokens
 22B.2 The three-stage compression hierarchy: NAC → DC → LBC
 22B.3 Neighbor-Aware Compression (NAC) — merging adjacent chunks from the same source
-  - 22B.3.1 Detecting neighbor runs via `chunk_seq` metadata
-  - 22B.3.2 The NAC merge prompt and validate-merge loop
-  - 22B.3.3 Retry-with-feedback when the LLM merge is unfaithful
-22B.4 Deduplication Compression (DC) — removing cross-chunk redundancy
-  - 22B.4.1 The sliding-window scanner and the `_DC_SCAN_PROMPT`
-  - 22B.4.2 The redundancy judge and `validate_redundancy`
-  - 22B.4.3 The intra-chunk group bug and the cross-chunk guard fix
-  - 22B.4.4 Bracket-counting JSON extraction — why greedy regex fails with trailing prose
-  - 22B.4.5 Verdict deduplication and out-of-range index guards
-22B.5 LLM-Based Compression (LBC) — query-focused sentence-level filtering
-  - 22B.5.1 The `_LBC_COMPRESS_PROMPT` and the `__IRRELEVANT__` sentinel
-  - 22B.5.2 `LBC_MIN_RETENTION_RATIO` — guarding against over-compression
-  - 22B.5.3 `validate_lbc` — detecting fabricated and dropped claims
-22B.6 Building `validators.py` — four LLM-as-judge validators
-  - 22B.6.1 `validate_retrieval` — PASS / PARTIAL / FAIL per chunk
-  - 22B.6.2 `validate_merge` — FAITHFUL / UNFAITHFUL with fabricated and dropped claims
-  - 22B.6.3 `validate_redundancy` — CONFIRMED / REJECTED per redundancy group
-  - 22B.6.4 `validate_lbc` — SAFE / OVER_COMPRESSED / FABRICATED
-22B.7 Extracting compression into its own module — building `context_compression.py`
-22B.8 The `compress_context` tool — exposing compression to the agent as a callable phase
-22B.9 Wiring `context_compression.py` into `agent_query.py` and the agent state machine
-22B.10 Measuring the token savings — before and after compression telemetry
-22B.11 Known failure modes and tuning knobs (`DC_WINDOW_SIZE`, `LBC_MIN_RETENTION_RATIO`, `MERGE_SIMILARITY_THRESHOLD`)
+
+- 22B.3.1 Detecting neighbor runs via `chunk_seq` metadata
+- 22B.3.2 The NAC merge prompt and validate-merge loop
+- 22B.3.3 Retry-with-feedback when the LLM merge is unfaithful
+  22B.4 Deduplication Compression (DC) — removing cross-chunk redundancy
+- 22B.4.1 The sliding-window scanner and the `_DC_SCAN_PROMPT`
+- 22B.4.2 The redundancy judge and `validate_redundancy`
+- 22B.4.3 The intra-chunk group bug and the cross-chunk guard fix
+- 22B.4.4 Bracket-counting JSON extraction — why greedy regex fails with trailing prose
+- 22B.4.5 Verdict deduplication and out-of-range index guards
+  22B.5 LLM-Based Compression (LBC) — query-focused sentence-level filtering
+- 22B.5.1 The `_LBC_COMPRESS_PROMPT` and the `__IRRELEVANT__` sentinel
+- 22B.5.2 `LBC_MIN_RETENTION_RATIO` — guarding against over-compression
+- 22B.5.3 `validate_lbc` — detecting fabricated and dropped claims
+  22B.6 Building `validators.py` — four LLM-as-judge validators
+- 22B.6.1 `validate_retrieval` — PASS / PARTIAL / FAIL per chunk
+- 22B.6.2 `validate_merge` — FAITHFUL / UNFAITHFUL with fabricated and dropped claims
+- 22B.6.3 `validate_redundancy` — CONFIRMED / REJECTED per redundancy group
+- 22B.6.4 `validate_lbc` — SAFE / OVER_COMPRESSED / FABRICATED
+  22B.7 Extracting compression into its own module — building `context_compression.py`
+  22B.8 The `compress_context` tool — exposing compression to the agent as a callable phase
+  22B.9 Wiring `context_compression.py` into `agent_query.py` and the agent state machine
+  22B.10 Measuring the token savings — before and after compression telemetry
+  22B.11 Known failure modes and tuning knobs (`DC_WINDOW_SIZE`, `LBC_MIN_RETENTION_RATIO`, `MERGE_SIMILARITY_THRESHOLD`)
 
 ### Chapter 22C — Two-Track Parallel Compression in the LangGraph Rewrite
+
 22C.1 Why split into two tracks — document chunks and learned_qa chunks have different characteristics
 22C.2 The state-schema split — `retrieved_document_chunks`, `retrieved_learned_qa_chunks`, and downstream parallel fields
 22C.3 The document track — NAC → DC → LBC (full pipeline for noisy source chunks)
@@ -389,6 +422,7 @@
 ## **PART V — TOKENS, CONTEXT, AND MODEL CHOICE**
 
 ### Chapter 23 — The Token Budget — What Actually Fits in Your Context Window
+
 23.1 What a context window is and what it includes (system prompt + history + tool results + user query + reserved output)
 23.2 Total window vs *actually usable* input — the 128K → ~120K reality
 23.3 A worked token budget for a 6-iteration agentic RAG run
@@ -396,6 +430,7 @@
 23.5 Reading real numbers — the `total_prompt_tokens` and `total_completion_tokens` log lines
 
 ### Chapter 24 — Long-Context Performance and the Failure Cliff
+
 24.1 The "lost in the middle" problem — why models attend to start and end, not middle
 24.2 Empirical zones for an 8B model — ≤16K green, 16–32K yellow, >32K red
 24.3 Where the rules start being ignored — the ~1.8K-token instruction-following ceiling on `llama-3.1-8b-instant`
@@ -403,6 +438,7 @@
 24.5 Designing a stress test — three runs at increasing context sizes, same query
 
 ### Chapter 25 — Why Small Models Struggle With Agentic Loops
+
 25.1 Parameter count as "working-memory capacity"
 25.2 Attention dilution as the conversation grows
 25.3 Instruction following is learned behavior, not a hard rule engine
@@ -411,6 +447,7 @@
 25.6 When to upgrade to a 70B model and what changes
 
 ### Chapter 26 — Prompt Engineering for Small Models in Long Loops
+
 26.1 Section ordering matters — role/rules first, contextual injections middle, PROCESS last (closest to the user message)
 26.2 The before-and-after of `_BASE_SYSTEM_PROMPT` → `_ROLE_AND_RULES` + `_PROCESS_INSTRUCTIONS` split
 26.3 Strengthening "do NOT batch tool calls" with explicit numbered process steps
@@ -421,6 +458,7 @@
 26.8 Adding negative instructions ("Do NOT write Python code") when small models drift
 
 ### Chapter 27 — Agent State Engineering Beyond the System Prompt
+
 27.1 Why "remind the model from the system prompt" stops working at scale
 27.2 Injecting retrieval state into every tool result (`[Retrieval N/5] Queries tried so far: …`)
 27.3 The per-iteration state-summary user message — a soft reminder placed close to generation
@@ -433,16 +471,19 @@
 ## **PART VI — THE SELF-LEARNING LAYER**
 
 ### Chapter 28 — What "Self-Learning" Actually Means
+
 28.1 The honest truth — agentic ≠ self-learning
 28.2 Why the LLM's weights never change in your app
 28.3 Three real paths to self-improvement
-  - 28.3.1 Memory injection (easiest)
-  - 28.3.2 Fine-tuning on accumulated interactions (moderate)
-  - 28.3.3 RLHF / DPO (research-grade)
-28.4 Why the memory-injection path is the right choice for most projects
-28.5 Dangers of unchecked self-learning (reinforcing hallucinations, memory pollution)
+
+- 28.3.1 Memory injection (easiest)
+- 28.3.2 Fine-tuning on accumulated interactions (moderate)
+- 28.3.3 RLHF / DPO (research-grade)
+  28.4 Why the memory-injection path is the right choice for most projects
+  28.5 Dangers of unchecked self-learning (reinforcing hallucinations, memory pollution)
 
 ### Chapter 29 — Capturing Interactions: The Feedback Store
+
 29.1 What to log — query, answer, sources, chunks, quality signal
 29.2 JSONL as a lightweight ledger (`interactions.jsonl`)
 29.3 Implicit vs explicit feedback (agent quality check vs user thumbs)
@@ -450,6 +491,7 @@
 29.5 Privacy, PII, and what NOT to log
 
 ### Chapter 30 — Learning From Failure, Part 1: Failed Query Variants
+
 30.1 The problem — the agent keeps re-trying phrasings that retrieved zero chunks
 30.2 The blocklist file — `failed_variants.json` keyed by normalized query
 30.3 Recording every failing reformulation, not just the user-flagged one
@@ -458,6 +500,7 @@
 30.6 Verifying it works — observing the agent skip a previously-failing query
 
 ### Chapter 31 — Learning From Failure, Part 2: User Thumbdowns
+
 31.1 The richer signal — when the answer was technically grounded but still wrong
 31.2 The `bad` command and the `MIN_FEEDBACK_LEN` threshold
 31.3 What to capture per thumbdown — original query, every variant tried, chunks each retrieved, the user's own feedback
@@ -470,6 +513,7 @@
 31.10 Exact matching vs fuzzy/semantic matching for query lookup
 
 ### Chapter 32 — Learning From Success: The Distillation Engine
+
 32.1 The principle — learn only from *validated* interactions
 32.2 Synthetic Q&A pair generation from verified triples
 32.3 Strict grounding in source chunks — no new facts invented
@@ -479,6 +523,7 @@
 32.7 Triggering: "every N good interactions" vs time-based vs manual (`learn` command)
 
 ### Chapter 33 — Hybrid Retrieval Over Documents and Learned Memory
+
 33.1 Two collections, one retriever
 33.2 Merging, deduplicating, and re-ranking across collections
 33.3 Weighting learned memory vs raw documents
@@ -490,6 +535,7 @@
 33.9 Per-collection top-k — `RETRIEVAL_TOP_K` for documents, `RETRIEVAL_TOP_L` for learned_qa
 
 ### Chapter 34 — Chunk-Level Deduplication and Merging During Retrieval
+
 34.1 Why retrievals across iterations produce near-duplicate chunks
 34.2 The `MERGE_SIMILARITY_THRESHOLD` knob — choosing 0.85 vs 0.88 vs 0.92
 34.3 Cosine similarity at retrieval time — comparing only new chunks against the existing pool
@@ -500,6 +546,7 @@
 34.8 Telemetry — logging near-misses to tune the threshold empirically
 
 ### Chapter 35 — Interactive Session: CLI Commands for Learning
+
 35.1 The `bad` command — interactive feedback prompt and persistence
 35.2 The `stats` command — visibility into learning progress
 35.3 The `learn` command — forcing a distillation pass
@@ -507,6 +554,7 @@
 35.5 User-friendly logging and progress messages
 
 ### Chapter 36 — Evaluating Whether Self-Learning Actually Works
+
 36.1 Baseline accuracy before learning kicks in
 36.2 Building a fixed evaluation set of questions
 36.3 Driving repeated runs with `run_batch.py` — `stdin` monkey-patching, fixture lists, and reusing `agent_query.main()`
@@ -517,6 +565,7 @@
 36.8 The long-lived single-process benchmark runner — `run_all_workflow_batches.py` starting one `app_workflow/api.py` subprocess, polling `GET /stats` until ready, and firing a 15-batch / 100-scenario catalog back-to-back (query / thumbdown / stats / forced-learn entries) so in-memory services, tracing setup, the MongoDB client, and the learned-QA vector-store view persist across the whole suite
 
 ### Chapter 36B — Feature-Flag-Driven Development for RAG Pipelines
+
 36B.1 Why every pipeline stage needs a kill-switch — incremental rollout, A/B testing, and ablation
 36B.2 The `config.py` flag catalogue — `ENABLE_SUB_QUERY_GENERATION`, `ENABLE_RETRIEVAL_DEDUP_MERGE`, `ENABLE_RETRIEVAL_VALIDATION`, `ENABLE_NAC_COMPRESSION`, `ENABLE_DC_COMPRESSION`, `ENABLE_LBC_COMPRESSION`, `ENABLE_COMPRESSION_VALIDATION`, `ENABLE_ANSWER_DRAFT_CREATION`, `ENABLE_ANSWER_QUALITY_CHECK`, `ENABLE_AUTO_DISTILLATION`, `ENABLE_QA_PAIR_GENERATION`, `ENABLE_GLOBAL_LLM_OUTPUT_FIX`
 36B.3 Per-stage output-fix flags — `ENABLE_*_OUTPUT_FIX` as an independent layer on top of `ENABLE_GLOBAL_LLM_OUTPUT_FIX`
@@ -528,6 +577,7 @@
 36B.9 Per-request flag overrides — `switches.py`, the nested `switches` object on `QueryRequest`, `resolve_switches()` overlaying non-`None` request values on `config.py` defaults, `get_switches(state)`, and carrying the resolved dictionary in `GraphState["switches"]` (20 `ENABLE_*` toggles across nine functional areas, with omitted fields retaining their configuration defaults)
 
 ### Chapter 36C — Evidence-Based Retrieval Tuning From Production Logs
+
 36C.1 Why hand-picked thresholds fail — the retrieval knobs that need real-data calibration
 36C.2 The A/B log-comparison methodology — running the same query set under two configurations and diffing the retrieved-chunk sets
 36C.3 Choosing `RETRIEVAL_TOP_K` (documents) and `RETRIEVAL_TOP_L` (learned_qa) from observed score distributions, not defaults
@@ -540,6 +590,7 @@
 ## **PART VII — PRODUCTION, DEPLOYMENT, AND BEYOND**
 
 ### Chapter 37 — Evaluation Frameworks for RAG
+
 37.1 Retrieval metrics — recall@k, precision@k, MRR, nDCG
 37.2 Generation metrics — faithfulness, answer relevancy, context precision
 37.3 RAGAS, TruLens, DeepEval — tools of the trade
@@ -547,6 +598,7 @@
 37.5 Human evaluation: when automation isn't enough
 
 ### Chapter 38 — Observability Platforms and Debugging
+
 38.1 Why print-statements stop scaling — trace granularity, cross-run comparison, and shareable evidence
 38.2 The three vantage points — application logs, LLM-call traces, and framework-level spans
 38.3 Structured logging across the pipeline — the `logger_config.py` module, per-file `getLogger(__name__)`, and level routing
@@ -572,6 +624,7 @@
 38.23 The dedicated `LangfuseHandler` — a fourth root log handler (`langfuse_logging.py`) that converts every `LogRecord` into a Langfuse `event` observation on the active trace, the `ContextVar` re-entrancy guard against SDK-log feedback loops, the deliberate `INFO` → `DEBUG` level choice, and why it is a separate handler from `_TracingHandler` rather than an extension of it
 
 ### Chapter 39 — Performance and Cost Optimization
+
 39.1 Batching embeddings — sweet-spot batch sizes
 39.2 Caching at every layer (embeddings, retrieval, LLM responses)
 39.3 Reducing token usage in prompts
@@ -587,6 +640,7 @@
 39.13 The singleton `timing_tracker.py` — `initialize` / `record` / `record_llm` / `_write` capturing per-phase and per-LLM-call durations to a JSON file, and reading the per-stage long-tail (retrieval-validation, merge, and compression calls ranging from milliseconds to 5–12+ minutes) rather than assuming a uniform per-stage cost
 
 ### Chapter 40 — Security and Safety
+
 40.1 Prompt injection — how attackers hide instructions in documents
 40.2 Data exfiltration via tool misuse
 40.3 Input validation and output sanitization
@@ -595,6 +649,7 @@
 40.6 Auditing what the agent has "learned" — and how to forget on demand
 
 ### Chapter 41 — Deployment
+
 41.1 Wrapping the agent in a FastAPI service — `api.py`, `lifespan`, and graceful shutdown
 41.2 Running two pipelines side by side — LangChain on port 8000, LangGraph on port 8001
 41.3 The endpoint surface — `POST /query`, `POST /bad`, `GET /stats`, `POST /learn`, `GET /health`
@@ -613,6 +668,7 @@
 41.16 Per-request pipeline control — the optional nested `switches` object on `QueryRequest`, letting a caller overlay any subset of the 20 `ENABLE_*` workflow flags on a single `/query` without a restart (see 36B.9), and how `resolve_switches()` stores the resolved dictionary in `GraphState` for the whole run
 
 ### Chapter 41B — Productionizing Document Conversion: The Marker Microservice and Switchable Ingestion
+
 41B.1 From evaluation to production — revisiting 5B.9's "kept as an evaluation utility, not the authoritative representation" decision now that a Marker-backed loader is wired into `app_workflow/`
 41B.2 Why Marker can't simply be `pip install`-ed into `app_workflow/` — the intrinsic `transformers`/`pillow` floor conflict between Marker's stack and the `sentence-transformers` embedding backbone on Python 3.14
 41B.3 Isolating Marker as a GPU microservice — `marker_service/` (FastAPI `POST /convert` + `GET /health`, one `PdfConverter` built at boot via `asyncio.to_thread`, conversions serialized behind a `threading.Lock`)
@@ -630,6 +686,7 @@
 *This Part switches codebases, from `Memora` (single-agent RAG) to `Bhai-To-Bhai` — a LangGraph controller that coordinates existing coding-agent CLIs (Claude Code, Codex) through a six-stage requirements → plan → parallel-code → merge → review → supervise pipeline over a real external Git repository. Same five-ledger discipline (Appendix C.5, K.5), same evidence-over-self-report philosophy as Memora's judge/validator layer — applied to agents that are now other agents, not tool calls.*
 
 ### Chapter 42 — Why Multi-Agent Orchestration Is a Different Problem
+
 42.1 From one reasoning loop to coordinating independent coding-agent CLIs — what actually changes
 42.2 The 35-item requirements checklist — multi-CLI support, dynamic per-stage agent selection, mid-task switching, canonical cross-agent task context, native session resumption, deterministic (non-LLM-judge) completion checks
 42.3 Surveying the field — ten existing orchestration frameworks (Maestro Orchestrate, Claw Orchestrator, Codex Orchestrator, The Pair, Sandbox Agent, AgentOS, Agent Orchestrator, claude-codex-gemini, Session Orchestrator, CLI Continues) and why none fully satisfied the checklist
@@ -638,6 +695,7 @@
 42.6 Treating agent reports as claims and Git/filesystem observations as evidence — the thesis stated before a line of pipeline code existed
 
 ### Chapter 43 — Learning Multi-Agent Primitives First: The Disposable LangGraph Sandbox
+
 43.1 Why five weeks of architecture documents weren't enough — prior hands-on agent experience was single-agent (Memora), not multi-agent
 43.2 The `yt_tutorial/` sandbox — deliberately disposable, tracked in git, firewalled from `orchestrator/`, on its own virtualenv
 43.3 The hierarchical-supervisor pattern — a research team and a writing team under one top-level router, built from a tutorial walkthrough
@@ -653,6 +711,7 @@
 43.13 The deletion clause that keeps not firing — when a "disposable" sandbox has earned the right to stay, and how to say so honestly in the ledger
 
 ### Chapter 44 — Choosing an Orchestration Substrate
+
 44.1 The execution-layer question — Claw Orchestrator vs. OpenHands Agent Canvas, and why neither reduces the project's own core custom work
 44.2 A blocked hands-on trial as data — treating an untested tool as still-open rather than assumed-fine
 44.3 Maestro-flow and Flow-next — the two frameworks that already solved mid-task delegation to a *different* coding-agent CLI
@@ -661,6 +720,7 @@
 44.6 Scoping a delegation tool repo-locally — moving 14 global Claude Code hooks and a statusline into project-scoped `.claude/settings.json`, and why "where the binary lives" and "where the hooks run" are independent decisions
 
 ### Chapter 45 — Designing the Six-Stage Pipeline
+
 45.1 requirements → planner → wave orchestrator → merger → reviewer → supervisor, as one compiled LangGraph state machine
 45.2 The `PipelineState` checkpoint record and its two reducer types — append-only `events`, and a keyed upsert on `(wave, attempt)` for `wave_results`
 45.3 Two bounded feedback loops — reviewer rework (per wave) and supervisor replan (per run) — and why only judgment stages may route the graph backward
@@ -669,6 +729,7 @@
 45.6 Recording `running` / `completed` / `bounded` / `failed` — a termination guard firing is never reported as success
 
 ### Chapter 46 — Requirements Capture and Deterministic Wave Scheduling
+
 46.1 Why requirements survey and clarification are separate graph nodes — LangGraph re-executes an interrupted node from its first line on resume, and splitting prevents paying for a survey call twice
 46.2 Search-first, narrowly-scoped clarifying questions — asking only what the repository itself cannot answer
 46.3 `user_choices.md` — written by deterministic code from the literal questions asked and answers received, with no room for a model-invented assumption to enter
@@ -676,6 +737,7 @@
 46.5 Deriving waves with Kahn's algorithm in code, rejecting dangling dependencies and cycles, rather than trusting a model-generated wave number
 
 ### Chapter 47 — Parallel Coding Dispatch in Isolated Git Worktrees
+
 47.1 Every task in a wave branches from the same integration SHA — why parallel tasks that don't share a base aren't actually independent
 47.2 Threads, not processes — workers block on external subprocesses, so concurrency happens in the child CLIs and the GIL is released
 47.3 Two independently configurable coding slots (A/B) and stable wave-index assignment — why a reworked task must return to the same slot and session
@@ -683,6 +745,7 @@
 47.5 What a nine-task parallel stress run exposed — prompt-pasted context is not the same thing as shared durable memory, and canonical run files are invisible as files inside a task's own worktree
 
 ### Chapter 48 — Merging, Review, and Bounded Rework Loops
+
 48.1 Sequential merge with no model call on a clean merge — an agent is invoked only for a real conflict
 48.2 Verifying a claimed conflict resolution against both a Git index check and a disk marker scan before staging
 48.3 The reviewer's evidence model — task-attributed claims plus observed files, never an unattributed vibe check
@@ -692,6 +755,7 @@
 48.7 A live diagnosed defect the pipeline's own checks never covered — an HTML comment that broke out early and rendered raw text in the browser, approved anyway because nothing in the pipeline looked for it
 
 ### Chapter 49 — The Agent Adapter Layer: One Contract, Five Backends
+
 49.1 `AgentRequest` / `AgentResult` and a closed, non-raising error taxonomy — a supervisor can route around a failed worker, never around a traceback
 49.2 Direct Claude Code and Codex CLI adapters — prompt transport, structured output, session telemetry, and where each vendor's final answer actually lives
 49.3 Maestro delegation as a fifth transport, alongside direct vendor CLIs and the stub
@@ -702,6 +766,7 @@
 49.8 A local Ollama fallback when a vendor's weekly rate limit hits, routed through the Codex harness — and its own false-completion and fabricated-`learnings.md` failure modes, caught by evidence checks every time
 
 ### Chapter 50 — Durable Artifacts, Checkpointing, and Evidence-Based Acceptance
+
 50.1 The orchestrator repository owns control-plane state; the target repository owns product code — and why that boundary survives an agent checkout or reset
 50.2 SQLite checkpoints keyed by run id — pausing for clarification and resuming a run with `--resume <run-id>`
 50.3 Append-only `events.jsonl` and `learnings.md`, and the OS-locked helper that lets parallel coding agents append findings without corrupting the file
@@ -709,6 +774,7 @@
 50.5 Why artifacts live outside the target checkout, and what the boundary still doesn't solve — run-scoped rather than project-scoped context across separate runs of the same target
 
 ### Chapter 51 — Testing a Multi-Agent Pipeline Without Paying For It
+
 51.1 The stub transport as a first-class backend, not a mock bolted on afterward
 51.2 197+ tests across ten files — configuration, graph wiring/toggles, CLI behavior, requirements interrupts, deterministic waves, dispatch/worktrees/reverts, merging, reviewing, supervision, terminal bounds
 51.3 What deterministic stub coverage actually proves, and what it structurally cannot — real vendor session mechanics, real rate limits, a browser-rendered defect nothing in the suite ever looked for
@@ -720,6 +786,7 @@
 ## **PART IX — CLOSING THE BOOK**
 
 ### Chapter 52 — Advanced Topics and Extensions
+
 52.1 Multi-modal RAG — images, tables, audio
 52.2 GraphRAG — knowledge graphs as the retrieval substrate
 52.3 Beyond CLI-orchestrated coding agents — where Part VIII's judgment-vs-mechanics split does and doesn't generalize to other multi-agent shapes (debate, blackboard, market-based)
@@ -732,6 +799,7 @@
 52.10 Where our memory-injection loop stops and weight-level self-adaptation begins — an honest map of the gap
 
 ### Chapter 53 — The Finished Projects — Recap and Roadmap
+
 53.1 What you built, file by file — both systems
 53.2 Architecture diagram of the complete Memora system (`rag_graph.png` — the rendered LangGraph)
 53.3 The three failure-memory mechanisms working together (`failed_variants`, `user_thumbdowns`, `learned_qa`)

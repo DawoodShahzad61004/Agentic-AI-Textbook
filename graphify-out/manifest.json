@@ -430,14 +430,14 @@
     "semantic_hash": "113bfc4c46f9f0d65cf1196cba3b54bc"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\chapter_build\\audit_chapters.py": {
-    "mtime": 1785025893.414741,
-    "ast_hash": "1b0bf6233e30fcb929bc5a72fe3f1c97",
-    "semantic_hash": "1b0bf6233e30fcb929bc5a72fe3f1c97"
+    "mtime": 1786638719.4939325,
+    "ast_hash": "1511b0205fe5af941a852f491a3ec1f8",
+    "semantic_hash": "1511b0205fe5af941a852f491a3ec1f8"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\chapter_build\\build_chapters.py": {
-    "mtime": 1785026080.3773842,
-    "ast_hash": "38c51ad2aaf6e24ca600bc9dab0fa1c5",
-    "semantic_hash": "38c51ad2aaf6e24ca600bc9dab0fa1c5"
+    "mtime": 1786638898.8302698,
+    "ast_hash": "d1c0798051a3a41b453c4de972c39035",
+    "semantic_hash": "d1c0798051a3a41b453c4de972c39035"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\AGENTS.md": {
     "mtime": 1783815199.914268,
@@ -445,9 +445,9 @@
     "semantic_hash": "b6a5eb3c99972137c2e79b5ef65a1ace"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Book_Index.md": {
-    "mtime": 1785536952.9508345,
-    "ast_hash": "3d53422951e54b823963c87b523253d2",
-    "semantic_hash": "3d53422951e54b823963c87b523253d2"
+    "mtime": 1786625223.745825,
+    "ast_hash": "5c5600f914d8b896dbd466fe365f585e",
+    "semantic_hash": "5c5600f914d8b896dbd466fe365f585e"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\CLAUDE.md": {
     "mtime": 1783815209.5662606,
@@ -455,9 +455,9 @@
     "semantic_hash": "4f952cfa8d858902fcf206a9264d9a1e"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapter_Build_Instructions.md": {
-    "mtime": 1783815102.3797662,
-    "ast_hash": "ce8861b584fd7d3531d1bdcd6095bfd2",
-    "semantic_hash": "ce8861b584fd7d3531d1bdcd6095bfd2"
+    "mtime": 1786567772.2843146,
+    "ast_hash": "796a7e3eec5f2f1085a5d228eed5ac15",
+    "semantic_hash": "796a7e3eec5f2f1085a5d228eed5ac15"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chats\\Chat 18 (June 10).txt": {
     "mtime": 1781120092.484062,
@@ -885,9 +885,9 @@
     "semantic_hash": "574e14c2cc52e528e141c80a7740527c"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\PROJECT_CONTEXT.md": {
-    "mtime": 1783813557.2584522,
-    "ast_hash": "d242d89e45cd4db775703874d5aef06b",
-    "semantic_hash": "d242d89e45cd4db775703874d5aef06b"
+    "mtime": 1786563367.6324043,
+    "ast_hash": "22e359bbc44f4c5843088620d43b5910",
+    "semantic_hash": "22e359bbc44f4c5843088620d43b5910"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Research\\LangSmith Transcript - English.md": {
     "mtime": 1783508695.8265183,
@@ -1008,11 +1008,6 @@
     "mtime": 1777223168.238053,
     "ast_hash": "0fcb19cdcf004f066fa1ca8629c9e798",
     "semantic_hash": "0fcb19cdcf004f066fa1ca8629c9e798"
-  },
-  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_3_Dev_Environment1.pdf": {
-    "mtime": 1777918349.048782,
-    "ast_hash": "db3d8347847167ce8167c59ac4e78224",
-    "semantic_hash": "db3d8347847167ce8167c59ac4e78224"
   },
   "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_4_The_Document_Structure.pdf": {
     "mtime": 1777919723.851593,
@@ -2343,5 +2338,190 @@
     "mtime": 1786018632.680784,
     "ast_hash": "5c31d70fb4f8c9fb64a4958a9f0e9c64",
     "semantic_hash": "5c31d70fb4f8c9fb64a4958a9f0e9c64"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\count_pdf_pages.py": {
+    "mtime": 1786632584.7479317,
+    "ast_hash": "c3e8a8ed3fcf3a1389d4543e5928b21c",
+    "semantic_hash": "c3e8a8ed3fcf3a1389d4543e5928b21c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_11_Query_Retrieval_Fundamentals.pdf": {
+    "mtime": 1786569815.4520712,
+    "ast_hash": "e57398cc9e7e0e7179ec64d6edf95263",
+    "semantic_hash": "e57398cc9e7e0e7179ec64d6edf95263"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_12_Advanced_Retrieval_Techniques.pdf": {
+    "mtime": 1786571103.7280395,
+    "ast_hash": "d3190a7ab713f09fb8000cb175140152",
+    "semantic_hash": "d3190a7ab713f09fb8000cb175140152"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_13B_Centralized_LLM_Invocation_and_Error_Handling.pdf": {
+    "mtime": 1786574238.2274728,
+    "ast_hash": "5f75aa2f275e514f367adbd204b45ae9",
+    "semantic_hash": "5f75aa2f275e514f367adbd204b45ae9"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_13_Generating_Answers_with_an_LLM.pdf": {
+    "mtime": 1786571991.1324005,
+    "ast_hash": "fe553301ab32c4b4bbde17015bbaeb42",
+    "semantic_hash": "fe553301ab32c4b4bbde17015bbaeb42"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_14_Prompt_Engineering_for_RAG.pdf": {
+    "mtime": 1786572766.2904563,
+    "ast_hash": "ebdb2d03794b099f70cfe803e55de520",
+    "semantic_hash": "ebdb2d03794b099f70cfe803e55de520"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_18_Implementing_the_Agent.pdf": {
+    "mtime": 1786617275.7754023,
+    "ast_hash": "577d483ca40358d499033d82ef4101b6",
+    "semantic_hash": "577d483ca40358d499033d82ef4101b6"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_19B_Porting_the_Agent_to_LangGraph.pdf": {
+    "mtime": 1786618866.4296765,
+    "ast_hash": "ed5c7306363d6e80918ff8f48606c11a",
+    "semantic_hash": "ed5c7306363d6e80918ff8f48606c11a"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_19_Orchestration_with_LangGraph.pdf": {
+    "mtime": 1786618225.419552,
+    "ast_hash": "f1d52fb8873349841ccf983f18434836",
+    "semantic_hash": "f1d52fb8873349841ccf983f18434836"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_20B_Structured_Output_Reliability.pdf": {
+    "mtime": 1786620234.6075242,
+    "ast_hash": "448ccccb2dcaa2eb42e67cfb1e94c39e",
+    "semantic_hash": "448ccccb2dcaa2eb42e67cfb1e94c39e"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_20_Quality_Control_and_Self_Correction.pdf": {
+    "mtime": 1786619748.3071737,
+    "ast_hash": "7c218d54abc199eca99d9e591f9a15b3",
+    "semantic_hash": "7c218d54abc199eca99d9e591f9a15b3"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_21_Answer_Relevance_Verification.pdf": {
+    "mtime": 1786621687.597829,
+    "ast_hash": "189c27697627ea980ab0ae17d4a9ce50",
+    "semantic_hash": "189c27697627ea980ab0ae17d4a9ce50"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_22B_Semantic_Compression.pdf": {
+    "mtime": 1786622831.8742187,
+    "ast_hash": "b2c3536a4477aa5197d6a4401c8533cf",
+    "semantic_hash": "b2c3536a4477aa5197d6a4401c8533cf"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_22C_Two_Track_Parallel_Compression.pdf": {
+    "mtime": 1786625152.8381157,
+    "ast_hash": "3c117b9ffccb1b71e55f6826b086c1c9",
+    "semantic_hash": "3c117b9ffccb1b71e55f6826b086c1c9"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_22_Observability_Dry_Run_Trace.pdf": {
+    "mtime": 1786622295.1734924,
+    "ast_hash": "a99a5434a6b920ca250e42c7e8f64220",
+    "semantic_hash": "a99a5434a6b920ca250e42c7e8f64220"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_24_Long_Context_Failure_Cliff.pdf": {
+    "mtime": 1786626520.3516135,
+    "ast_hash": "1ba38eb3212e7c863d1c0d933a953950",
+    "semantic_hash": "1ba38eb3212e7c863d1c0d933a953950"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_25_Small_Models_Agentic_Loops.pdf": {
+    "mtime": 1786627142.379259,
+    "ast_hash": "a85fce7d77a04207a7444d36a3eb7361",
+    "semantic_hash": "a85fce7d77a04207a7444d36a3eb7361"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_26_Prompt_Engineering_Small_Models.pdf": {
+    "mtime": 1786628189.0253968,
+    "ast_hash": "99c0b5eaef46502a2850cc7e44c920a3",
+    "semantic_hash": "99c0b5eaef46502a2850cc7e44c920a3"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_27_Agent_State_Engineering.pdf": {
+    "mtime": 1786628450.14226,
+    "ast_hash": "7f22f92b65504f831f30433fd0602a2d",
+    "semantic_hash": "7f22f92b65504f831f30433fd0602a2d"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_29_Capturing_Interactions_Feedback_Store.pdf": {
+    "mtime": 1786630880.8751369,
+    "ast_hash": "8f8eac855ea40de26820264d648acbce",
+    "semantic_hash": "8f8eac855ea40de26820264d648acbce"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_30_Failed_Query_Variants.pdf": {
+    "mtime": 1786631405.3419352,
+    "ast_hash": "c00a946a2d3485959ce8c24df23d78d3",
+    "semantic_hash": "c00a946a2d3485959ce8c24df23d78d3"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_31_User_Thumbdowns.pdf": {
+    "mtime": 1786631831.9153166,
+    "ast_hash": "cd7d1f202d5e5fe1e88f470c15fcfc11",
+    "semantic_hash": "cd7d1f202d5e5fe1e88f470c15fcfc11"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_32_Distillation_Engine.pdf": {
+    "mtime": 1786632320.531962,
+    "ast_hash": "cef25e6370ab892d1d48bfb32877bdd4",
+    "semantic_hash": "cef25e6370ab892d1d48bfb32877bdd4"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_3_Dev_Environment.pdf": {
+    "mtime": 1777918349.048782,
+    "ast_hash": "db3d8347847167ce8167c59ac4e78224",
+    "semantic_hash": "db3d8347847167ce8167c59ac4e78224"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_5B_Evaluating_Document_Conversion_Engines.pdf": {
+    "mtime": 1786565883.988004,
+    "ast_hash": "8d9aeb4a240660353ebe0f7038b7de8b",
+    "semantic_hash": "8d9aeb4a240660353ebe0f7038b7de8b"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_7B_Chunking_Converted_Documents.pdf": {
+    "mtime": 1786566991.2805998,
+    "ast_hash": "931d5c06cb1651da69e349602472df12",
+    "semantic_hash": "931d5c06cb1651da69e349602472df12"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_33_Hybrid_Retrieval.pdf": {
+    "mtime": 1786640945.8400578,
+    "ast_hash": "6b90df8ff3d039b9c40e3d948f64c1de",
+    "semantic_hash": "6b90df8ff3d039b9c40e3d948f64c1de"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_34_Chunk_Deduplication_Merging.pdf": {
+    "mtime": 1786641387.8572135,
+    "ast_hash": "e0ab1562b33a588c165894f19bb90f45",
+    "semantic_hash": "e0ab1562b33a588c165894f19bb90f45"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_35_CLI_Commands_For_Learning.pdf": {
+    "mtime": 1786641854.9687655,
+    "ast_hash": "a0d240ef8f8153b5378c498c7cb2653b",
+    "semantic_hash": "a0d240ef8f8153b5378c498c7cb2653b"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_36B_Feature_Flag_Driven_Development.pdf": {
+    "mtime": 1786643154.1905138,
+    "ast_hash": "49867017b12265b780c87ed2cf4d556c",
+    "semantic_hash": "49867017b12265b780c87ed2cf4d556c"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_36C_Evidence_Based_Retrieval_Tuning.pdf": {
+    "mtime": 1786643528.5934312,
+    "ast_hash": "6fe0f8033bad5b5af559d84c87dde135",
+    "semantic_hash": "6fe0f8033bad5b5af559d84c87dde135"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_36_Evaluating_Self_Learning.pdf": {
+    "mtime": 1786642574.531338,
+    "ast_hash": "b8273821417f4f6633b56939d829a7a8",
+    "semantic_hash": "b8273821417f4f6633b56939d829a7a8"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_37_Evaluation_Frameworks_for_RAG.pdf": {
+    "mtime": 1786643793.5108707,
+    "ast_hash": "733b92710e43a685862ec80bc02e03a0",
+    "semantic_hash": "733b92710e43a685862ec80bc02e03a0"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_38_Observability_Platforms_and_Debugging.pdf": {
+    "mtime": 1786645210.9059174,
+    "ast_hash": "a626fccef1ca23a40688496b09174fe5",
+    "semantic_hash": "a626fccef1ca23a40688496b09174fe5"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_39_Performance_and_Cost_Optimization.pdf": {
+    "mtime": 1786649966.3317986,
+    "ast_hash": "4419ad4e0a1d9c0dabce2f85f1ff4f33",
+    "semantic_hash": "4419ad4e0a1d9c0dabce2f85f1ff4f33"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_41B_Productionizing_Document_Conversion.pdf": {
+    "mtime": 1786651884.957047,
+    "ast_hash": "718e874f9497ca2733ac798153a0f45b",
+    "semantic_hash": "718e874f9497ca2733ac798153a0f45b"
+  },
+  "C:\\Users\\LOQ\\Desktop\\Projects\\Agentic AI Textbook\\Chapters Created So Far\\Chapter_41_Deployment.pdf": {
+    "mtime": 1786650352.788237,
+    "ast_hash": "62ca75a1c4e5e9b32f63053839a006ac",
+    "semantic_hash": "62ca75a1c4e5e9b32f63053839a006ac"
   }
 }

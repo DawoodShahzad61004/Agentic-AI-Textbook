@@ -3487,8 +3487,915 @@ llm = ChatOpenAI(..., http_client=build_tolerant_http_client())''')
     return path
 
 
+def diagram_phase_machine_18() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="880">'
+        '<rect width="1200" height="880" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["The RETRIEVE to COMPRESS to ANSWER to JUDGE state machine"], size=24, bold_first=True)
+        + '<ellipse cx="600" cy="100" rx="190" ry="42" fill="#FFFFFF" stroke="#000000" stroke-width="3"/>'
+        + svg_centered_text(600, 100, ["run_agent(query)"], size=19, bold_first=True)
+        + svg_arrow(600, 142, 600, 168)
+        + svg_labeled_box(310, 170, 580, 115, "RETRIEVE", ["LLM calls retrieve_documents", "or emits text / calls compress_context"], fill="#F2F2F2")
+        + svg_arrow(600, 285, 600, 311)
+        + svg_labeled_box(310, 313, 580, 115, "COMPRESS", ["force compress_context if skipped", "NAC then DC then LBC pipeline"], fill="#D9D9D9")
+        + svg_arrow(600, 428, 600, 454)
+        + svg_labeled_box(310, 456, 580, 115, "ANSWER (DRAFT)", ["LLM writes a draft, no tool schemas", "from compressed context only"], fill="#808080", text_fill="#FFFFFF")
+        + svg_arrow(600, 571, 600, 597)
+        + svg_labeled_box(310, 599, 580, 115, "JUDGE", ["check_answer_quality(draft, context)", "a plain function, never a tool"], fill="#D9D9D9")
+        + svg_arrow(600, 714, 600, 740)
+        + svg_centered_text(730, 730, ["OK, or budget exhausted"], size=15, bold_first=True)
+        + svg_labeled_box(310, 742, 580, 100, "FINAL ANSWER", ["generate_final_answer(draft)", "written once, outside the loop"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + '<path d="M 310 660 C 120 660 120 227 308 227" fill="none" stroke="#000000" stroke-width="3" stroke-dasharray="10 8"/>'
+        + '<polygon points="308,227 292,219 292,235" fill="#000000"/>'
+        + svg_centered_text(165, 445, ["INSUFFICIENT,", "budget remains"], size=15, gap=20, bold_first=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter18_phase_machine", svg)
+
+
+def diagram_scrub_18() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500">'
+        '<rect width="1200" height="500" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Scrubbing content without breaking id pairing"], size=25, bold_first=True)
+        + svg_labeled_box(60, 90, 500, 105, "Assistant (before)", ["tool_calls: [{id: call_7f2,", "name: retrieve_documents}]"], fill="#F2F2F2")
+        + svg_arrow(310, 195, 310, 221)
+        + svg_labeled_box(60, 223, 500, 110, "Tool Result (before)", ["tool_call_id: call_7f2", "content: 2,400 chars of raw chunks"], fill="#D9D9D9")
+        + svg_labeled_box(640, 90, 500, 105, "Assistant (after)", ["tool_calls: [{id: call_7f2,", "name: retrieve_documents}] unchanged"], fill="#F2F2F2")
+        + svg_arrow(890, 195, 890, 221)
+        + svg_labeled_box(640, 223, 500, 110, "Tool Result (after)", ["tool_call_id: call_7f2 — unchanged", "content: COMPRESSED_PLACEHOLDER"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_labeled_box(60, 360, 1080, 100, "Only content is ever scrubbed",
+                           ["deleting the message instead would break the assistant to tool_call_id pairing the chat API enforces"], fill="#FFFFFF", dashed=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter18_scrub", svg)
+
+
+def build_chapter_18() -> Path:
+    title = "Implementing the Agent with llm.invoke(tools=…)"
+    doc = configure_document(title)
+    add_cover(doc, 18, title, "PART IV — FROM RAG TO AGENTIC RAG", "A loop is not an agent until something inside it can decide the loop is done.")
+    add_chapter_heading(doc, 18, title)
+    add_body(doc, "Chapter 16 designed the loop's shape and Chapter 17 designed the tools it calls through. This chapter wires them together into `agent_query.py` — the actual, running `run_agent` function: a single-file, framework-free state machine that reads a model's response, executes what it asked for, feeds the result back, and knows, precisely, when to stop.")
+    add_body(doc, "Nothing here is abstract. Every mechanism in this chapter exists in Memora's `run_agent` today, in the form a real failure forced it into: a synthetic tool call injected when the model skips a required step, a message scrubbed rather than deleted so a chat protocol invariant survives compression, a sidecar message that keeps a validator's opinion visible without letting it masquerade as retrieved evidence, and an exit condition that leaves room for exactly one more round-trip before giving up.")
+    add_body(doc, "By the end of this chapter you will be able to read a tool-calling response correctly, execute and feed back its results, enforce phases the model cannot skip even when it tries to, and account for every prompt and completion token a multi-iteration agent spends along the way.")
+
+    add_heading(doc, "18.1 response.content vs response.tool_calls — the two shapes of a reply")
+    add_callout(doc, "Definition", "Tool call", "A structured request attached to a model's response — a name and an argument dictionary — that the orchestrator, not the model, is responsible for executing and returning a result for.")
+    add_body(doc, "Every `llm_invoke` call in the RETRIEVE phase returns a response with two fields worth reading separately: `.content`, the model's plain text, and `.tool_calls`, a list of structured requests. A response is never partially one or the other in practice — the orchestrator's entire branching logic in this phase hinges on which one arrived.")
+    add_code(doc, '''resp_content    = str(getattr(response, "content", ""))
+resp_tool_calls = getattr(response, "tool_calls", []) or []
+
+if not resp_tool_calls:
+    # LLM emitted text with no tool calls — treat as "done retrieving"
+    phase = "COMPRESS"
+    continue''')
+    add_body(doc, "Notice what does *not* happen in the empty-tool-calls branch: the bare text response is never appended to `messages`. Appending it would put an unstructured assistant utterance into a transcript the rest of the loop expects to be tool-call-shaped, for no benefit — the text itself is discarded, only the *signal* that the model considers retrieval finished is kept, by moving the phase forward.")
+
+    add_heading(doc, "18.2 Executing tool calls in your loop")
+    add_body(doc, "A response can carry more than one tool call in a single turn. `run_agent` deduplicates identical `retrieve_documents` queries within the same batch before executing anything — cheap insurance against a model asking the same question twice in one breath — then dispatches each surviving call by name.")
+    add_code(doc, '''for tool_call in deduped:
+    name, args = tool_call["name"], tool_call["args"]
+
+    if name == "retrieve_documents":
+        result = _handle_retrieve_documents_call(tool_call)
+    elif name == "compress_context":
+        result = callables["compress_context"]()
+        compress_called_this_iter = True
+    else:
+        result = f"Unknown tool '{name}'."   # never silently ignored''')
+    add_body(doc, "The `else` branch matters as much as the two real ones. A model that hallucinates a tool name — or calls one from an earlier prompt version still lingering in its context — gets an explicit, visible rejection message fed back as a real tool result, not a silent no-op. The loop stays auditable even when the model asks for something that does not exist.")
+
+    add_heading(doc, "18.3 Feeding tool results back as role: \"tool\" messages")
+    add_body(doc, "A chat-completions API enforces a strict pairing: every `tool_calls` entry in an assistant message needs exactly one corresponding message with `role: \"tool\"` and a matching `tool_call_id`, before the next assistant turn is valid. `run_agent` appends the assistant response first, then one tool message per executed call, in the same order.")
+    add_code(doc, '''messages.append(response)   # the assistant turn, tool_calls and all
+
+for tool_call in deduped:
+    result = dispatch(tool_call)
+    messages.append({
+        "role": "tool",
+        "tool_call_id": tool_call["id"],
+        "content": result,
+    })''')
+    add_body(doc, "Get this ordering or pairing wrong — skip a call, append results out of order, reuse an id — and the next `llm_invoke` call does not fail gracefully. It fails at the provider, with a protocol-level rejection that has nothing to do with the model's reasoning and everything to do with the shape of the conversation you sent it.")
+
+    add_heading(doc, "18.4 Injecting real retrieved context into quality checks")
+    add_body(doc, "`check_answer_quality` was not always the plain function Chapter 17 described. An earlier version exposed it as a callable tool, and the 8B model exploited the freedom exactly as such freedom tends to get exploited: it called the quality check in iteration one, before any retrieval had happened, grading an answer it had just fabricated from training knowledge rather than retrieved chunks. ADR-020's fix removed it from the tool schema entirely and made the orchestrator call it directly in the JUDGE phase, with the real compressed context as an explicit argument — not whatever the model claimed the context was.")
+    add_callout(doc, "Common pitfall", "Mutating a tool call's args dict in place", "A tool call's `args` dictionary is the same Python object already sitting inside the assistant message appended to `messages`. Overwriting one of its keys in place — to inject real context in place of what the model supplied, for instance — silently rewrites the conversation history: the transcript now shows the model having \"asked for\" data it never actually requested. Build a new dictionary for the call you actually execute (`{**tool_call[\"args\"], \"context\": real_context}`) and leave the object living inside `messages` untouched. History should record what happened, not what the orchestrator wishes had happened.")
+    add_body(doc, "This is the same context-injection principle Chapter 17.3 introduced — keep server-owned data out of the model's hands — carried one step further: injection has to happen without corrupting the very record the next LLM call will read back as its own prior turn.")
+
+    add_heading(doc, "18.5 Exit conditions and safeguarding against infinite loops")
+    add_body(doc, "Three independent budgets bound `run_agent`, and none of them alone is sufficient — each caps a different resource the loop could otherwise exhaust.")
+    add_table(doc, ["Budget", "Bounds", "Caught by"], [
+        ["`MAX_ITERATIONS`", "Total passes through the state machine", "`while iterations < MAX_ITERATIONS`"],
+        ["`MAX_TOTAL_RETRIEVALS`", "Retrieval calls across the whole run", "Checked inside `_handle_retrieve_documents_call`"],
+        ["`MAX_TOOL_CALLS_PER_ITERATION`", "Tool calls accepted from one LLM turn", "Slice applied before dispatch: `resp_tool_calls[:MAX_TOOL_CALLS_PER_ITERATION]`"],
+    ], [2.15, 2.45, 1.70])
+    add_body(doc, "The JUDGE phase adds a fourth, subtler condition on top of the raw counters: `budget_ok` requires `iterations < MAX_ITERATIONS - 1`, not simply `< MAX_ITERATIONS`. Looping back to RETRIEVE only to discover on the very next iteration that the budget is now exhausted would waste an entire iteration on a retry the loop could never finish — reserving one iteration's headroom guarantees a retry, once granted, always has room to reach a final answer.")
+    add_body(doc, "When every budget is exhausted and no phase has returned, the loop falls through to a final, unconditional check: return the best draft available, or an honest \"max iterations reached\" message if there was never a draft to fall back on. An agent loop without an unreachable-fallthrough case is a loop that can, on a bad enough day, simply never return.")
+
+    add_heading(doc, "18.6 Writing agent_query.py")
+    add_body(doc, "`run_agent` takes every dependency — the LLM clients, the tool schemas and callables, the quality-check function, the retriever, a shared mutable `agent_state` dict — as an explicit argument rather than a module-level global. Nothing about the function reaches outside itself for state, which is what makes the whole loop testable with fakes standing in for a real model and a real vector store.")
+    add_code(doc, '''def run_agent(
+    query: str, llm, merge_llm, judge_llm,
+    tool_schemas: list, callables: dict,
+    check_answer_quality,          # plain callable, NOT an LLM tool
+    retriever: RAGRetriever, agent_state: dict,
+    blocked_variants: list[str] | None = None,
+    prior_thumbdowns: list[dict] | None = None,
+) -> tuple[dict, list[str]]:
+    ...''')
+    add_body(doc, "The return type is worth pausing on: a tuple of the answer payload *and* a list of newly-failed query variants. The second element is not an afterthought — it is how this run's failures become tomorrow's blocked variants (Chapter 14's `_ROLE_AND_RULES` injection), a self-learning feedback loop that only works because the loop reports its own failures honestly, not just its successes.")
+
+    add_heading(doc, "18.7 From open loop to phase state machine")
+    add_body(doc, "An earlier version of this agent was a free-form loop: call the model, execute whatever it asked for, repeat, with the model itself deciding what stage of the process it was in. ADR-020's fix was not a patch on that design — it replaced the design. `run_agent` tracks its own `phase` variable explicitly, and the model's freedom is scoped to what a given phase permits, never to the sequence of phases itself.")
+    add_figure(doc, diagram_phase_machine_18(), "Figure 18.1 — Four phases, one loop-back edge, and exactly one way out.")
+    add_table(doc, ["Phase", "Model's freedom", "Orchestrator's guarantee"], [
+        ["RETRIEVE", "Choose queries, decide when done", "Retrieval and total-call caps always enforced"],
+        ["COMPRESS", "None — model is not consulted", "`compress_context` runs exactly once, forced if skipped"],
+        ["ANSWER", "Write a draft from given context", "No tool schemas offered — text only"],
+        ["JUDGE", "None — a plain function decides", "Verdict always computed the same way"],
+    ], [1.30, 2.75, 2.25])
+    add_body(doc, "Figure 18.1's single loop-back edge is deliberate: JUDGE can send the run back to RETRIEVE, and nothing else can. Every other transition moves strictly forward. A state machine with one controlled cycle is auditable in a way a graph with cycles between every phase never could be — you can always answer \"how many times can this run repeat itself, and under exactly what condition?\"")
+
+    add_heading(doc, "18.8 Synthetic-injection — when the LLM skips a required phase")
+    add_body(doc, "Two real gaps in what the model reliably does on its own are closed the same way: the orchestrator constructs the tool call the model should have made, appends it to `messages` as if the model had made it, executes it, and appends the result — all before the model gets another turn.")
+    add_code(doc, '''def _inject_synthetic_tool_call(tool_name: str, tool_args: dict, reason: str) -> str:
+    synth_id = f"call_sys_{tool_name}_{uuid.uuid4().hex[:12]}"
+    messages.append({
+        "role": "assistant",
+        "content": f"[system-injected tool call] Running {tool_name}() because: {reason}",
+        "tool_calls": [{"id": synth_id, "name": tool_name, "args": dict(tool_args)}],
+    })
+    result_str = callables[tool_name](**tool_args)
+    messages.append({"role": "tool", "tool_call_id": synth_id, "content": result_str})
+    return result_str''')
+    add_heading(doc, "18.8.1 Retrieval with sub-query generation disabled", level=2)
+    add_body(doc, "With `ENABLE_SUB_QUERY_GENERATION` off, the model is never even asked to choose a query — the orchestrator injects a `retrieve_documents` call with the original question verbatim before the first LLM call of the run, and moves straight to COMPRESS. The model's turn begins one phase later than it otherwise would.")
+    add_heading(doc, "18.8.2 Compression skipped at the end of RETRIEVE", level=2)
+    add_body(doc, "The far more common case: the model stops calling `retrieve_documents` — either by emitting plain text or exhausting its retrieval budget — without ever calling `compress_context` itself. The COMPRESS phase checks `agent_state[\"compress_done\"]` and, if it is still `False`, injects the call before the model is consulted again. The model experiences this as compression having simply already happened.")
+    add_heading(doc, "18.8.3 The user-role nudge after a bad verdict", level=2)
+    add_body(doc, "One more pattern belongs in this family even though it injects a message rather than a tool call: when JUDGE returns INSUFFICIENT with budget remaining, the orchestrator appends a `role: \"user\"` message explaining exactly why the draft failed and instructing the model to try genuinely different query angles, then resets `compress_done` and loops back to RETRIEVE. It is the same idea as a synthetic tool call — the orchestrator, not the model, decides what happens next — expressed as a steering message instead of a fabricated action, because what is missing here is not a skipped step but a bad result the model needs a clean, specific reason to try again.")
+
+    add_heading(doc, "18.9 Message-list scrubbing without breaking the assistant to tool_call_id pairing")
+    add_body(doc, "Once `compress_context` runs, the raw chunks a `retrieve_documents` call returned earlier in the conversation are redundant — their compressed replacement is now the tool's own result — and expensive to keep paying prompt-token cost for on every subsequent turn. The fix is not to delete those earlier messages.")
+    add_figure(doc, diagram_scrub_18(), "Figure 18.2 — The tool_call_id never changes; only the content behind it does.")
+    add_body(doc, "Deleting a `retrieve_documents` tool-result message would leave its parent assistant message's `tool_calls` entry pointing at an id with no matching result — the exact protocol violation Section 18.3 warned about, self-inflicted this time by cleanup code instead of a dispatch bug. The fix in Figure 18.2 mutates only `content`, replacing it with a short, constant placeholder, and leaves every id exactly where the model left it.")
+    add_code(doc, '''for m in messages:
+    if m.get("role") != "tool":
+        continue
+    origin = tool_call_id_to_name.get(m.get("tool_call_id", ""))
+    if origin == "retrieve_documents" and m["content"] != COMPRESSED_PLACEHOLDER:
+        m["content"] = COMPRESSED_PLACEHOLDER   # never delete the message itself''')
+
+    add_heading(doc, "18.10 The _judge sidecar message")
+    add_body(doc, "Retrieval validation (Chapter 12's researched-but-not-shipped judge, actually wired in here) needs to tell the model something happened without pretending its verdict was retrieved evidence. `run_agent` appends the verdict as its own tool message, keyed off the *same* `tool_call_id` as the retrieval it is judging, with a `_judge` suffix appended.")
+    add_code(doc, '''messages.append({
+    "role": "tool",
+    "tool_call_id": tool_call["id"] + "_judge",
+    "content": f"[RETRIEVAL JUDGE] {verdict_summary}",
+})''')
+    add_body(doc, "The suffix is not decorative — the scrubbing logic in Section 18.9 explicitly strips it back off (`tcid[:-len(\"_judge\")]`) to look up which tool the sidecar belongs to, so a judge verdict about a `retrieve_documents` call is correctly identified as commentary *about* retrieved evidence, never mistaken for retrieved evidence itself, while still living in the transcript at exactly the point the model needs to see it.")
+
+    add_heading(doc, "18.11 Token-usage accounting per iteration")
+    add_body(doc, "Every `llm_invoke` response carries a `token_usage` dictionary in `response_metadata`, and `run_agent` reads it after every single call — RETRIEVE, DRAFT, and FINAL alike — accumulating into two running totals that survive the entire run, not just the current phase.")
+    add_code(doc, '''usage = (getattr(response, "response_metadata", {}) or {}).get("token_usage", {})
+total_prompt_tokens     += usage.get("prompt_tokens", 0)
+total_completion_tokens += usage.get("completion_tokens", 0)''')
+    add_body(doc, "Both totals ride along in every return payload the function produces, win or lose. A caller — a benchmark script, a cost dashboard, the `Execution Time Comparison.md` workflow Chapter 13B's provider decisions leaned on — never has to reconstruct token spend from a debug log after the fact. The loop that spent the tokens is the loop that reports them, at the moment it has the number, because a total computed later from scattered log lines is a total someone eventually gets wrong.")
+
+    add_body(doc, "`run_agent` is a complete, working agent — and also, deliberately, the last version of this architecture built by hand, message list and all. The next three chapters ask what changes when the same phases become nodes in an explicit graph instead of branches in one long function: Chapter 19 introduces LangGraph's primitives, Chapter 19B ports this exact state machine onto them node by node, and the fan-out this hand-written loop never attempted — two retrievals running genuinely in parallel — becomes possible for the first time.")
+
+    path = OUT_DIR / "Chapter_18_Implementing_the_Agent.docx"
+    doc.core_properties.title = f"Chapter 18 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_minimal_graph_19() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660">'
+        '<rect width="1200" height="660" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["A minimal decide, retrieve, generate graph"], size=26, bold_first=True)
+        + '<ellipse cx="600" cy="100" rx="140" ry="40" fill="#FFFFFF" stroke="#000000" stroke-width="3"/>'
+        + svg_centered_text(600, 100, ["START"], size=19, bold_first=True)
+        + svg_arrow(600, 140, 600, 166)
+        + svg_labeled_box(390, 168, 420, 100, "decide(state)", ["reads current state", "returns updated state"], fill="#F2F2F2")
+        + svg_arrow(600, 268, 600, 294)
+        + '<polygon points="600,296 770,358 600,420 430,358" fill="#D9D9D9" stroke="#000000" stroke-width="3"/>'
+        + svg_centered_text(600, 358, ["Enough", "evidence?"], size=18, gap=24, bold_first=True)
+        + svg_arrow(752, 343, 828, 313)
+        + svg_centered_text(800, 318, ["yes"], size=15, bold_first=True)
+        + svg_labeled_box(830, 288, 330, 100, "generate", ["writes final answer", "no further tool calls"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(995, 388, 995, 414)
+        + '<ellipse cx="995" cy="452" rx="130" ry="38" fill="#FFFFFF" stroke="#000000" stroke-width="3"/>'
+        + svg_centered_text(995, 452, ["END"], size=19, bold_first=True)
+        + svg_arrow(600, 420, 600, 446)
+        + svg_centered_text(630, 438, ["no"], size=15, bold_first=True)
+        + svg_labeled_box(410, 448, 380, 100, "retrieve", ["adds chunks to state", "via an Annotated reducer"], fill="#D9D9D9")
+        + '<path d="M 410 498 C 230 498 230 218 388 218" fill="none" stroke="#000000" stroke-width="3" stroke-dasharray="10 8"/>'
+        + '<polygon points="388,218 372,210 372,226" fill="#000000"/>'
+        + svg_centered_text(255, 340, ["back to decide"], size=15, bold_first=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter19_minimal_graph", svg)
+
+
+def diagram_barrier_19() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700">'
+        '<rect width="1200" height="700" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Unequal-depth tracks still need to join exactly once"], size=24, bold_first=True)
+        + svg_labeled_box(80, 100, 420, 90, "DC_learned_qa", ["short track — 2 stages"], fill="#F2F2F2")
+        + svg_arrow(290, 190, 290, 216)
+        + svg_labeled_box(80, 218, 420, 90, "LBC_learned_qa", ["feeds combine_tracks"], fill="#D9D9D9")
+        + svg_labeled_box(700, 100, 420, 90, "NAC_documents", ["long track — 3 stages"], fill="#F2F2F2")
+        + svg_arrow(910, 190, 910, 216)
+        + svg_labeled_box(700, 218, 420, 90, "DC_documents", ["still one stage from done"], fill="#F2F2F2")
+        + svg_arrow(910, 308, 910, 334)
+        + svg_labeled_box(700, 336, 420, 90, "LBC_documents", ["feeds combine_tracks"], fill="#D9D9D9")
+        + svg_arrow(290, 308, 470, 460)
+        + svg_arrow(910, 426, 730, 460)
+        + svg_labeled_box(350, 462, 500, 105, "combine_tracks", ["defer=True — a true fan-in barrier", "waits for BOTH tracks, runs exactly once"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_labeled_box(150, 590, 900, 90, "Without defer=True",
+                           ["a two-predecessor node fires once per arriving edge — twice, not once"], fill="#FFFFFF", dashed=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter19_barrier", svg)
+
+
+def build_chapter_19() -> Path:
+    title = "Orchestration with LangGraph"
+    doc = configure_document(title)
+    add_cover(doc, 19, title, "PART IV — FROM RAG TO AGENTIC RAG", "The moment two independent things could happen at once, a linear loop stops being able to say so.")
+    add_chapter_heading(doc, 19, title)
+    add_body(doc, "Chapter 18's `run_agent` is a complete, correct agent, and it is also, structurally, one long Python function with a phase variable threaded through it. That is not a criticism — it is exactly the right shape for a strictly sequential pipeline, where RETRIEVE always precedes COMPRESS which always precedes ANSWER. It stops being the right shape the moment two things in that pipeline no longer depend on each other and could genuinely run at once.")
+    add_body(doc, "This chapter introduces LangGraph on its own terms, independent of Memora: nodes, edges, conditional routing, a typed state object, and the two mechanisms — reducers and fan-in barriers — that make parallel branches rejoin correctly instead of racing each other. Chapter 19B then takes every primitive introduced here and ports Chapter 18's exact state machine onto it, node by node.")
+    add_body(doc, "By the end of this chapter you will be able to declare a graph's state as a typed dictionary, add nodes and route between them conditionally, understand why a fan-out needs a reducer and a fan-in sometimes needs an explicit barrier, and know — from a real, documented decision rather than a framework's marketing claims — when adopting a graph is worth the migration and when it is not.")
+
+    add_heading(doc, "19.1 Why graph-based orchestration — and why not sooner")
+    add_body(doc, "Memora did not adopt LangGraph the first time someone suggested it. The project's own architecture record shows a deliberate deferral: no parallel sub-query retrieval existed yet, no human-in-the-loop step was planned, and no durable-checkpoint requirement had appeared — three concrete triggers the team had agreed would justify the migration, none of which were true yet. A framework adopted because loops are supposedly inelegant, rather than because a real requirement needs what the framework uniquely provides, is a rewrite in search of a justification.")
+    add_body(doc, "The deferral held until the two-track retrieval architecture (Chapter 11.5) made it concrete: `documents` and `learned_qa` compress through independent NAC/DC/LBC pipelines that share no data and never need to run in sequence relative to each other. That is a genuine parallel opportunity `run_agent`'s single-threaded loop structurally cannot express — not because Python cannot run two things at once, but because a hand-written loop has no primitive for \"these two branches, then rejoin.\" That gap, not general dissatisfaction with loops, is what finally justified the migration.")
+    add_callout(doc, "Common pitfall", "Migrating before the first real attempt teaches you the mechanics", "An early, direct migration attempt built a full `TypedDict` mirror of the agent's state and a toy visualization script before anyone on the project had run a single conditional edge by hand — and immediately hit three mechanical mistakes in one sitting: a missing `__main__` guard, a Jupyter-only display call used in a terminal script, and `.get_graph()` called on an uncompiled graph. The fix was not to push through; it was to delete the production-shaped files, build a small, disposable graph wired to real project objects, and only resume the real port once the mechanics were second nature. Practice on something you can afford to get wrong before you rewrite something you can't.")
+
+    add_heading(doc, "19.2 Nodes, edges, and conditional edges — the three primitives")
+    add_callout(doc, "Definition", "Node", "A plain function that accepts the graph's state and returns a partial update — a dictionary of the fields it changed, not the whole state object — registered under a string name with `graph.add_node(name, fn)`.")
+    add_callout(doc, "Definition", "Edge", "A fixed transition from one named node to another (or to `END`), declared with `graph.add_edge(a, b)`, that always fires when node `a` finishes — no decision involved.")
+    add_callout(doc, "Definition", "Conditional edge", "A transition whose destination is computed at runtime by a routing function that reads the current state and returns the name of the next node, declared with `graph.add_conditional_edges(name, routing_fn, {label: target, ...})`.")
+    add_code(doc, '''graph = StateGraph(GraphState)
+graph.add_node("decide", decide)
+graph.add_node("retrieve", retrieve)
+graph.add_node("generate", generate)
+
+graph.add_edge(START, "decide")
+graph.add_conditional_edges(
+    "decide", route_decide,
+    {"retrieve": "retrieve", "generate": "generate"},
+)
+graph.add_edge("retrieve", "decide")   # loop back
+graph.add_edge("generate", END)''')
+    add_body(doc, "Three primitives, and nothing else is load-bearing. A node changes state; an edge says what runs next unconditionally; a conditional edge asks a small routing function to decide. Every graph in this book — Memora's real one included — is built from nothing more than these three calls, repeated.")
+
+    add_heading(doc, "19.3 The GraphState TypedDict")
+    add_callout(doc, "Definition", "GraphState", "A `TypedDict` declaring every field any node in the graph may read or write, given once to `StateGraph(GraphState)` so the framework knows the complete shape of the state it is passing between nodes.")
+    add_body(doc, "Every field a graph will ever touch is declared once, up front — not accumulated implicitly the way a hand-written loop's local variables are. A node cannot silently invent a new piece of state; if it is not in `GraphState`, it does not exist as far as the graph is concerned.")
+    add_code(doc, '''class GraphState(TypedDict):
+    query: str
+    query_variants: list[str]
+    retrieved_document_chunks: Annotated[list[dict], operator.add]
+    retrieved_learned_qa_chunks: Annotated[list[dict], operator.add]
+    compressed_docs: list[dict]
+    draft: NotRequired[str]
+    answer: str
+    retry_count: int''')
+    add_body(doc, "A node's return value is a *partial* update — `{\"draft\": text}\"`, not the entire state — and LangGraph merges it into the running state object after the node completes. Declaring the full shape once, centrally, is what makes it possible to look at one file and know everything any node in a large graph is allowed to touch.")
+
+    add_heading(doc, "19.4 Annotated[list[dict], operator.add] — reducers for fan-out and fan-in")
+    add_callout(doc, "Definition", "Reducer", "A function attached to a state field via `Annotated[type, reducer_fn]` that combines an incoming partial update with the field's existing value, instead of the update simply overwriting it — the mechanism that lets multiple parallel branches all write to the same field safely.")
+    add_body(doc, "Without a reducer, a field's default merge behavior is overwrite: the last branch to finish wins, and every other branch's contribution to that field is silently lost. `retrieved_document_chunks` is fed by every parallel `retrieve` call spawned from a fan-out (Section 19.6) — overwrite semantics would keep only the last variant's chunks. `operator.add` (list concatenation) instead accumulates every branch's contribution into one combined list.")
+    add_code(doc, '''retrieved_document_chunks: Annotated[list[dict], operator.add]
+variants_with_chunks:      Annotated[list[dict], operator.add]
+newly_failed_variants:     Annotated[list[str],  operator.add]''')
+    add_body(doc, "All three of Memora's list-accumulating fields use the same reducer for the same reason: each is written by every parallel retrieval branch, and the graph needs all of their contributions, not just the last one to finish.")
+
+    add_heading(doc, "19.5 NotRequired[…] — fields that may or may not appear")
+    add_callout(doc, "Definition", "NotRequired field", "A `GraphState` field marked optional via `typing.NotRequired`, signaling that a given run may complete without ever setting it — read with `state.get(field, default)`, never `state[field]`, since indexing would raise a `KeyError` on a run where it was never populated.")
+    add_body(doc, "Memora's `switches` field is the clearest case: a per-request dictionary of `ENABLE_*` overrides that most requests never set at all. Its own docstring states the contract plainly — a request without overrides transparently falls back to `config.py` defaults, precisely because the field is optional rather than defaulted to an empty dict that would need constructing on every request regardless of whether anything overrides it.")
+    add_code(doc, '''switches: NotRequired[dict[str, bool]]
+blocked_variants: NotRequired[list[str]]
+draft: NotRequired[str]
+quality_verdict: NotRequired[str]''')
+    add_body(doc, "`draft` and `quality_verdict` are optional for a related but distinct reason: a run that skips draft creation entirely (Section 19.7's routing) never writes either field, and every node downstream that might read them does so through `.get()` with an explicit fallback, never assuming they exist.")
+
+    add_heading(doc, "19.6 A minimal decide, retrieve, generate workflow")
+    add_body(doc, "Strip Memora's real graph down to its smallest honest version and three nodes remain: decide whether the accumulated evidence is enough, retrieve more if not, generate an answer if so.")
+    add_figure(doc, diagram_minimal_graph_19(), "Figure 19.1 — The same decide-retrieve-generate loop Chapter 16 designed, now expressed as three nodes and one conditional edge.")
+    add_body(doc, "Figure 19.1 is the graph form of exactly the loop Chapter 16 designed conceptually and Chapter 18 built by hand. Nothing about the underlying logic changed — `decide` still reads state and chooses; `retrieve` still adds evidence; `generate` still writes the final answer once. What changed is that the loop-back edge and the exit condition are now declarations the framework can inspect, log, and visualize, rather than a `while` condition and a `continue` statement buried in a function body.")
+
+    add_heading(doc, "19.7 Conditional edges and routing functions")
+    add_body(doc, "A routing function's contract is deliberately narrow: read the state, return a string naming the next node, and do nothing else — no side effects, no state mutation. Keeping routing logic this pure is what makes a graph's control flow legible from `graph.py` alone, without having to read every node's implementation to know what can happen next.")
+    add_code(doc, '''def route_after_quality_check(state: GraphState) -> str:
+    if state.get("quality_verdict") == QUALITY_PASS_VERDICT:
+        return "generate_answer"
+    budget_ok = (
+        get_switches(state)["ENABLE_SUB_QUERY_GENERATION"]
+        and state.get("retry_count", 0) < LLM_RESPONSE_RETRY_LIMIT
+    )
+    return "retry" if budget_ok else "generate_answer"''')
+    add_body(doc, "This is the exact same budget-with-headroom logic Chapter 18.5 implemented inline inside `run_agent`'s JUDGE phase — reproduced here as a standalone function with no access to anything but the state dictionary it was handed. Moving control flow out of node bodies and into named, single-purpose routing functions is what lets `graph.py`'s edge declarations read as a table of contents for the entire pipeline's behavior.")
+
+    add_heading(doc, "19.8 Visualizing the graph")
+    add_body(doc, "A compiled graph can draw itself. `app.get_graph().draw_mermaid_png()` walks every registered node and edge and renders an actual PNG — not a hand-maintained diagram that drifts out of sync with the code, but a direct visualization of whatever `graph.py` currently declares.")
+    add_code(doc, '''app = graph.compile()
+png_bytes = app.get_graph().draw_mermaid_png()
+Path("rag_graph.png").write_bytes(png_bytes)''')
+    add_callout(doc, "Common pitfall", "Calling .get_graph() on the uncompiled StateGraph", "`StateGraph` and its compiled form (`graph.compile()`) are different objects with different capabilities — visualization and execution both require the compiled `app`, not the builder you called `add_node` on. This exact mistake was one of the three that surfaced during Memora's own first hands-on LangGraph session (Section 19.1); it produces a confusing error rather than an obviously wrong result, which is what makes it worth naming explicitly rather than trusting it will be self-evident.")
+    add_body(doc, "Regenerate this diagram whenever `graph.py` changes and treat a stale copy as worse than no diagram at all — a visualization that silently drifted out of sync with the actual edges is a trap for exactly the debugging session it was supposed to help with.")
+
+    add_heading(doc, "19.9 Debugging a LangGraph flow")
+    add_body(doc, "A graph's execution is harder to follow with a debugger than a linear function's — control genuinely jumps between independent functions rather than flowing top to bottom — which makes deliberate, structured logging at node boundaries load-bearing rather than optional. Every node in Memora's port logs its own inputs and outputs on entry and exit, and a project-specific tracing decorator, `instrument_namespace`, is applied to every node and service module specifically to keep that logging consistent without hand-writing it at every call site.")
+    add_code(doc, '''from services.operation_tracing import instrument_namespace as _instrument_namespace
+_instrument_namespace(globals(), "Retrieval Node", exclude={"retrieve"})''')
+    add_bullets(doc, [
+        "Log each node's relevant inputs and outputs at entry and exit, not just on failure.",
+        "Snapshot state at a graph's known trouble points — after a fan-in barrier is the highest-value place to look first.",
+        "Set an explicit recursion limit; a routing bug that loops two nodes against each other fails loudly against a limit instead of hanging silently.",
+        "Read the compiled graph's visualization (Section 19.8) before assuming a routing function's logic — the drawn graph shows what the framework will actually do, not what you intended.",
+    ])
+
+    add_heading(doc, "19.10 When LangGraph helps and when an imperative loop is enough")
+    add_body(doc, "Memora's own research settled this question with a criterion sharper than \"does the pipeline have multiple phases\" — nearly every pipeline does. The real question is whether the pipeline has independent phases that would genuinely parallelize, failure modes an existing retry path cannot already recover from, or long-running pauses — human review, hours-long waits — that need to survive a process restart.")
+    add_table(doc, ["Pipeline shape", "LangGraph's benefit", "Verdict"], [
+        ["Strict sequential dependency chain (NAC then DC then LBC)", "None — runtime equals a plain loop, plus framework overhead", "An imperative loop is enough"],
+        ["Independent branches that could run concurrently (two compression tracks)", "Real speedup — `max(branches)` instead of `sum(branches)`", "Graph orchestration earns its cost"],
+        ["In-process transient failure (a retryable timeout)", "Marginal — a scripted retry already handles this", "Framework checkpointing adds little"],
+        ["Failure that must survive a process crash or deployment", "Durable checkpointing recovers from the last completed node", "Graph orchestration earns its cost"],
+    ], [2.65, 2.35, 1.70])
+    add_body(doc, "Checkpointing deserves its own honest caveat: an in-memory checkpointer only helps within a single live process, and durability past a crash requires writing checkpoints somewhere persistent — SQLite, Postgres, a file store — before the failure happens. LangGraph does not make the LLM calls, embedding calls, or vector-store queries underneath it any faster; it only changes what happens around a failure, and only where a failure mode existed for it to help with in the first place.")
+
+    add_heading(doc, "19.11 Non-barrier fan-in — the default behavior")
+    add_body(doc, "A node with more than one incoming edge does not wait for all of its predecessors by default — it runs once per predecessor that reaches it, in whatever order they arrive. This is the correct behavior when a join node's job is genuinely per-branch (log each branch as it finishes, for instance), and a silent correctness bug when the node's job actually depends on having every branch's output at once.")
+    add_callout(doc, "Common pitfall", "Assuming a multi-predecessor node runs exactly once", "Memora's two compression tracks have unequal depth — documents run NAC then DC then LBC, three stages; learned_qa runs DC then LBC, two stages — so they finish in different graph supersteps even when started together. A join node registered without a barrier would fire once when the shorter track's edge arrives, using whichever track happened to be ready and treating the other as absent, and fire again when the second edge arrives. Section 19.12 is the fix.")
+
+    add_heading(doc, "19.12 The defer=True flag")
+    add_callout(doc, "Definition", "defer=True", "A `graph.add_node(...)` option that registers a node as a true fan-in barrier — LangGraph holds it until every other pending task in the current execution has completed, then runs it exactly once, regardless of how many predecessor edges feed it or how unevenly deep those predecessors' paths are.")
+    add_body(doc, "Figure 19.2 shows exactly the shape Section 19.11 warned about: two tracks of unequal depth, both required, joined by a single barrier.")
+    add_figure(doc, diagram_barrier_19(), "Figure 19.2 — Two tracks of different depth, one barrier, one execution.")
+    add_code(doc, '''graph.add_node("combine_tracks", combine_tracks, defer=True)''')
+    add_body(doc, "The comment beside this single line in Memora's `graph.py` is worth reading verbatim, because it states the reasoning as precisely as the mechanism itself: the two tracks land in different supersteps, so a plain multi-predecessor node would fire once per predecessor instead of once total, and `defer=True` is what forces genuine barrier semantics instead. One keyword argument, and an entire class of race-shaped bug becomes structurally impossible rather than merely unlikely.")
+
+    add_heading(doc, "19.13 Reducer semantics revisited — combining Annotated with defer=True")
+    add_body(doc, "Section 19.4's reducers and Section 19.12's barrier solve two different halves of the same problem, and Memora's graph needs both, at two different points, for two different reasons. `retrieved_document_chunks` and `retrieved_learned_qa_chunks` accumulate through `operator.add` as an arbitrary number of parallel `retrieve` branches — one per query variant — each contribute their own chunks; nothing waits for a fixed count, because the fan-out itself (Section 19.6's `Send`) determines how many branches exist. `combine_tracks`, by contrast, has exactly two, always-present predecessors of unequal depth, and needs all of both, every time, with no accumulation logic beyond simple concatenation once both arrive.")
+    add_table(doc, ["Mechanism", "Solves", "Used where"], [
+        ["`Annotated[list, operator.add]`", "Combining an unknown or variable number of contributions", "Fan-out over query variants"],
+        ["`defer=True`", "Guaranteeing a fixed set of predecessors all finish before running", "Fan-in after two asymmetric-depth tracks"],
+    ], [2.55, 3.10, 1.05])
+    add_body(doc, "Reach for a reducer when a field's *number* of writers varies; reach for `defer=True` when a node's *set* of predecessors is fixed but their timing is not. Confusing the two — relying on a reducer to somehow wait for stragglers, or adding `defer=True` to a node whose writer count genuinely varies — solves neither problem correctly.")
+
+    add_heading(doc, "19.14 No-code comparison — testing cyclic execution in Langflow")
+    add_body(doc, "A parallel, no-code experiment tested the same underlying question — can a visual flow builder execute a real cycle — in Langflow, a drag-and-drop LLM pipeline tool. The answer was yes, through a dedicated `Loop` component providing an explicit back-edge and a guaranteed stop condition: fed a three-row CSV, the looped section executed once per row and terminated deterministically when the rows were exhausted.")
+    add_body(doc, "A second experiment then exposed a distinction worth carrying back into graph-based thinking generally: the loop reused a single captured chat message across every iteration rather than prompting the user again per row, because Langflow's `Chat Input` captures one message at flow start, not a per-iteration `input()` call. The project's own research notes name this precisely — an *automatic data cycle* (what the `Loop` component provides) is not an *interactive cycle* (pause, wait for a new message, resume), and the two are easy to conflate until a test run reveals which one you actually built.")
+    add_body(doc, "The comparison went one step further: the entire Memora agentic RAG pipeline was ported into Langflow as a generated Custom-Component flow, and the port immediately surfaced a real bug worth knowing about regardless of which tool produced it — Langflow's Knowledge node returns Chroma's raw `similarity_search_with_score` value (negative distance, roughly in `[-2, 0]`, closer to `0` meaning better) where Memora's own retriever returns a true `[0, 1]` cosine similarity. Every ported threshold, written against the `[0, 1]` scale, rejected every retrieved row until the mismatch was found — the same distance-versus-score confusion Chapter 11.4's `1 - distance` pitfall warned about, reappearing across a tool boundary instead of a distance-metric boundary.")
+    add_body(doc, "A no-code tool reaching the same cyclic-execution conclusion as a hand-coded graph framework is not a coincidence — both are converging on the same underlying requirement: bounded, explicit, inspectable iteration, whichever surface expresses it. Chapter 19B now takes every primitive from this chapter and ports Chapter 18's exact agent onto them, node by node, so the comparison stops being abstract.")
+
+    path = OUT_DIR / "Chapter_19_Orchestration_with_LangGraph.docx"
+    doc.core_properties.title = f"Chapter 19 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_module_mapping_19b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650">'
+        '<rect width="1200" height="650" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["One phase becomes one file"], size=27, bold_first=True)
+        + svg_centered_text(270, 72, ["agent_query.py — one function"], size=18, bold_first=True)
+        + svg_centered_text(930, 72, ["app_workflow/nodes/ — one file per phase"], size=18, bold_first=True)
+        + svg_labeled_box(40, 100, 460, 105, "RETRIEVE", ["choose queries, fetch chunks"], fill="#F2F2F2")
+        + svg_labeled_box(700, 100, 460, 105, "Query + Retrieve", ["query_variants.py", "retrieve.py"], fill="#F2F2F2")
+        + svg_arrow(500, 152, 698, 152)
+        + svg_labeled_box(40, 230, 460, 105, "COMPRESS", ["NAC then DC then LBC"], fill="#D9D9D9")
+        + svg_labeled_box(700, 230, 460, 105, "Compression Track", ["nac.py, dc.py, lbc.py", "combine_tracks.py"], fill="#D9D9D9")
+        + svg_arrow(500, 282, 698, 282)
+        + svg_labeled_box(40, 360, 460, 105, "ANSWER", ["draft from compressed context"], fill="#808080", text_fill="#FFFFFF")
+        + svg_labeled_box(700, 360, 460, 105, "Draft", ["generate_draft.py"], fill="#808080", text_fill="#FFFFFF")
+        + svg_arrow(500, 412, 698, 412)
+        + svg_labeled_box(40, 490, 460, 105, "JUDGE", ["check_answer_quality()"], fill="#D9D9D9")
+        + svg_labeled_box(700, 490, 460, 105, "Quality + Final", ["check_answer_quality.py", "generate_answer.py"], fill="#D9D9D9")
+        + svg_arrow(500, 542, 698, 542)
+        + "</svg>"
+    )
+    return svg_to_png("chapter19b_module_mapping", svg)
+
+
+def diagram_boundary_19b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["The node versus service boundary"], size=26, bold_first=True)
+        + svg_labeled_box(60, 100, 500, 220, "nodes/", ["graph-aware — reads and writes GraphState", "one function per graph node", "e.g. retrieve.py, combine_tracks.py, user_input.py"], fill="#F2F2F2")
+        + svg_labeled_box(640, 100, 500, 220, "services/", ["reusable — no GraphState dependency", "plain functions, clients, singletons", "e.g. llm_caller.py, retriever.py, prompts.py"], fill="#D9D9D9")
+        + svg_arrow(562, 210, 638, 210)
+        + svg_centered_text(600, 190, ["imports"], size=15, bold_first=True)
+        + svg_labeled_box(60, 350, 1080, 90, "One direction only",
+                           ["services/ never imports from nodes/ — the dependency runs nodes to services, never back"], fill="#FFFFFF", dashed=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter19b_boundary", svg)
+
+
+def build_chapter_19b() -> Path:
+    title = "Porting the Agent to a LangGraph State Machine"
+    doc = configure_document(title)
+    add_cover(doc, "19B", title, "PART IV — FROM RAG TO AGENTIC RAG", "Porting an agent to a graph is not a rewrite of its logic — it is a rewrite of everything the logic used to assume about being alone in one function.")
+    add_chapter_heading(doc, "19B", title)
+    add_body(doc, "Chapter 19 introduced LangGraph's primitives against small, disposable examples. This chapter ports something real: Chapter 18's `run_agent`, phase by phase, onto exactly those primitives — producing `app_workflow/`, a second, parallel implementation of the same agent that runs alongside `app/` rather than replacing it, until the port is proven correct on its own terms.")
+    add_body(doc, "Every structural choice in this chapter answers a question the single-file version never had to ask. Where does one phase's logic live when it becomes its own file? What happens to a shared helper function when two different node files both need it? How does a two-track parallel pipeline — the concrete trigger from Chapter 19.1 — actually fan out and rejoin without racing itself? And what breaks, specifically, when the same package gets imported two different ways by two different entry points?")
+    add_body(doc, "By the end of this chapter you will be able to plan a node-per-phase migration, draw the boundary between a node module and a service module, wire fan-out and fan-in correctly for a real two-track pipeline, and recognize the specific import-ordering mistake that turns a working package into one that fails only from certain entry points.")
+
+    add_heading(doc, "19B.1 The migration plan — from a loop to a node-per-phase graph")
+    add_body(doc, "The plan was conservative by design, for the same reason Chapter 19.1's aborted first attempt failed: `app/agent_query.py` kept running, untouched, for the entire duration of the port. `app_workflow/` was built as a second package, importing nothing from `app/` and exporting nothing back to it, so a defect in the new graph could never take down the proven one. Every architecture decision record for this migration ends the same way — \"`app/` unaffected\" — not as boilerplate, but as a standing constraint the team checked on every single change.")
+    add_body(doc, "The plan itself reduces to one sentence: give every phase Chapter 18 hand-coded its own file, give every file exactly one job, and let `graph.py` be the only place that knows how the files connect. What used to be a phase variable and an `if` chain becomes a directory listing.")
+
+    add_heading(doc, "19B.2 One module per node")
+    add_body(doc, "`app_workflow/nodes/` holds sixteen files, and their names alone describe the pipeline without opening a single one.")
+    add_table(doc, ["Module", "Responsibility"], [
+        ["`user_input.py`", "Entry point — parses commands, loads feedback context"],
+        ["`query_variants.py`", "Generates and pre-filters query rephrasings"],
+        ["`retrieve.py`", "One parallel branch per query variant"],
+        ["`post_retrieve.py`", "Fan-in filter after all retrieve branches land"],
+        ["`validate_retrieval.py`", "Per-track relevance judging"],
+        ["`dedup_merge.py`", "Per-track near-duplicate chunk merging"],
+        ["`nac.py` / `dc.py` / `lbc.py`", "The three compression stages (Chapter 22B)"],
+        ["`combine_tracks.py`", "The fan-in barrier joining both compression tracks"],
+        ["`generate_draft.py` / `generate_answer.py`", "The two-stage answer pipeline (Chapter 20.9)"],
+        ["`check_answer_quality.py`", "The quality gate between them"],
+        ["`no_context_answer.py`", "The canned-answer short-circuit"],
+        ["`commands.py`", "`bad` / `stats` / `learn` / `exit` handlers"],
+        ["`auto_distillation.py`", "Self-learning trigger after a good answer"],
+    ], [2.55, 3.75])
+    add_body(doc, "Every module exports one function with the same shape: accept `GraphState`, return a partial update. There is no other contract to learn once that pattern is recognized once.")
+
+    add_heading(doc, "19B.3 The graph.py module — assembling nodes, edges, and entry points")
+    add_body(doc, "`graph.py` does exactly one thing: register every node, declare every edge, and compile. It contains no business logic of its own — reading it top to bottom is reading the entire pipeline's shape, which is the payoff for having moved everything else out.")
+    add_code(doc, '''def build_graph():
+    graph = StateGraph(GraphState)
+    graph.add_node("retrieve", retrieve)
+    graph.add_node("combine_tracks", combine_tracks, defer=True)
+    ...
+    graph.add_edge(START, "user_input")
+    graph.add_conditional_edges("user_input", route_user_input, {...})
+    ...
+    return graph.compile()''')
+    add_body(doc, "Figure 19B.1 shows the correspondence directly: every phase Chapter 18 tracked with one `phase` variable now has a named file, and the state machine's transitions — the `if phase == \"COMPRESS\"` blocks — are now `graph.py`'s edge declarations.")
+    add_figure(doc, diagram_module_mapping_19b(), "Figure 19B.1 — Chapter 18's four phases become fourteen node files, wired together in one place.")
+
+    add_heading(doc, "19B.4 The state.py schema")
+    add_body(doc, "One file, `state.py`, declares every field any node anywhere in the graph may read or write — the complete `GraphState` Chapter 19.3 introduced in the abstract, now carrying this pipeline's actual shape: two raw retrieval tracks accumulated by reducer, two validated tracks, two dedup-merged tracks, a full document compression chain (NAC, DC, LBC) running parallel to a shorter learned-QA chain (DC, LBC only — no neighbor-merging step, because distilled Q&A chunks have no sequence to merge), and a combined output only `combine_tracks` is allowed to write.")
+    add_body(doc, "Reading `state.py` end to end is the fastest way to understand what this graph actually does — faster than reading any single node, because every node's contract is legible from the fields it touches.")
+
+    add_heading(doc, "19B.5 The routes.py module")
+    add_body(doc, "Every conditional-edge routing function in the entire graph lives in one file, imported by `graph.py` and nowhere else. Nothing about this is enforced by the language — it is a discipline the project chose, for the same reason `state.py` centralizes state: a reader who wants to know \"what can happen after `combine_tracks`\" should be able to find the answer in one place, not by tracing into node implementations.")
+    add_code(doc, '''def route_after_combine(state: GraphState) -> str:
+    if not state.get("compressed_docs"):
+        if state.get("retry_count", 0) >= LLM_RESPONSE_RETRY_LIMIT:
+            return "no_context_answer"
+        return "retry"
+    return "generate_draft" if get_switches(state)["ENABLE_ANSWER_DRAFT_CREATION"] else "generate_answer"''')
+    add_body(doc, "Nine routing functions live here, and every one of them reads state and returns a string — nothing more. `fan_out_retrievals` is the exception worth noting early: it returns a list of `Send` objects rather than a single string, because fanning out is a different shape of decision than choosing one path (Section 19B.8).")
+
+    add_heading(doc, "19B.6 The services/ layer")
+    add_body(doc, "`app_workflow/services/` holds every piece of infrastructure a node might need but that has no idea a graph exists: `llm_caller.py` and `llm_setup.py` (Chapter 13B in full), `logger_config.py`, `prompts.py`, `embedding_manager.py`, `retriever.py`, `validators.py`, and `fix_llm_output.py` (Chapter 20B). None of these files import `GraphState`, `StateGraph`, or anything else from LangGraph — they are the same kind of reusable, framework-agnostic code Part III built, simply relocated under a package a graph now happens to sit on top of.")
+    add_body(doc, "`services/services.py` is the one file in this layer worth naming specifically: a small module holding shared singleton instances — the live `retriever`, `feedback_store`, `self_learner`, and `learned_collection` objects — constructed once and imported by whichever node needs them. `commands.py`'s `cmd_bad` reaches into it directly: `services.last_variants_with_chunks`, the same variant-tracking data Chapter 18.6 threaded through `run_agent`'s return tuple, now living as shared state one module away instead of a value passed down a call stack.")
+
+    add_heading(doc, "19B.7 The user_input_node and route_user_input")
+    add_body(doc, "The graph's entry point does everything `agent_query.py`'s command handling used to do inline, before a single retrieval happens: recognize `bad`, `stats`, `learn`, and `exit` as commands rather than questions, and — for an actual question — load blocked variants and prior thumbdowns from the feedback store so they can steer retrieval exactly as Chapter 18's `_build_system_prompt` did.")
+    add_code(doc, '''def user_input_node(state: GraphState) -> dict:
+    raw_lower = state["user_input"].strip().lower()
+    if raw_lower in {"exit", "quit"}:
+        return {"command": "exit"}
+    ...
+    return {
+        "command": "",
+        "blocked_variants": blocked_variants,
+        "prior_thumbdowns": prior_thumbdowns,
+    }''')
+    add_body(doc, "`route_user_input` then reads `command` and sends the run to a dedicated node per command, or on to `generate_query_variants` for anything that was not a command at all. Command handling and question handling are structurally the same kind of decision — a conditional edge — rather than the special-cased early-return checks a hand-written loop tends to accumulate.")
+
+    add_heading(doc, "19B.8 Fan-out — two independent retrievals from a single START")
+    add_body(doc, "This is the concrete capability Chapter 19.1 identified as the actual trigger for the migration: multiple query variants, each retrieving independently, running as `max(variants)` instead of `sum(variants)`. `fan_out_retrievals` returns one `Send` per variant, each carrying its own copy of state with `query` overridden — LangGraph schedules every `Send` as an independent parallel task.")
+    add_code(doc, '''def fan_out_retrievals(state: GraphState):
+    return [
+        Send("retrieve", {**state, "query": variant})
+        for variant in state["query_variants"]
+    ]''')
+    add_body(doc, "`run_agent`'s hand-written loop never attempted this — it could not, without threading or async machinery a single Python function has no clean way to express. A conditional edge that returns a list of `Send` objects instead of one node name is the entire mechanism; nothing about `retrieve.py` itself needed to change to become parallelizable.")
+
+    add_heading(doc, "19B.9 Fan-in via reducer-typed list fields")
+    add_body(doc, "Every parallel `retrieve` branch writes to the same two state fields, and `state.py`'s reducers are what make that safe: `retrieved_document_chunks` and `retrieved_learned_qa_chunks` are both `Annotated[list[dict], operator.add]`, so LangGraph concatenates every branch's contribution rather than letting the last branch to finish silently overwrite the others.")
+    add_code(doc, '''retrieved_document_chunks: Annotated[list[dict], operator.add]
+retrieved_learned_qa_chunks: Annotated[list[dict], operator.add]
+variants_with_chunks: Annotated[list[dict], operator.add]
+newly_failed_variants: Annotated[list[str], operator.add]''')
+    add_body(doc, "`post_retrieval_filter` sits immediately after `retrieve` in the graph and runs once, implicitly waiting for every fanned-out branch to finish before it fires — an ordinary, non-deferred fan-in, correct here because every branch writes into reducer-typed fields rather than fields a barrier would need to protect. Section 19B.10 is where that stops being sufficient.")
+
+    add_heading(doc, "19B.10 The combine_tracks node")
+    add_body(doc, "The document and learned-QA compression tracks run at different depths — three compression stages against two — and land in different graph supersteps even though both start from the same fan-out point. `combine_tracks` is registered with `defer=True` specifically because a plain multi-predecessor node would fire once per arriving edge instead of once for both.")
+    add_figure(doc, diagram_boundary_19b(), "Figure 19B.2 — Nodes depend on services; services never depend on nodes.")
+    add_body(doc, "(Figure 19B.2 is introduced here to set up Section 19B.13 — hold that thought for two sections.) `combine_tracks` itself is almost aggressively simple once the barrier guarantees both tracks are actually present: concatenate learned-QA chunks first, documents second, matching the same precedence ordering `agent_query.py`'s `format_precedence_context_for_llm` already established in Chapter 18. The barrier is where the real engineering is; the join itself is one list concatenation.")
+
+    add_heading(doc, "19B.11 The draft, quality-check, and final-answer routing")
+    add_body(doc, "Three routing functions reproduce Chapter 18's JUDGE-phase logic exactly, as three separate, individually testable functions instead of branches inside one large conditional block.")
+    add_table(doc, ["Routing function", "Mirrors", "Decision"], [
+        ["`route_after_combine`", "COMPRESS → ANSWER transition", "Empty result → retry or give up; else proceed to draft"],
+        ["`route_after_generate_draft`", "Draft-creation feature flag", "Skip straight to `generate_answer` if drafting is disabled"],
+        ["`route_after_quality_check`", "JUDGE phase's budget_ok logic", "OK → answer; INSUFFICIENT + budget → retry; else best-effort"],
+    ], [2.05, 2.30, 2.05])
+    add_body(doc, "`route_after_quality_check`'s budget check is worth comparing line for line against Chapter 18.5's inline version — the logic is unchanged, only its address changed, from a nested `if` inside `run_agent` to a standalone function `graph.py` wires in by name.")
+
+    add_heading(doc, "19B.12 Maintaining both pipelines side-by-side")
+    add_body(doc, "`app/` and `app_workflow/` ran in parallel for weeks, not days — long enough for `app_workflow/` to accumulate its own bugs, its own tuning passes, and its own provider migration (Chapter 13B) entirely independent of the proven loop sitting next to it. Every architecture decision touching the new graph states its blast radius explicitly: \"`app/` unaffected,\" repeated so consistently across the record that it reads less like a note and more like a checklist item nobody was willing to skip.")
+    add_body(doc, "The discipline is what made the migration safe to attempt at all. A team free to break the working version while building its replacement has no fallback when the replacement's own bugs surface — and Chapter 19B.14's circular import was found precisely because someone could still run the old pipeline to confirm the new one, not the underlying logic, was what had broken.")
+
+    add_heading(doc, "19B.13 The node-vs-service architectural boundary")
+    add_body(doc, "Figure 19B.2's rule is simple to state and easy to violate by accident: a `nodes/` file may import from `services/`, never the reverse, and a `services/` file should never need to know `GraphState` exists at all. `llm_caller.py` living in `services/` and not `nodes/` is not a naming preference — it is the same file, doing the same job, that Chapter 13B described for the pre-graph pipeline, proof that centralizing LLM invocation was never actually coupled to which orchestration layer sits above it.")
+    add_body(doc, "The test is practical: if a function needs `GraphState` to make sense — it reads or writes specific graph fields — it belongs in `nodes/`. If it would work identically whether the caller were a graph node, a CLI script, or a unit test, it belongs in `services/`. A `services/` file that starts needing `state.get(...)` is a sign the boundary has already been crossed, quietly, and is worth catching before it spreads.")
+
+    add_heading(doc, "19B.14 Circular imports across nodes/")
+    add_body(doc, "`app_workflow/` sits on `sys.path` two different ways depending on entry point — `main.py` imports it as the bare `nodes` package; `api.py`, run via uvicorn from inside `app_workflow/`, can end up importing the same files under the fully-qualified `app_workflow.nodes` identity instead. Python does not deduplicate these — two different import paths to the same file produce two different module objects, each with its own copy of every name defined in it.")
+    add_body(doc, "Every file in `nodes/` used the bare `nodes.X` form to reference a sibling module, matching `nodes/__init__.py` itself — except one line in `generate_answer.py`, which imported `check_answer_quality` via the absolute `app_workflow.nodes.check_answer_quality` path instead. Because `__init__.py` imports `generate_answer` before `check_answer_quality` in its own declared order, that one absolute import re-entered the still-initializing `nodes` package under its *other* identity partway through, and failed to find `generate_answer` defined yet — `ImportError: cannot import name 'generate_answer' from partially initialized module 'nodes.generate_answer'`.")
+    add_callout(doc, "Common pitfall", "One inconsistent import style, two identities for the same package", "The bug reproduced reliably from `main.py` and did not reproduce from `api.py` in the same session — not because the code was only sometimes wrong, but because only one entry point happened to trigger the exact import order that exposed it. A defect that depends on which door you walked in through is still a defect; test every real entry point, not just the one you use during development. The fix was one line — match the bare `nodes.X` style every other file in the package already used — but finding it required recognizing that `sys.path` position, not the file's own code, was what had two different opinions about what package this file belonged to.")
+    add_body(doc, "Detecting this class of bug before it reaches a user is mostly a matter of consistency, not cleverness: pick one import style for intra-package references — bare, relative, or fully-qualified — and enforce it everywhere, because the moment two styles coexist, Python's import system is free to load the same file twice under two names, and only one of them will ever be the one already halfway through initializing.")
+
+    add_body(doc, "`app_workflow/` is now a complete, parallel agent — every phase Chapter 18 hand-coded, reproduced as a graph, with a genuine parallel retrieval fan-out the original loop structurally could not express. What has not yet changed is how good any of its answers actually are. Chapter 20 returns to that question directly: the quality gate this chapter routed around, in detail — where it came from, why a binary verdict eventually proved not enough, and what replaced it.")
+
+    path = OUT_DIR / "Chapter_19B_Porting_the_Agent_to_LangGraph.docx"
+    doc.core_properties.title = f"Chapter 19B — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_judge_evolution_20() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560">'
+        '<rect width="1200" height="560" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Three generations of the same quality gate"], size=26, bold_first=True)
+        + svg_labeled_box(310, 100, 580, 115, "Heuristic PRM", ["refusal check, length floor,", "word-overlap counting"], fill="#F2F2F2")
+        + svg_centered_text(985, 157, ["brittle — verbatim", "copies pass"], size=14, gap=19)
+        + svg_arrow(600, 215, 600, 241)
+        + svg_labeled_box(310, 243, 580, 115, "Binary LLM Judge", ["OK or INSUFFICIENT", "one prompted call, fails open to OK"], fill="#808080", text_fill="#FFFFFF")
+        + svg_arrow(600, 358, 600, 384)
+        + svg_labeled_box(310, 386, 580, 115, "Multi-Verdict Judge", ["GROUNDED / PARTIALLY_FABRICATED / OVERCLAIMED", "OFF_TOPIC / UNKNOWN — fails closed"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_centered_text(985, 443, ["current — ADR-056"], size=14, bold_first=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter20_judge_evolution", svg)
+
+
+def diagram_missing_gate_20() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440">'
+        '<rect width="1200" height="440" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["The last content-altering step has no gate after it"], size=23, bold_first=True)
+        + svg_labeled_box(20, 110, 270, 140, "DRAFT", ["generate_draft node", "working answer from context"], fill="#F2F2F2")
+        + svg_labeled_box(310, 110, 270, 140, "JUDGE", ["check_answer_quality(draft)", "verdict computed here"], fill="#D9D9D9")
+        + svg_labeled_box(600, 110, 270, 140, "SYNTHESIZE", ["generate-answer-from-draft", "can drop content vs. draft"], fill="#808080", text_fill="#FFFFFF")
+        + svg_labeled_box(890, 110, 290, 140, "SHIPPED", ["no re-validation runs", "least-checked text in the run"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(300, 180, 308, 180)
+        + svg_arrow(590, 180, 598, 180)
+        + svg_arrow(880, 180, 888, 180, dashed=True)
+        + svg_labeled_box(150, 290, 900, 90, "BUG-068 (open)",
+                           ["nothing re-validates the synthesized answer against the draft the judge actually approved"], fill="#FFFFFF", dashed=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter20_missing_gate", svg)
+
+
+def build_chapter_20() -> Path:
+    title = "Quality Control and Self-Correction"
+    doc = configure_document(title)
+    add_cover(doc, 20, title, "PART IV — FROM RAG TO AGENTIC RAG", "A judge that only checks the draft has not checked the answer.")
+    add_chapter_heading(doc, 20, title)
+    add_body(doc, "Every retrieval upgrade in Chapter 12, every prompt discipline in Chapter 14, every phase boundary Chapter 18 enforced — all of it is in service of one gate: deciding whether an answer is actually good enough to return. This chapter is the history of that one gate, told through three real implementations, two of them retired for a documented reason and the third carrying a documented gap of its own.")
+    add_body(doc, "None of this history is theoretical. `check_answer_quality` began as a hand-coded heuristic, was diagnosed as brittle by the project's own research process, was replaced by a single prompted LLM call, and was replaced again after that binary call turned out to have a specific, nameable blind spot. The current multi-verdict judge is better than both of its predecessors and is not, itself, the end of the story — Section 20.10 covers an open bug in exactly this gate that the project has identified but not yet closed.")
+    add_body(doc, "By the end of this chapter you will be able to explain why a heuristic quality check is brittle in a specific, predictable way, design a judge that fails closed instead of open, route retries deliberately instead of blindly, and recognize the gap that opens whenever a pipeline gains a content-altering step without asking whether its quality gate still covers it.")
+
+    add_heading(doc, "20.1 The check_answer_quality heuristic")
+    add_callout(doc, "Definition", "Process Reward Model (PRM)", "A scoring function — hand-coded or learned — that grades one step of a multi-step process rather than only the final outcome, used here to grade a generated answer before it ever reaches the user.")
+    add_body(doc, "Before any LLM call judged an answer, `check_answer_quality` was what the project's own research notes call a hand-coded heuristic PRM: reject answers that used refusal language, reject answers below a minimum length, and score the remainder by counting meaningful word overlap between the answer and the retrieved context.")
+    add_code(doc, '''def check_answer_quality_heuristic(answer: str, context: str) -> str:
+    if any(phrase in answer.lower() for phrase in REFUSAL_PHRASES):
+        return "INSUFFICIENT — answer contains a refusal phrase."
+    if len(answer.split()) < MIN_WORD_COUNT:
+        return "INSUFFICIENT — answer is too short."
+    overlap = meaningful_word_overlap(answer, context, stop_words=STOP_WORDS)
+    return "OK" if overlap >= OVERLAP_THRESHOLD else "INSUFFICIENT — low overlap with context."''')
+    add_body(doc, "Three checks, zero LLM calls, essentially free to run on every answer — which is exactly why it was the first version built. A heuristic PRM costs nothing but its own maintenance; the question Section 20.2 answers is what that cheapness actually bought.")
+
+    add_heading(doc, "20.2 Why heuristic groundedness checks are brittle")
+    add_body(doc, "The project's own verdict on its heuristic, recorded directly in its research log, is unambiguous: brittle. A 200-word answer built by copying chunk text verbatim passes easily — high word overlap by construction, no refusal language, comfortably over the length floor — while a tight, well-synthesized 150-word answer that paraphrases the same evidence in the model's own words can fail the same check, because paraphrase reduces surface word overlap even when it preserves every fact.")
+    add_callout(doc, "Common pitfall", "Optimizing a proxy instead of the thing you actually want", "Word overlap is a proxy for groundedness, not groundedness itself — and a proxy this cheap is trivial for a model to satisfy by degenerate means. Copying context verbatim maximizes word overlap while adding zero synthesis value; a heuristic that rewards this shape of answer is training the *rest of the pipeline*, not just this check, toward padded, uncompressed, barely-summarized output, because a generator will drift toward whatever the gate downstream of it actually accepts.")
+    add_body(doc, "Every stop-list, threshold, and overlap-counting rule in a heuristic like this one is a hand-tuned approximation of a judgment call a human would make instantly and a model with the right prompt can make almost as well. The heuristic was never wrong to exist — it was the correct thing to build first, cheaply, before spending an LLM call on every single answer. It was wrong to keep once a cheaper LLM call was available and the failure mode was this well understood.")
+
+    add_heading(doc, "20.3 LLM-as-judge evaluation")
+    add_body(doc, "The project's own recommendation for the heuristic's replacement was specific rather than general: a prompted judge call asking whether the answer uses only facts from the retrieved chunks, directly addresses the question, and avoids verbatim copying — one extra LLM call per query, evaluated by a model that never generated the answer it is grading.")
+    add_body(doc, "Chapter 13B.11 already named the reason the judge must be a separate call from generation: a model grading its own output carries the same reasoning path and the same blind spots into the grading pass. A heuristic has no reasoning path to share — its blind spot was mechanical (word overlap), not psychological (self-justification) — but the fix for both is structurally identical: the check must be independent of whatever produced the thing being checked, whether that independence comes from using a different model entirely or simply from using any model instead of a string-matching rule.")
+
+    add_heading(doc, "20.4 Retry strategies")
+    add_body(doc, "An INSUFFICIENT verdict is not automatically a retry — Chapter 18.5's budget arithmetic decides that — but when a retry does happen, what changes between attempts matters as much as whether one happens at all. The retry message built in the JUDGE phase does three things at once: states the specific reason the previous answer failed, instructs the model to generate genuinely different query variants rather than rephrasing the same angle, and explicitly forbids repeating anything already tried.")
+    add_bullets(doc, [
+        "Rephrase — same information need, different vocabulary, when the failure looks like a retrieval-wording problem.",
+        "Expand — broaden the query when the verdict suggests coverage was too narrow, not wrong.",
+        "Broaden scope — step back to a more general query when a specific one returned nothing usable at all (this is Chapter 12's Step-Back pattern, applied automatically rather than by prompt design).",
+        "Never retry identically — a retry that reuses the exact prior query variants will most likely reproduce the exact prior failure.",
+    ])
+    add_body(doc, "The strategy is chosen implicitly by the model responding to the verdict's stated reason, not by an explicit strategy-selection step — Chapter 14.6's grounding constraints and the retry message's specificity are what steer the model toward the right kind of different attempt, rather than a mechanical rule picking rephrase versus expand versus broaden.")
+
+    add_heading(doc, "20.5 Confidence scoring")
+    add_body(doc, "Chapter 13.8 already made the load-bearing choice here: `advanced_answer`'s confidence score is the maximum similarity score among retrieved chunks, not a number the LLM reports about its own answer. That choice is worth restating explicitly now that Chapter 20's subject is quality judging specifically — because it would be easy to assume a \"confidence\" field belongs next to a quality verdict, generated by the same judge call.")
+    add_callout(doc, "Common pitfall", "Trusting an LLM's self-reported confidence", "Asking a model \"how confident are you in this answer, from 0 to 100\" produces a number with the surface shape of calibrated uncertainty and none of the underlying property. A model's fluency is not correlated with its correctness in any way a raw self-report reliably captures — a confidently wrong answer and a confidently right one can report identical confidence, because the number was generated by the same process that generated the answer's tone, not by any independent check against evidence. A retrieval-derived signal (Chapter 13.8) or a structured judge verdict (Section 20.7) are both actual measurements of something; a self-reported confidence score is a restatement of the answer's own writing style.")
+
+    add_heading(doc, "20.6 Graceful degradation when nothing useful is retrieved")
+    add_body(doc, "The correct response to zero usable evidence is not a best-effort answer padded to look substantial — it is an honest, canned refusal, returned immediately, with no further LLM calls spent trying to make something out of nothing. Chapter 18.7's COMPRESS phase enforces exactly this: if both accumulated chunk tracks are empty when compression would otherwise run, the loop returns `NO_CONTEXT_ANSWER` directly and skips DRAFT and JUDGE entirely.")
+    add_body(doc, "This is graceful degradation in its most literal sense — the system degrades to a known-safe, known-honest output rather than attempting a lower-quality version of its normal behavior. A judge call spent grading an answer synthesized from nothing would either correctly flag it as ungrounded (wasting a call to reach a foregone conclusion) or, worse, occasionally pass it — the canned-answer short-circuit removes that risk structurally rather than trusting the judge to catch every instance of it.")
+
+    add_heading(doc, "20.7 Beyond OK and INSUFFICIENT — the structured multi-verdict judge")
+    add_body(doc, "The binary judge's free-text `OK` / `INSUFFICIENT — <reason>` output was replaced with a structured verdict carrying real diagnostic information, evaluated against three rules instead of two: exhaustive per-sentence traceability (not just \"key claims\"), relevance, and a new completeness/calibration rule checking whether the answer's scope and confidence actually match how much evidence it was given. Figure 20.1 lays out all three generations in order.")
+    add_figure(doc, diagram_judge_evolution_20(), "Figure 20.1 — Each generation fixed a specific, named failure of the one before it.")
+    add_code(doc, '''{
+  "verdict": "GROUNDED" | "PARTIALLY_FABRICATED" | "OVERCLAIMED" | "OFF_TOPIC" | "UNKNOWN",
+  "unsupported_claims": [],
+  "scope_mismatch": false,
+  "overall_reason": "..."
+}''')
+    add_table(doc, ["Verdict", "Means"], [
+        ["`GROUNDED`", "Every claim traces to retrieved evidence; the single pass verdict"],
+        ["`PARTIALLY_FABRICATED`", "At least one claim has no support in the retrieved chunks at all"],
+        ["`OVERCLAIMED`", "Every claim is technically true, but confidence or scope exceeds the evidence"],
+        ["`OFF_TOPIC`", "The answer does not actually address the question asked"],
+        ["`UNKNOWN`", "The judge call itself failed — fails closed, not open"],
+    ], [1.85, 4.15])
+    add_body(doc, "That last row is a quiet but important reversal: the binary judge defaulted a failed judge call to `OK`, a fail-open design that let a transient timeout silently pass every answer it happened to interrupt. The multi-verdict judge defaults to `UNKNOWN` instead — a judge that cannot render a verdict now blocks the gate rather than waving everything through it.")
+
+    add_heading(doc, "20.8 Semantic-extension blindness")
+    add_callout(doc, "Definition", "Semantic-extension blindness", "A grading failure mode in which a judge evaluates only whether an answer's key or salient claims are supported, allowing additional, unchecked sentences to add plausible-sounding but entirely unsupported content that the judge never examines.")
+    add_body(doc, "This was the binary judge's specific, nameable blind spot, not a vague \"LLM judges are imperfect\" concern: grading only \"key claims\" gave the judge no mandate to check every sentence, so an answer built from one true, well-grounded claim padded with several fabricated ones could pass as `OK` — the judge sampled the strong claim, approved it, and never looked closely at the padding around it.")
+    add_body(doc, "`OVERCLAIMED` and `PARTIALLY_FABRICATED` exist as separate verdicts specifically because this blind spot has two different shapes, and a project that only distinguishes \"grounded\" from \"not\" cannot route them differently even after noticing both exist. Every claim can be individually true while the answer as a whole overclaims what the evidence actually supports (`OVERCLAIMED`) — a scope problem, potentially fixable with a caveat rather than a full retry — or a claim can simply be invented outright (`PARTIALLY_FABRICATED`) — a fabrication problem, which a caveat cannot fix. Differentiated routing per verdict is designed into the schema; today's routing still treats every non-`GROUNDED` verdict the same way, a deliberately incremental rollout rather than a finished one.")
+
+    add_heading(doc, "20.9 Two-stage answer generation")
+    add_callout(doc, "Definition", "Synthesis input", "Working material passed into a further generation step, as distinct from a finished output — a draft is synthesis input for the final answer, not the final answer with extra steps performed on it beforehand.")
+    add_body(doc, "The intended design has always been two real generation calls: `generate_draft` produces working material from the compressed context, and `generate_answer` takes that draft as input to one more synthesis call that reconciles it against the full context and produces the polished, final text — falling back to the literal draft only if that second call itself fails.")
+    add_callout(doc, "Common pitfall", "A draft short-circuit that skips synthesis entirely", "The LangGraph port's `generate_answer` once did `if draft: answer = draft` — a hard short-circuit that returned the draft completely unmodified whenever one existed, skipping the intended synthesis call outright. Confirmed byte-for-byte in a production debug log: the draft text and the \"final\" answer text were identical down to the character. This silently collapsed two real generation calls into one, and meant the quality judge's verdict — computed over the draft — was being reported as a verdict on text that then shipped completely unrefined. A fallback path written as the primary path is a bug that looks, at a glance, exactly like a working optimization.")
+    add_body(doc, "The fix added a dedicated synthesis prompt for the draft-present case and made the verbatim-draft path what it was always supposed to be: a fallback triggered only when the synthesis call itself fails, never the default outcome.")
+
+    add_heading(doc, "20.10 The missing-gate bug")
+    add_body(doc, "Fixing Section 20.9's bug correctly — making synthesis a real, content-altering LLM call again — reopened a question nobody had needed to ask while the short-circuit made the draft and the final answer identical: what checks the *actual* final answer, after synthesis has had a chance to change it? Figure 20.2 traces the gap directly.")
+    add_figure(doc, diagram_missing_gate_20(), "Figure 20.2 — The judge runs before the last step that can still change the content.")
+    add_body(doc, "The answer, confirmed by debug-log audit, is nothing. `check_answer_quality` runs on the pre-synthesis draft and produces a verdict; the synthesis call that follows can drop entire subtopics relative to that draft — in one analyzed run, two of six requested subtopics and an honest disclosure about a data gap both vanished during synthesis — and nothing downstream notices, because no validator runs after the last step that is actually allowed to change the content. The user-visible answer is, structurally, the least-validated text in the entire pipeline.")
+    add_body(doc, "This bug remains open in the project's own tracker, and it is worth sitting with specifically because it is open: identifying a gate's blind spot is not the same work as closing it, and the two proposed fixes — move the gate to run after synthesis instead of before it, or add a lightweight second pass that diffs draft coverage against final coverage — are still a design decision, not yet a shipped one. A pipeline gains this exact shape of bug whenever a content-altering step is added downstream of an existing gate without asking, explicitly, whether the gate still covers everything that can change the answer.")
+
+    add_heading(doc, "20.11 Fabrication under repair")
+    add_body(doc, "One more open issue belongs in this chapter even though it lives in a different module: the JSON-repair tier (Chapter 20B covers `fix_llm_output.py` in full) can fabricate a plausible, populated object from raw model output that contains no real answer data at all — a bare function definition, a lambda, an outright refusal message — rather than signaling that extraction failed.")
+    add_body(doc, "The root cause is a prompt with no escape hatch: the repair model is instructed to reconstruct JSON matching a target schema, but is never told it is allowed to report absence. A schema-aware model under those instructions defaults to satisfying the schema by inventing values, precisely because inventing something is the only path the prompt describes to a successful-looking response. This is the same underlying failure as Section 20.1's heuristic optimizing a proxy instead of the goal — a repair model rewarded, implicitly, for producing schema-shaped output will produce schema-shaped output, whether or not the source text contained anything to shape.")
+    add_body(doc, "The proposed fix is a single missing instruction: tell the repair prompt explicitly that \"no data present\" is a valid, expected outcome with its own designated empty marker, and show it an example of choosing that marker over inventing a value. Quality control, it turns out, is not only what happens to a generated answer — it is any point in the pipeline where a model is asked to produce something and never told that admitting it cannot is an acceptable answer.")
+
+    add_body(doc, "Three generations of one gate, two open bugs in adjacent modules, and a consistent throughline: every failure in this chapter is a model finding the shortest path to a shape the pipeline will accept, and every fix is closing off exactly that shortcut without closing off legitimate output along with it. Chapter 20B goes one level deeper into the mechanism the last two sections both touched — not whether an answer is grounded, but why models produce malformed structure in the first place, and what a repair pipeline built from forty catalogued failure modes actually looks like.")
+
+    path = OUT_DIR / "Chapter_20_Quality_Control_and_Self_Correction.docx"
+    doc.core_properties.title = f"Chapter 20 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_repair_pipeline_20b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800">'
+        '<rect width="1200" height="800" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Five stages between raw text and a validated object"], size=24, bold_first=True)
+        + svg_labeled_box(310, 100, 580, 115, "Preprocess", ["strip fences, comments, blockquotes,", "Python literals, thinking preambles"], fill="#F2F2F2")
+        + svg_arrow(600, 215, 600, 241)
+        + svg_labeled_box(310, 243, 580, 115, "Tiered Parse Attempts", ["json.loads, then balanced extract,", "then full json_repair"], fill="#D9D9D9")
+        + svg_arrow(600, 358, 600, 384)
+        + svg_labeled_box(310, 386, 580, 115, "LLM Repair (last resort)", ["a dedicated json_fix_llm call", "reconstructs JSON from the schema"], fill="#808080", text_fill="#FFFFFF")
+        + svg_arrow(600, 501, 600, 527)
+        + svg_labeled_box(310, 529, 580, 115, "Pydantic Validation", ["schema-checks and coerces every field", "drops bad list items, never the whole batch"], fill="#D9D9D9")
+        + svg_arrow(600, 644, 600, 670)
+        + svg_labeled_box(310, 672, 580, 115, "Value-Verify", ["a second LLM pass checks values against", "the raw response — or an empty fallback"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter20b_repair_pipeline", svg)
+
+
+def diagram_tier_cost_20b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400">'
+        '<rect width="1200" height="400" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 38, ["Each tier costs orders of magnitude more than the last"], size=24, bold_first=True)
+        + svg_labeled_box(30, 100, 340, 150, "Deterministic Parse", ["json.loads() on cleaned text", "≈ 0.1 - 0.4 ms"], fill="#F2F2F2")
+        + svg_labeled_box(430, 100, 340, 150, "json_repair Fallback", ["tolerant, permissive parsing", "≈ 270 - 400 ms"], fill="#D9D9D9")
+        + svg_labeled_box(830, 100, 340, 150, "LLM Repair", ["a dedicated small model call", "≈ 550 ms - 2 s"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(370, 175, 428, 175)
+        + svg_arrow(770, 175, 828, 175)
+        + svg_labeled_box(150, 280, 900, 85, "Try the cheapest tier first",
+                           ["most real responses never reach the last one"], fill="#FFFFFF", dashed=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter20b_tier_cost", svg)
+
+
+def build_chapter_20b() -> Path:
+    title = "Structured Output Reliability with fix_llm_output.py"
+    doc = configure_document(title)
+    add_cover(doc, "20B", title, "PART IV — FROM RAG TO AGENTIC RAG", "A model that fails to produce valid JSON has not failed to reason — it has failed to format, and formatting can be fixed downstream of thought.")
+    add_chapter_heading(doc, "20B", title)
+    add_body(doc, "Chapter 20B.11's judge, Chapter 12's redundancy scanner, Chapter 14's structured-output hierarchy — every structured LLM call in this book eventually produces text a Python program needs to parse as JSON, and every one of them sometimes fails to. `fix_llm_output.py` is the single module that stands between a raw, possibly malformed LLM response and the validated Python object the rest of the pipeline actually consumes.")
+    add_body(doc, "This chapter is a full accounting of that module: the forty distinct ways a real LLM has been observed to fail at emitting JSON, the five-stage pipeline that recovers from as many of them as possible without ever inventing data, the Pydantic schemas that give each of ten different call sites its own validated shape, and the test harness that turns \"seems to work\" into three hundred and two checked cases.")
+    add_body(doc, "By the end of this chapter you will be able to build a layered repair pipeline that tries cheap, deterministic fixes before expensive LLM-assisted ones, write Pydantic schemas that coerce rather than reject malformed-but-recoverable values, and recognize the difference between a parameter that changes behavior and one that merely looks like it does.")
+
+    add_heading(doc, "20B.1 The forty failure modes")
+    add_callout(doc, "Definition", "Structured-output failure mode", "A specific, reproducible way a language model's response fails to satisfy \"valid JSON matching the expected schema,\" distinct enough from other failure modes to require its own detection and, where possible, its own recovery path.")
+    add_body(doc, "Forty distinct failure modes were catalogued through literature review, community bug reports, and direct observation of this project's own LLM calls — and they group cleanly into six families, which is what makes a layered repair pipeline tractable instead of an ever-growing pile of special cases.")
+    add_table(doc, ["Family", "Examples"], [
+        ["Syntax failures", "Broken JSON, truncation, trailing commas, single quotes, unquoted keys"],
+        ["Structural failures", "Wrong top-level type, list-wrapped dict, partial schema hallucination"],
+        ["Wrapper failures", "Markdown fences, code blocks, `submit_answer({...})`-style calls, blockquotes"],
+        ["Language failures", "Python `True`/`None`, JS comments, YAML, XML, class/attribute syntax"],
+        ["Semantic failures", "Hallucinated placeholders, refusals, multiple candidate answers, infinite repetition"],
+        ["Encoding failures", "Unicode corruption, stray control characters"],
+    ], [1.65, 4.35])
+    add_body(doc, "No single technique closes all six families — a regex fixes a wrapper, not a hallucinated placeholder; a tolerant parser recovers truncated syntax, not a refusal message wearing JSON's clothing. That mismatch, not any one clever trick, is the actual argument for Section 20B.2's layered design.")
+
+    add_heading(doc, "20B.2 The layered repair pipeline")
+    add_body(doc, "Every call to `fix_llm_output` walks the same five stages shown in Figure 20B.1, in the same order, each one cheaper and more trustworthy than the one after it, escalating only when the current stage actually fails rather than running every stage regardless.")
+    add_figure(doc, diagram_repair_pipeline_20b(), "Figure 20B.1 — Cheap, deterministic recovery is attempted first; an LLM is only asked when it has to be.")
+    add_code(doc, '''def fix_llm_output(expected_output, raw_response, correct=False, llm=None, config=None):
+    model, top_level = _resolve_expected(expected_output)
+    obj = _parse_to_python(raw_response)          # preprocess -> tiered parse
+    for _ in range(_JSON_REPAIR_TRIES):
+        if obj is not None:
+            break
+        obj = _LLM_Json_Repair(raw_response, model, top_level, config=config)
+    if obj is None:
+        return _empty(top_level), False
+    obj = _coerce_top_level(obj, top_level)
+    validated = _validate_with_pydantic(obj, model, top_level)
+    if validated is None:
+        return _empty(top_level), False
+    return _Verify_And_Correct(validated, raw_response, config=config), True''')
+    add_body(doc, "The ordering is the design: a tolerant parser is tried before an LLM call because it is thousands of times cheaper when it works, and it works often enough — Section 20B.11's own measurements show most real responses never reach the LLM-repair tier at all.")
+
+    add_heading(doc, "20B.3 Preprocessing")
+    add_body(doc, "Six cheap, lossless text transforms run before any parse attempt, each one closing off exactly one wrapper failure from Section 20B.1's catalogue: strip code fences, strip markdown blockquotes, unwrap a function-call-style wrapper, strip JSON comments, convert Python literals to JSON ones, and cut a \"thinking\" preamble that precedes the actual JSON.")
+    add_code(doc, '''def _fix_python_literals(s: str) -> str:
+    """Replace True/False/None with true/false/null — but only outside strings,
+    walked character by character so 'a True story' is never corrupted."""
+    out, i, in_str, str_char = [], 0, False, ""
+    while i < len(s):
+        ch = s[i]
+        if in_str:
+            out.append(ch)
+            if ch == str_char:
+                in_str = False
+            i += 1
+            continue
+        if ch in ('"', "'"):
+            in_str, str_char = True, ch
+            out.append(ch); i += 1; continue
+        for py, js in (("True", "true"), ("False", "false"), ("None", "null")):
+            if s.startswith(py, i):
+                out.append(js); i += len(py); break
+        else:
+            out.append(ch); i += 1
+    return "".join(out)''')
+    add_callout(doc, "Common pitfall", "A naive regex replacing Python literals anywhere it finds them", "A regex substitution for `True` → `true` with no awareness of string boundaries will happily corrupt a legitimate string value like `\"a True story\"` into `\"a true story\"` — a silent, low-visibility data change rather than a parse failure, which is worse: parse failures get noticed. `_fix_python_literals` walks the text one character at a time, tracking whether it is currently inside a quoted string, and only replaces a literal when it is not — the same string-aware scanning discipline Section 20B.4 uses for a harder version of the identical problem.")
+
+    add_heading(doc, "20B.4 Balanced top-level JSON extraction")
+    add_callout(doc, "Definition", "Balanced extraction", "Locating the first top-level `{` or `[` in a text and finding its true matching closing bracket by depth-counting, rather than by pattern-matching to the last `}` or `]` in the string — the only way to correctly isolate a JSON object from surrounding prose that may itself contain brackets.")
+    add_body(doc, "A greedy regex like `\\{.*\\}` fails the moment a model appends even one sentence of trailing prose after the JSON, because `.*` happily swallows past the true closing brace looking for a later one. `_extract_balanced_json` instead counts nesting depth character by character, and — critically — suspends counting entirely while walking through a quoted string, so a stray `{` or `}` typed inside a string value never miscounts the real structure's depth.")
+    add_code(doc, '''def _extract_balanced_json(text: str) -> str | None:
+    start, open_ch = next(((i, c) for i, c in enumerate(text) if c in "{["), (-1, ""))
+    if start == -1:
+        return None
+    close_ch = "}" if open_ch == "{" else "]"
+    depth, in_str, str_char, i = 0, False, "", start
+    while i < len(text):
+        ch = text[i]
+        if in_str:
+            if ch == str_char:
+                in_str = False
+        elif ch in ('"', "'"):
+            in_str, str_char = True, ch
+        elif ch == open_ch:
+            depth += 1
+        elif ch == close_ch:
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+        i += 1
+    return None  # never balanced — let the repair layer handle truncation''')
+    add_body(doc, "Returning `None` on an unbalanced structure is itself a deliberate choice, not an oversight — a truncated response has no true closing bracket to find, and inventing one here would mean silently guessing at how the response was supposed to end. That guess belongs to `json_repair` (Section 20B.5), a tool built specifically for tolerant reconstruction, not to a function whose entire job is precise, honest boundary detection.")
+
+    add_heading(doc, "20B.5 json_repair as the tolerant fallback")
+    add_body(doc, "Where balanced extraction is precise and refuses to guess, `json_repair` is the opposite by design — a permissive parser that reconstructs plausible JSON from truncated, malformed, or loosely-structured text, invoked only after the precise tiers have already failed.")
+    add_code(doc, '''def _try_repair(s: str) -> Any | None:
+    try:
+        result = repair_json(s, return_objects=True)
+        return None if result in ("", None) else result
+    except Exception:
+        return None''')
+    add_body(doc, "Trust it for what it is good at — truncation, unbalanced brackets, stray prose between JSON candidates — and distrust it for exactly the failure mode Chapter 20.11 already named: a permissive tool asked to reconstruct structure from text that never contained real data will reconstruct *something*, and something plausible-looking is more dangerous than an honest parse failure, because it does not look like a failure to whatever consumes it next. `json_repair` is a recovery tool for damaged JSON, not a substitute for data that was never there — Section 20B.8's empty-fallback principle is what keeps that distinction from collapsing.")
+
+    add_heading(doc, "20B.6 Project-specific Pydantic schemas")
+    add_body(doc, "Ten schemas cover every structured call site in the pipeline, registered by a short string tag so a caller never has to import a Pydantic class directly — just name what it expects and hand over the raw text.")
+    add_table(doc, ["Tag", "Shape", "Used by"], [
+        ["`merge`", "dict", "Chunk-merge output (Chapter 22B's NAC stage)"],
+        ["`dc_scan`", "list", "Redundancy-group proposals"],
+        ["`redundancy_judge`", "list", "Per-group CONFIRMED / REJECTED verdicts"],
+        ["`retrieval_judge`", "dict", "Per-chunk relevance verdicts (Chapter 12)"],
+        ["`merge_judge`", "dict", "Faithfulness verdict on a merge"],
+        ["`lbc_compress`", "dict", "Query-focused chunk compression output"],
+        ["`lbc_judge`", "dict", "Compression-safety verdict"],
+        ["`grounding_judge`", "dict", "The multi-verdict answer judge (Chapter 20.7)"],
+        ["`distill_qa`", "list", "Self-learning distillation Q&A pairs"],
+        ["`query_variants`", "list", "Reformulated query strings"],
+    ], [1.75, 0.85, 3.40])
+    add_body(doc, "Every schema does more than reject bad shapes — its field validators actively coerce recoverable ones. `MergeSchema.merged_from` accepts an integer, a numeric string, or `None`, and normalizes all three to a real `int` rather than rejecting anything that isn't already exactly the right type:")
+    add_code(doc, '''class MergeSchema(_BaseStrict):
+    content: str
+    sources: list[str] = Field(default_factory=list)
+    merged_from: int = 0
+
+    @field_validator("merged_from", mode="before")
+    @classmethod
+    def _coerce_merged_from(cls, v):
+        if v is None or v == "":
+            return 0
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0''')
+    add_body(doc, "A schema this permissive at the field level and this strict at the shape level is the balance the whole module is built around: never reject a value that could obviously be coerced, never accept a shape that plainly does not match.")
+
+    add_heading(doc, "20B.7 The correct parameter — a signature that outgrew its own behavior")
+    add_body(doc, "`fix_llm_output`'s signature carries a `correct: bool = False` parameter, and its name and default suggest exactly the strict-versus-aggressive-recovery split you would expect: `False` for validation only, `True` to additionally opt into the value-verification pass. Reading the function body tells a different story — `_Verify_And_Correct` runs unconditionally, every time, regardless of what `correct` is set to. The parameter is accepted and never once referenced again.")
+    add_callout(doc, "Common pitfall", "A parameter that looks load-bearing and isn't", "This is Chapter 19B.13's dead-parameter pattern again, in a different file: a signature that documents an intention — `correct` implies a choice exists — that the implementation quietly stopped honoring at some point in the module's evolution, almost certainly when value-verification changed from optional to standard behavior without anyone removing the now-meaningless flag. Every call site in the codebase still passes some value for `correct`, and every one of those values is silently ignored. Before assuming a boolean flag changes behavior, grep for where it's actually read, not just where it's declared — a parameter's name is a claim, not a guarantee.")
+    add_body(doc, "The honest fix mirrors ADR-055's from Chapter 19B exactly: either remove the parameter and let every call site reflect what actually happens, or make it real again by gating `_Verify_And_Correct` behind it. Leaving it as-is costs nothing at runtime and costs a reader real confusion the first time they trust the signature over the implementation.")
+
+    add_heading(doc, "20B.8 The empty-fallback principle")
+    add_callout(doc, "Definition", "Empty-fallback principle", "On any unrecoverable failure — parsing, coercion, or schema validation — return the schema's empty container (`{}` for a dict-shaped schema, `[]` for a list-shaped one) rather than raising an exception or returning partially-invented data.")
+    add_body(doc, "Every hard-failure exit in `fix_llm_output` returns the same shape of thing: `_empty(top_level), False` — an empty container paired with an explicit boolean signaling failure, never a crash and never a guess.")
+    add_code(doc, '''def _empty(top_level: str) -> Union[dict, list]:
+    return {} if top_level == "dict" else []''')
+    add_body(doc, "The choice not to raise is deliberate: a validator that raises turns every malformed judge response into a pipeline-halting exception, when the correct response to \"the judge failed to produce a verdict\" is usually \"treat this as no verdict and move on\" — exactly the `UNKNOWN`-defaults-closed behavior Chapter 20.7 built into the grounding judge. An empty list is also, separately, a legitimate real answer — \"no redundancy groups found\" is a correct, non-error result that happens to look identical to a parse failure's fallback shape, which is precisely why the function returns a success boolean alongside the value instead of overloading emptiness itself as the failure signal.")
+
+    add_heading(doc, "20B.9 The Outlines framework")
+    add_callout(doc, "Definition", "Constrained decoding", "Restricting a model's token generation at each step to only the tokens that keep its output consistent with a target grammar or schema, implemented via masking the model's own logits — a guarantee available only when the caller controls the actual inference loop.")
+    add_body(doc, "Outlines was evaluated specifically for guaranteeing schema-valid JSON and rejected for the same structural reason both times it came up: its finite-state-machine token masking requires direct access to the model's logits during generation, which only exists for a locally-hosted model. Point it at a remote OpenAI-compatible API — Groq included — and `outlines.from_openai()` cannot mask anything; it silently falls back to sending the same `response_format: json_schema` parameter a caller could set directly, with an added dependency and, for complex schemas, a schema-compilation cost measured in minutes rather than milliseconds.")
+    add_body(doc, "The rejection was not a verdict on Outlines' technique — constrained decoding is real and effective where it can actually run. It was a verdict on this project's deployment shape: a remote, API-based inference provider that no dependency can retrofit local guarantees onto. Local model hosting with Outlines and vLLM was named explicitly as the path that would make the library's real capability available, and explicitly deferred rather than pursued.")
+
+    add_heading(doc, "20B.10 Why response_format: json_schema only works on certain models")
+    add_body(doc, "Native `json_schema` mode is the actual server-side enforcement Section 20B.9 concluded was the correct approach for remote inference — but \"available\" and \"available on the model you are currently using\" are different claims, verified separately. On Groq specifically, `llama-3.3-70b-versatile` supports it; `llama-3.1-8b-instant`, the development-tier model Chapter 13.3 chose for iteration speed, does not.")
+    add_code(doc, '''response = llm.invoke(
+    messages,
+    response_format={
+        "type": "json_schema",
+        "json_schema": {"schema": MergeSchema.model_json_schema(), "strict": True},
+    },
+)''')
+    add_callout(doc, "Common pitfall", "Assuming a provider capability transfers across every model it hosts", "A structured-output mode, a tool-calling feature, a context-window size — none of these are provider-wide guarantees; they are per-model capabilities a provider happens to host several of. Code written and tested against `llama-3.3-70b-versatile`'s `json_schema` support will fail, not degrade, the moment a config change or a cost-driven model swap points the same call at `llama-3.1-8b-instant`. Verify structured-output support per model, the same way Chapter 13B.14's Hugging Face router investigation verified model availability per router rather than assuming Hub presence implied it.")
+
+    add_heading(doc, "20B.11 Test harness")
+    add_body(doc, "`test_output_fixes.py` runs 302 malformed-input cases across the eight schemas most exercised in production, each case tagged with an identifier that names its failure family at a glance — `PC04-mj` (a Python-class-syntax case against the merge-judge schema), `C18-dc` (an outright refusal message against the DC-scan schema) — so a failing case points straight at both the input shape and the schema it broke against.")
+    add_body(doc, "Running the suite with per-case timing turns the pipeline's own tiered design into a visible, measured fact rather than an assumption, as Figure 20B.2 shows directly.")
+    add_figure(doc, diagram_tier_cost_20b(), "Figure 20B.2 — Elapsed time per case makes the pipeline's own escalation order directly observable.")
+    add_body(doc, "That measured cost gradient is what proved the layered design earns its complexity: deterministic parsing resolves the large majority of real cases in under half a millisecond, and only a minority ever pay the LLM-repair tier's cost at all. The same suite is also what surfaced Chapter 20.11's fabrication bug in the first place — every Python-class-syntax case returning `{}` instead of escalating, every bare-refusal case producing a populated object instead of signaling absence, found because the harness ran all forty catalogued failure modes against real schemas and logged exactly where each one landed, not because anyone suspected those specific cases in advance.")
+    add_body(doc, "A test harness built from a failure-mode catalogue rather than from whatever inputs happened to be on hand is the difference between \"this passed the tests I thought to write\" and \"this was checked against every failure this project has ever actually seen.\" The second claim is the only one worth making about a repair pipeline whose entire job is surviving inputs nobody could fully anticipate.")
+
+    add_body(doc, "`fix_llm_output.py` closes the loop this Part opened: Chapter 18 built an agent that could act, Chapter 19 and 19B gave it a graph to act within, Chapter 20 gave it a judge to check what it produced, and this chapter gave every structured call in between a way to survive its own model's imperfect grip on syntax. None of it makes the underlying model more reliable — it makes the system around an unreliable model reliable instead, which is the only kind of reliability a project that does not control model weights ever actually gets to build. Part V turns from correctness to memory: how a system that already retrieves, generates, and judges well begins to learn from its own validated interactions over time.")
+
+    path = OUT_DIR / "Chapter_20B_Structured_Output_Reliability.docx"
+    doc.core_properties.title = f"Chapter 20B — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
 BUILDERS = {
     11: build_chapter_11,
+    18: build_chapter_18,
+    20: build_chapter_20,
+    "20B": build_chapter_20b,
+    19: build_chapter_19,
+    "19B": build_chapter_19b,
     12: build_chapter_12,
     13: build_chapter_13,
     "13B": build_chapter_13b,

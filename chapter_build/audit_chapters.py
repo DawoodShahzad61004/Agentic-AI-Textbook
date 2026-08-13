@@ -12,6 +12,21 @@ from docx import Document
 
 
 FILES = {
+    "41B": ROOT / "Chapters Created So Far" / "Chapter_41B_Productionizing_Document_Conversion.docx",
+    41: ROOT / "Chapters Created So Far" / "Chapter_41_Deployment.docx",
+    39: ROOT / "Chapters Created So Far" / "Chapter_39_Performance_and_Cost_Optimization.docx",
+    38: ROOT / "Chapters Created So Far" / "Chapter_38_Observability_Platforms_and_Debugging.docx",
+    37: ROOT / "Chapters Created So Far" / "Chapter_37_Evaluation_Frameworks_for_RAG.docx",
+    "36C": ROOT / "Chapters Created So Far" / "Chapter_36C_Evidence_Based_Retrieval_Tuning.docx",
+    "36B": ROOT / "Chapters Created So Far" / "Chapter_36B_Feature_Flag_Driven_Development.docx",
+    36: ROOT / "Chapters Created So Far" / "Chapter_36_Evaluating_Self_Learning.docx",
+    35: ROOT / "Chapters Created So Far" / "Chapter_35_CLI_Commands_For_Learning.docx",
+    34: ROOT / "Chapters Created So Far" / "Chapter_34_Chunk_Deduplication_Merging.docx",
+    33: ROOT / "Chapters Created So Far" / "Chapter_33_Hybrid_Retrieval.docx",
+    32: ROOT / "Chapters Created So Far" / "Chapter_32_Distillation_Engine.docx",
+    31: ROOT / "Chapters Created So Far" / "Chapter_31_User_Thumbdowns.docx",
+    30: ROOT / "Chapters Created So Far" / "Chapter_30_Failed_Query_Variants.docx",
+    29: ROOT / "Chapters Created So Far" / "Chapter_29_Capturing_Interactions_Feedback_Store.docx",
     27: ROOT / "Chapters Created So Far" / "Chapter_27_Agent_State_Engineering.docx",
     26: ROOT / "Chapters Created So Far" / "Chapter_26_Prompt_Engineering_Small_Models.docx",
     25: ROOT / "Chapters Created So Far" / "Chapter_25_Small_Models_Agentic_Loops.docx",
@@ -41,6 +56,21 @@ FILES = {
 }
 
 EXPECTED = {
+    "41B": [f"41B.{i}" for i in range(1, 12)],
+    41: [f"41.{i}" for i in range(1, 17)],
+    39: [f"39.{i}" for i in range(1, 14)],
+    38: [f"38.{i}" for i in range(1, 24)],
+    37: [f"37.{i}" for i in range(1, 6)],
+    "36C": [f"36C.{i}" for i in range(1, 7)],
+    "36B": [f"36B.{i}" for i in range(1, 10)],
+    36: [f"36.{i}" for i in range(1, 9)],
+    35: [f"35.{i}" for i in range(1, 6)],
+    34: [f"34.{i}" for i in range(1, 9)],
+    33: [f"33.{i}" for i in range(1, 10)],
+    32: [f"32.{i}" for i in range(1, 8)],
+    31: [f"31.{i}" for i in range(1, 11)],
+    30: [f"30.{i}" for i in range(1, 7)],
+    29: [f"29.{i}" for i in range(1, 6)],
     27: [f"27.{i}" for i in range(1, 7)],
     26: [f"26.{i}" for i in range(1, 10)],
     25: [f"25.{i}" for i in range(1, 8)],

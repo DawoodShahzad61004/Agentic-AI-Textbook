@@ -5547,7 +5547,1756 @@ all_tried_queries.add(q_normalized)''')
     return path
 
 
+def diagram_interaction_record_29() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560">'
+        '<rect width="1200" height="560" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Anatomy of one interactions.jsonl record"], size=22, bold_first=True)
+        + svg_labeled_box(60, 90, 520, 100, "Identity", ["ts, request_id", "query"], fill="#F2F2F2")
+        + svg_labeled_box(620, 90, 520, 100, "Outcome", ["answer, quality", "(OK / INSUFFICIENT / USER_THUMBSDOWN)"], fill="#F2F2F2")
+        + svg_labeled_box(60, 220, 520, 100, "Evidence", ["sources, document_chunks", "learned_qa_chunks (truncated previews)"], fill="#D9D9D9")
+        + svg_labeled_box(620, 220, 520, 100, "Trajectory", ["variants — every query tried,", "not only the one that succeeded"], fill="#D9D9D9")
+        + svg_arrow(600, 340, 600, 366)
+        + svg_labeled_box(160, 368, 880, 110, "One append-only line — the ledger every later Part VI chapter reads from", ["failure blocklists, thumbdown lookups, and distillation all start here"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter29_interaction_record", svg)
+
+
+def diagram_implicit_explicit_29() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Two feedback paths, one ledger"], size=22, bold_first=True)
+        + svg_labeled_box(80, 100, 460, 130, "Implicit — the JUDGE phase", ["check_answer_quality() runs on", "every turn, no user action needed"], fill="#F2F2F2")
+        + svg_labeled_box(660, 100, 460, 130, "Explicit — the user's own signal", ["\"bad\" command + typed feedback", "only when the user bothers to flag it"], fill="#D9D9D9")
+        + svg_arrow(310, 230, 310, 270)
+        + svg_arrow(890, 230, 890, 270)
+        + svg_labeled_box(160, 272, 880, 130, "feedback_store.log() / mark_last_bad()", ["quality: \"OK\" | \"INSUFFICIENT\" | \"USER_THUMBSDOWN\"", "same record shape, same ledger, different trigger"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter29_implicit_explicit", svg)
+
+
+def build_chapter_29() -> Path:
+    title = "Capturing Interactions: The Feedback Store"
+    doc = configure_document(title)
+    add_cover(doc, 29, title, "PART VI — THE SELF-LEARNING LAYER", "A system cannot learn from an interaction it never wrote down.")
+    add_chapter_heading(doc, 29, title)
+    add_body(doc, "Chapter 28 drew the line between agentic behavior and genuine cross-run learning, and closed by naming the artifact every subsequent Part VI mechanism depends on: a durable, queryable record of what happened on every prior turn. This chapter builds that record — the feedback store — in the form this project originally shipped it: `interactions.jsonl`, a single flat, append-only file, plus the `FeedbackStore` class that reads and writes it.")
+    add_body(doc, "This is a deliberate pedagogical choice worth stating up front. This project's feedback persistence layer was later migrated to MongoDB (ADR-046, covered in a later chapter) for concurrency and transactional reasons real production load exposed. But the flat-file design this chapter teaches is not a simplification invented for the book — it is the system's actual original architecture, and every downstream mechanism in Chapters 30 through 32 (blocklists, thumbdown lookups, distillation) was designed against exactly this file's shape before the storage engine underneath it ever changed.")
+    add_body(doc, "By the end of this chapter you will be able to design an interaction record schema that captures enough evidence to support failure blocking and success distillation, explain why JSONL specifically — not a single JSON array, not a database — was the right first choice for this project's ledger, distinguish implicit from explicit feedback signals and know why both need to reach the same store, and name the categories of information a feedback record must never retain.")
+
+    add_heading(doc, "29.1 What to log")
+    add_callout(doc, "Definition", "Interaction record", "A single durable entry capturing one query-answer exchange together with enough evidence — the retrieved chunks, the quality outcome, every query variant attempted — to support both failure-avoidance and success-distillation later, without needing to re-run the interaction.")
+    add_body(doc, "The question \"what to log\" is really the question \"what will a future mechanism need to read.\" Chapter 30's failure blocklist needs to know which query phrasings were tried and which of them retrieved nothing. Chapter 31's thumbdown lookup needs the user's own feedback text, the original query, and every chunk each variant surfaced. Chapter 32's distillation engine needs a verified answer and the source chunks that grounded it. A record designed without these three downstream consumers in mind ends up needing a second, incompatible log the moment any of them is built — which is exactly the trap a single, sufficiently rich schema from day one avoids.")
+    add_body(doc, "The record this project settled on carries: a timestamp and request ID (identity), the query and answer text (content), a quality verdict of `OK`, `INSUFFICIENT`, or `USER_THUMBSDOWN` (outcome), the sources and retrieved chunks from both the document and learned-QA tracks (evidence), and the full list of query variants attempted during that run, not merely the one that ultimately succeeded (trajectory). Figure 29.1 lays out this anatomy directly.")
+    add_body(doc, "The trajectory field deserves particular emphasis because it is the easiest to omit and the most valuable once Chapter 30 is built. A naive design logs only the final, successful query and its answer — after all, that pairing is what the user actually saw. But Chapter 30's entire blocklist mechanism depends on knowing about the queries that were tried and discarded along the way, not just the one that eventually worked. If those failed intermediate variants are never written down, the agent has no way to remember, on a future run, that a particular phrasing already led nowhere — it would have to rediscover that failure from scratch every single time the topic came up.")
+
+    add_heading(doc, "29.1B Sizing the record without bloating the ledger")
+    add_body(doc, "A record rich enough to support three downstream consumers is not the same as a record that stores everything unboundedly. Full chunk content, repeated across every interaction that happened to retrieve it, would make the ledger grow far faster than the information it actually needs to preserve — the vector store already holds the authoritative full text, keyed by the same source identifiers a truncated preview can carry. This project's own chunk-storage helper caps stored previews to the first three chunks per track and truncates each to its `content` and `source` fields only, discarding embeddings, raw scores, and metadata the ledger does not need to fulfill its actual job.")
+    add_figure(doc, diagram_interaction_record_29(), "Figure 29.1 — Four field groups, one append-only record: identity, outcome, evidence, and trajectory.")
+
+    add_heading(doc, "29.2 JSONL as a lightweight ledger")
+    add_body(doc, "JSON Lines — one complete, independent JSON object per line, rather than one JSON array wrapping every record — is a deliberately boring format choice, and the reasons it wins over the alternatives are entirely operational rather than aesthetic. A single JSON array requires reading, parsing, appending to, and re-serializing the *entire* file for every single write; at ten interactions that cost is invisible, at ten thousand it is a real bottleneck for what should be a cheap append. A JSONL file, by contrast, supports a true `open(path, \"a\")` append — write one line, flush, done — with no need to touch anything already on disk.")
+    add_code(doc, '''import json
+from datetime import datetime, timezone
+
+def log_interaction(path, query, answer, quality, sources, chunks, variants):
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "query": query,
+        "answer": answer,
+        "quality": quality,          # "OK" | "INSUFFICIENT" | "USER_THUMBSDOWN"
+        "sources": sources,
+        "chunks": chunks,
+        "variants": variants,
+    }
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\\n")''')
+    add_body(doc, "The append-only property has a second, quieter benefit this project's own bug history surfaced only after the later MongoDB migration: a flat JSONL file simply cannot raise a duplicate-key error on a retried write, because it has no concept of a unique key to violate — each append is just another line. The MongoDB successor gained a `request_id` uniqueness constraint specifically for data integrity, and then had to handle the exact `DuplicateKeyError` case a node retry could trigger — a failure mode the original flat file was structurally incapable of producing in the first place, though at the cost of the file format not being able to detect or prevent a true duplicate either.")
+    add_callout(doc, "Common pitfall", "Reaching for a database before you need one", "A JSONL file readable with a single `grep` or `pandas.read_json(lines=True)` call is easier to inspect, diff, and reason about during early development than a database schema migration. Reach for a real datastore when concurrency, transactions, or query patterns actually demand it — not preemptively, on the assumption that a file will not scale.")
+
+    add_heading(doc, "29.3 Implicit vs. explicit feedback")
+    add_body(doc, "Every interaction produces feedback whether or not the user ever types a word about it. The JUDGE phase's `check_answer_quality()` call (Chapter 16.3) runs on every single turn, producing an `OK` or `INSUFFICIENT` verdict entirely automatically — this is implicit feedback, generated by the system's own quality gate, present for 100% of interactions regardless of user engagement. Explicit feedback — a user actually invoking the `bad` command and typing what was wrong — is a strictly rarer, richer signal: it requires the user to notice a problem, care enough to act on it, and articulate what was wrong in their own words.")
+    add_body(doc, "Figure 29.2 lays these two paths side by side specifically to make their asymmetry visible: implicit feedback is high-volume and low-detail (a single word, `OK` or `INSUFFICIENT`), while explicit feedback is low-volume and high-detail (a full sentence describing exactly what the user expected instead). A system that only captured one of the two would be missing either the statistical coverage the first provides or the diagnostic depth the second provides — Chapter 32's distillation loop leans almost entirely on the first, while Chapter 31's thumbdown mechanism exists entirely because of the second.")
+    add_figure(doc, diagram_implicit_explicit_29(), "Figure 29.2 — Implicit feedback covers every turn automatically; explicit feedback is rarer but carries the user's own diagnosis of what went wrong.")
+    add_body(doc, "Both signals write to the identical record shape and the identical ledger — `quality` simply takes a different value (`OK`/`INSUFFICIENT` from the judge, `USER_THUMBSDOWN` from the user) — which is precisely why Section 29.1's schema treats them as one unified concept rather than two separate logs. A distillation pipeline reading only `OK`-quality records (Chapter 32.1) does not need to know or care whether that verdict came from an automatic judge call; it only needs the guarantee that every `OK` record actually earned that label.")
+
+    add_heading(doc, "29.4 Building FeedbackStore")
+    add_body(doc, "The `FeedbackStore` class wraps the raw file operations behind a small, stable interface: `log()` to append a new interaction, `load_all()` and `load_good()` to read records back (the latter filtered to `quality == \"OK\"`, exactly what Chapter 32's distillation loop needs), `count()` and `count_good()` for the running totals Chapter 35's `stats` command surfaces, and `mark_last_bad()` to retroactively flip the most recent record's quality when a thumbdown arrives after the fact.")
+    add_code(doc, '''class FeedbackStore:
+    def __init__(self, path="data/feedback/interactions.jsonl"):
+        self.path = path
+
+    def log(self, query, answer, quality, sources, chunks, variants):
+        ...  # append one JSONL line, as in Section 29.2
+
+    def load_all(self) -> list[dict]:
+        with open(self.path, encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def load_good(self, limit=None) -> list[dict]:
+        good = [r for r in self.load_all() if r["quality"] == "OK"]
+        return good[-limit:] if limit else good
+
+    def count(self) -> int:
+        return len(self.load_all())
+
+    def count_good(self) -> int:
+        return sum(1 for r in self.load_all() if r["quality"] == "OK")''')
+    add_body(doc, "This illustrative version re-reads the whole file on every call, which is the honest trade-off a flat-file store makes: simplicity and zero external dependencies, at the cost of O(n) reads that eventually motivate exactly the kind of indexed, queryable backend ADR-046 later introduced. `mark_last_bad()` is the one operation that complicates this simplicity most directly — it needs to find and rewrite one specific already-written line, which a pure-append format cannot do without reading and rewriting the entire file, foreshadowing the two-step-write consistency problem Chapter 31 and the later MongoDB migration both had to solve more carefully.")
+    add_body(doc, "It is worth being explicit about why `load_good(limit=N)` matters as its own method rather than a slice applied by the caller. Chapter 32's distillation loop wants only the most recent N good interactions, not an arbitrary N — otherwise repeated distillation passes would keep re-processing the same oldest records forever while newer successes sat unlearned. Encoding \"most recent good interactions\" as the store's own responsibility, rather than trusting every caller to slice the list correctly, is the same single-source-of-truth discipline Chapter 27.6 argued for applied to a persistence layer instead of an in-memory counter.")
+
+    add_heading(doc, "29.5 Privacy, PII, and what NOT to log")
+    add_body(doc, "A feedback store is, by design, a durable, growing record of exactly what users asked and exactly what the system told them — which makes it a natural place for personally identifying or sensitive information to accumulate quietly, entry by entry, unless the logging code actively guards against it. This project's own chunk-storage helper caps what gets persisted per chunk to content and source only, and truncates to a small preview length rather than storing full raw retrieval payloads — a deliberate minimization, not an oversight.")
+    add_bullets(doc, [
+        "Never log raw API keys, credentials, or authorization tokens, even if a user pastes one into a query by mistake — scan and redact before the write, not after.",
+        "Truncate stored chunk previews rather than persisting full source documents a second time inside every interaction record — the vector store is already the source of truth for full content.",
+        "Avoid logging free-text user feedback verbatim into any log stream with looser access controls than the feedback store itself; thumbdown text (Chapter 31) can contain more candid, sensitive detail than the original query.",
+        "Treat `request_id` as an opaque correlation handle, not a place to smuggle session or user-identifying metadata that would otherwise need its own access-control review.",
+        "Plan for deletion from the start — a flat-file ledger with no per-record deletion path makes a future \"forget this user's data\" request an all-or-nothing file rewrite rather than a targeted operation.",
+    ])
+    add_callout(doc, "Common pitfall", "Logging first, redacting later", "Once a sensitive string is written to an append-only file, every backup, every log-shipping pipeline, and every downstream consumer that already read it has a copy. Filtering at write time is the only point where a single missed field does not become a permanent, distributed liability.")
+
+    add_body(doc, "The chapters that follow this one all read from the ledger this chapter built. Chapter 30 asks what happens when the `variants` field records the same failing query phrasing turn after turn, and builds the blocklist that stops the agent from repeating it. Chapter 31 goes deeper into the `USER_THUMBSDOWN` records specifically — not just that a thumbdown happened, but what a system should actually do with the richer, harder-to-use signal a user's own written feedback provides.")
+    add_body(doc, "One more property of this design is worth naming before moving on: nothing about the schema in Section 29.1 is specific to the flat-file backend that stores it. Every field — timestamp, query, answer, quality, evidence, variants — maps directly onto a MongoDB document's fields, which is precisely why ADR-046's later migration could describe itself as replacing the storage engine rather than redesigning the record. A schema designed around what downstream consumers actually need, independent of how it happens to be persisted, is what makes that kind of infrastructure swap a contained, mechanical change instead of a ledger-wide rewrite.")
+    add_body(doc, "This separation of concerns — record shape as one decision, storage backend as an entirely separate one — is worth treating as a general design principle for any system expected to evolve past its first deployment. A project's very first feedback store rarely needs to survive concurrent writers or support transactional two-step updates; a JSONL file is honestly sufficient for that stage, and building anything heavier before the load justifies it is effort spent on a problem that does not yet exist. What does matter from day one is getting the record's *content* right, because a missing field is a data-loss problem no storage migration can retroactively fix — records written before a field existed simply never had it, no matter how sophisticated the database that later replaces the flat file becomes.")
+
+    path = OUT_DIR / "Chapter_29_Capturing_Interactions_Feedback_Store.docx"
+    doc.core_properties.title = f"Chapter 29 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_failed_variant_lifecycle_30() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560">'
+        '<rect width="1200" height="560" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["The failed-variant lifecycle, one session to the next"], size=22, bold_first=True)
+        + svg_labeled_box(40, 90, 340, 110, "retrieve_documents(query)", ["returns zero chunks", "for both tracks"], fill="#F2F2F2")
+        + svg_arrow(388, 145, 428, 145)
+        + svg_labeled_box(436, 90, 340, 110, "newly_failed.append(query)", ["recorded in this run's state"], fill="#D9D9D9")
+        + svg_arrow(784, 145, 824, 145)
+        + svg_labeled_box(832, 90, 330, 110, "save_failed_variants()", ["written to failed_variants.json", "at end of run"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 200, 600, 236)
+        + svg_labeled_box(200, 238, 800, 110, "load_failed_variants() — next session, or next query", ["normalized query → known-bad list, read back into blocked_variants"], fill="#F2F2F2")
+        + svg_arrow(600, 348, 600, 384)
+        + svg_labeled_box(200, 386, 800, 110, "Hard filter in _handle_retrieve_documents_call", ["the exact phrasing is rejected before it ever reaches the retriever again"], fill="#D9D9D9")
+        + "</svg>"
+    )
+    return svg_to_png("chapter30_failed_variant_lifecycle", svg)
+
+
+def diagram_soft_vs_hard_30() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Soft prompt injection vs. hard tool-layer filtering"], size=22, bold_first=True)
+        + svg_labeled_box(80, 100, 460, 160, "Soft: \"Never repeat a blocked query\"", ["stated in _ROLE_AND_RULES", "obeyed only if instruction-", "following happens to hold"], fill="#F2F2F2")
+        + svg_labeled_box(660, 100, 460, 160, "Hard: normalized-string check", ["against failed_variants.json", "before the retriever is called —", "no dependence on the model at all"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_centered_text(310, 300, ["can still be retried under", "Chapter 25's dilution"], size=15, gap=20, bold_first=True)
+        + svg_centered_text(890, 300, ["cannot be retried,", "regardless of model state"], size=15, gap=20, bold_first=True)
+        + "</svg>"
+    )
+    return svg_to_png("chapter30_soft_vs_hard", svg)
+
+
+def build_chapter_30() -> Path:
+    title = "Learning From Failure, Part 1: Failed Query Variants"
+    doc = configure_document(title)
+    add_cover(doc, 30, title, "PART VI — THE SELF-LEARNING LAYER", "The cheapest lesson a system can learn is which questions it already tried and already lost.")
+    add_chapter_heading(doc, 30, title)
+    add_body(doc, "Chapter 29 built the ledger; this chapter builds the first thing that actually reads from it across sessions. Every retrieval that returns zero chunks is a small, free lesson — the agent tried a specific phrasing and it did not work. Without persistence, that lesson evaporates the moment the process restarts, and the next user asking a related question watches the agent burn its retrieval budget rediscovering the identical dead end.")
+    add_body(doc, "This chapter builds `failed_variants.json` — a blocklist keyed by normalized query text — and traces the full loop: recording a failure during a run, persisting it at the end of the session, loading it back at the start of the next one, and enforcing it as a hard filter rather than a hopeful prompt instruction. Along the way, two real bugs from this project's own LangGraph port — a missing write-back and a broken file path — show exactly what happens when one half of that loop is implemented and the other is quietly forgotten.")
+    add_body(doc, "By the end of this chapter you will be able to design a blocklist keyed for reliable lookup rather than approximate matching, explain concretely why Chapter 27.4's hard-filter principle applies here with even more force than it did within a single session, and recognize the specific shape of bug this feature produces when only half of its read/write cycle gets ported to a new architecture.")
+
+    add_heading(doc, "30.1 The problem")
+    add_body(doc, "Chapter 23.4 already quantified the cost of a single retrieval call — roughly 1,250 tokens for a top-k=5 result. A query phrasing that reliably returns zero chunks costs exactly that much every time it is tried, for exactly zero benefit, and nothing about the agent's own reasoning prevents it from reaching for a phrasing it — or a *previous* invocation of the same agent — already exhausted. `_PROCESS_INSTRUCTIONS`'s within-session dedup (Chapter 27.4's `all_tried_queries` set) stops a single run from repeating itself, but a fresh process start has no memory of what the last run already learned.")
+    add_body(doc, "The practical failure mode is a query like \"What is the recommended dosage of risperidone for a 7-year-old child with autism and epilepsy?\" — genuinely outside this project's ASD-and-Adjustable-Speed-Drive corpus, and genuinely certain to retrieve nothing no matter how many times or how many different ways it gets asked. `run_batch.py`'s Batch 3 (\"zero_chunk_situations\") exists specifically to exercise this case. Without cross-session memory, every user who asks a variant of that same out-of-corpus question pays the full multi-reformulation retrieval cost the very first user already paid.")
+    add_body(doc, "The cost compounds in a way that is easy to underestimate from a single query's perspective. A knowledge base with a stable, unchanging scope will keep encountering the same handful of out-of-domain question categories indefinitely — medication dosing, brand-specific product comparisons, and regulatory codes were this project's own recurring zero-chunk categories, per Batch 3's design. Every user who independently stumbles into one of those categories re-pays the discovery cost from scratch unless something durable remembers that the knowledge base has already been asked, and has already failed to answer, a question shaped like this one.")
+
+    add_heading(doc, "30.2 The blocklist file")
+    add_body(doc, "`failed_variants.json` is keyed by *normalized* query text — lowercased and stripped of surrounding whitespace, the identical normalization `FeedbackStore._normalize_query()` applies to thumbdown lookups (Chapter 31.10) — mapping each normalized query to the list of prior failed answers or a simple count, depending on how much detail a given deployment wants to retain. Keying by normalized text rather than a semantic embedding is a deliberate simplicity choice: exact-match lookup on a string is O(1) with a plain dict, requires no model call, and catches the single most common repeat-failure case — the agent or a *different* user asking the literally identical question — without the false-positive risk fuzzy matching would introduce.")
+    add_code(doc, '''{
+  "what is the recommended dosage of risperidone for a 7-year-old child with autism and epilepsy?": {
+    "count": 3,
+    "last_seen": "2026-06-18T14:22:03Z"
+  },
+  "which specific brand of variable frequency drive is best for a 75 kw pump application?": {
+    "count": 1,
+    "last_seen": "2026-06-11T09:03:47Z"
+  }
+}''')
+    add_body(doc, "Section 30.10 (carried forward properly in Chapter 31.10) revisits the exact-vs-fuzzy trade-off this key design commits to: a query that fails as \"dosage of risperidone for autism\" and later gets asked as \"risperidone dose autism child\" will not match this blocklist at all, since the two strings normalize differently. This is a known, accepted limitation of exact keying, not an oversight — Chapter 31.10 explains why a fuzzy-matching upgrade is a real option but not a free one.")
+    add_body(doc, "Storing a count and a last-seen timestamp per entry, rather than a bare boolean \"has failed,\" is a small design choice with a real payoff: a query that has failed once might be an unlucky phrasing worth one more attempt with a different embedding model or a corpus update; a query that has failed a dozen times across a month is a far stronger signal that no reformulation is likely to help. Neither this chapter's minimal implementation nor the original project's shipped version acts on that distinction automatically, but the data is there to support exactly that kind of tiered policy — block immediately past some count threshold, but tolerate a first or second occurrence — without needing to change the record schema later.")
+
+    add_heading(doc, "30.3 Recording every failing reformulation")
+    add_body(doc, "A design that only records the query a user explicitly thumbs-down misses the majority of the actual signal. Within a single multi-iteration run, `_PROCESS_INSTRUCTIONS` has the agent try 2-3 semantically different phrasings before compression — if two of those three retrieve nothing and the third succeeds, only the user ever sees the successful answer, but all three phrasings are real evidence about what does and does not work for this topic. Recording only the user-flagged failure would discard the two silent failures that happened inside a session that technically \"succeeded.\"")
+    add_body(doc, "This project's own LangGraph port makes the accumulation mechanism explicit in a way the original imperative loop only implied: `retrieve.py` emits `newly_failed_variants: Annotated[list[str], operator.add]` into `GraphState` — the exact reducer-typed field pattern Chapter 19B.4 introduced for concurrent fan-out — so that every parallel `Send` branch (one per query variant, Chapter 22C.8) that retrieves zero chunks contributes its own entry to the accumulated list, regardless of which other branches succeeded in the same run.")
+    add_body(doc, "Figure 30.1 traces this record's full lifecycle end to end — not just the moment of failure, but everything that has to happen afterward for that single zero-chunk retrieval to actually change future behavior: accumulation during the run, persistence at the run's end, reloading at the start of a completely different process, and enforcement as a hard filter the next time the identical phrasing is attempted.")
+    add_figure(doc, diagram_failed_variant_lifecycle_30(), "Figure 30.1 — A failure recorded during one run is written at session end and enforced as a hard filter at the very next retrieval attempt, in any future session.")
+
+    add_heading(doc, "30.4 Soft prompt injection vs. hard tool-layer filtering")
+    add_body(doc, "The blocked-variant text injected into `_ROLE_AND_RULES` (Chapter 26.4) — \"These exact phrasings retrieved 0 useful chunks the last time this question was asked. Do NOT reuse them\" — is real and does measurably bias the model away from repeating a known-bad query. But Chapter 25.3's core lesson applies here without modification: a system prompt instruction is a bias on next-token probability, not a guarantee, and Chapter 24's dilution effects apply exactly as much to a cross-session blocklist injection as they did to the within-session `all_tried_queries` case Chapter 27.4 covered.")
+    add_body(doc, "The hard version is the identical pattern Chapter 27.4 already built for within-session dedup, now reading from `failed_variants.json` instead of an in-memory set: normalize the incoming query, check it against the loaded blocklist, and reject before the retriever is ever called, regardless of what the prompt said or whether the model's instruction-following held on this particular turn. Figure 30.2 makes the comparison explicit — the soft version can still fail under exactly the conditions Chapter 24-25 catalogued; the hard version cannot fail that way at all, because the model's cooperation was never a dependency in the first place.")
+    add_figure(doc, diagram_soft_vs_hard_30(), "Figure 30.2 — The soft instruction biases the model; the hard filter does not depend on the model cooperating at all.")
+
+    add_heading(doc, "30.5 Walkthrough: load/save helpers wired into run_agent")
+    add_body(doc, "The load side runs once, at the very start of a query, populating the `blocked` list that seeds `_build_system_prompt()`'s soft injection and — in a fully hard-filtered design — a lookup set the retrieval handler checks directly. The save side runs once, at the very end of `run_agent()`, folding `newly_failed` (Chapter 27's local accumulator, populated by exactly the same zero-chunk branch that already appends to `retrieved_sources`) into the persisted file.")
+    add_code(doc, '''def load_failed_variants(path) -> dict:
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+def save_failed_variants(path, blocklist: dict, newly_failed: list[str]) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    for query in newly_failed:
+        key = query.strip().lower()
+        entry = blocklist.setdefault(key, {"count": 0, "last_seen": ""})
+        entry["count"] += 1
+        entry["last_seen"] = now
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(blocklist, f, indent=2)''')
+    add_body(doc, "Wiring this into `run_agent()` is two lines: `blocked = load_failed_variants(path)` before the loop starts, seeding both the soft prompt injection and the hard-filter lookup set; `save_failed_variants(path, blocked, newly_failed)` after the loop ends, persisting whatever this run discovered. The load-then-save-back pattern (rather than a pure append) is what lets `count` and `last_seen` accumulate meaningfully across many sessions instead of each session only ever seeing its own additions.")
+
+    add_heading(doc, "30.6 Two real bugs in the port")
+    add_body(doc, "This project's own migration from `app/agent_query.py` to `app_workflow/`'s LangGraph implementation shipped exactly half of this chapter's loop at first. BUG-043 records it precisely: `user_input.py` read `failed_variants.json` on startup — the load side worked — but no node in the graph ever called the equivalent of `save_failed_variants()`. The blocklist worked *within* a session (variants were in state) but never grew *across* sessions, because the write half of the loop this section just walked through had simply never been ported.")
+    add_table(doc, ["Bug", "Symptom", "Root cause", "Fix"], [
+        ["BUG-043", "Blocklist never grows across process restarts", "Write-back node never ported from app/", "New newly_failed_variants reducer field + save call in generate_answer.py"],
+        ["BUG-047", "Failed variants written outside the project directory entirely", "One extra ../ in a CWD-relative path constant", "Rewrote path constants against a __file__-anchored project root"],
+    ], [1.15, 2.55, 2.15, 2.15])
+    add_body(doc, "BUG-047 is a different failure mode entirely, but one this chapter's walkthrough makes easy to appreciate: `FAILED_VARIANTS_PATH` was built as a CWD-relative string with one extra `../` relative to its sibling path constants, so writes silently landed a directory above the actual project root. The blocklist file this section's `save_failed_variants()` writes to is only useful if every process, launched from every possible working directory, resolves to the *same* file — a lesson Chapter 27.6's single-source-of-truth principle applies just as much to a file path as to an in-memory counter.")
+    add_body(doc, "What makes BUG-047 worth dwelling on is how quietly it fails. A missing write-back (BUG-043) produces an observable symptom fairly quickly — someone eventually notices the blocklist never grows. A path resolved one directory too high produces *no* error at all: `json.dump()` succeeds, the write completes, and the file that exists is simply not the file `load_failed_variants()` will look for next time. The bug is invisible until someone manually inspects the filesystem and finds the blocklist sitting one level above where every other `data/feedback/` file lives — exactly the class of failure `__file__`-anchored path resolution exists to make structurally impossible rather than merely rare.")
+    add_body(doc, "Both bugs share a root cause worth naming explicitly: a feature with a read half and a write half, ported or refactored without verifying both halves still agree on where their shared file lives and whether both halves actually exist. `services.py` already used the safer `_project_root`-derived resolution pattern for `VECTOR_STORE_PATH` at the time BUG-047 was found — the fix was not inventing a new technique, it was applying a pattern that already existed elsewhere in the same codebase consistently, rather than letting one config module drift onto CWD-relative construction while its neighbors had already moved past it.")
+
+    add_heading(doc, "30.7 Verifying it works")
+    add_body(doc, "Verifying this chapter's mechanism works end to end does not require anything exotic: run a known-zero-chunk query once, confirm `failed_variants.json` gained an entry, restart the process entirely, and ask the identical question again — the second run's debug log should show the hard filter rejecting the query before a single retrieval call is made, exactly the same `[DEDUP]`-style log line Chapter 27.4's within-session filter already produces, now firing on a query the *current* process never asked at all.")
+    add_body(doc, "A more thorough verification checks both halves of the loop independently, precisely because BUG-043 demonstrated that one half can silently stop working while the other keeps functioning. Confirm the write path by inspecting the file directly after a zero-chunk run — `count` should have incremented for the normalized query, and `last_seen` should reflect the current run's timestamp. Confirm the read path separately by deleting or renaming the file, restarting, and observing that a previously-blocked query is now attempted again — proving that the blocking behavior genuinely depends on the file's contents rather than some other, coincidentally-correct code path.")
+    add_body(doc, "This two-sided verification habit — checking that a persisted-state feature's write path actually wrote and its read path actually reads that same file, independently — is the general lesson this chapter's two bugs both teach. A feature that appears to work in a single continuous session can still be silently broken across the process boundary that matters most for a cross-session mechanism like this one, and the only way to catch that is to actually restart the process as part of the test, not merely trust that a feature working within one long-running session means it will still be there the next time the system starts cold.")
+    add_body(doc, "Chapter 31 turns to the second, richer failure signal this project's own feedback loop captures — not silence, but a user's own explanation of what went wrong.")
+
+    path = OUT_DIR / "Chapter_30_Failed_Query_Variants.docx"
+    doc.core_properties.title = f"Chapter 30 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_thumbdown_record_31() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560">'
+        '<rect width="1200" height="560" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Anatomy of one user_thumbdowns.json record"], size=22, bold_first=True)
+        + svg_labeled_box(60, 90, 520, 100, "Original query + bad answer", ["what was asked, what the", "system wrongly returned"], fill="#F2F2F2")
+        + svg_labeled_box(620, 90, 520, 100, "user_feedback", ["the user's own words —", "the richest field in the record"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_labeled_box(60, 220, 1080, 130, "variants[] — every reformulation tried in that run", ["each with its own document_chunks and learned_qa_chunks previews", "(captured pre-validation — BUG-033, still open)"], fill="#D9D9D9")
+        + svg_arrow(600, 350, 600, 386)
+        + svg_labeled_box(200, 388, 800, 110, "normalized_query — the lookup key", ["Section 31.5 reads this back on every future matching query"], fill="#F2F2F2")
+        + "</svg>"
+    )
+    return svg_to_png("chapter31_thumbdown_record", svg)
+
+
+def diagram_asd_disambiguation_31() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Worked example: the ASD disambiguation thumbdown"], size=22, bold_first=True)
+        + svg_labeled_box(60, 100, 340, 150, "Q1-Q6: autism answers", ["\"What is ASD...\" answered", "as Autism Spectrum Disorder", "every time, unchallenged"], fill="#F2F2F2")
+        + svg_arrow(408, 175, 448, 175)
+        + svg_labeled_box(456, 100, 340, 150, "Q7: thumbdown", ["\"I was actually asking about", "Adjustable Speed Drives,", "not autism.\""], fill="#D9D9D9")
+        + svg_arrow(804, 175, 844, 175)
+        + svg_labeled_box(852, 100, 300, 150, "Q8: same question again", ["USER-FLAGGED PRIOR FAILURE", "now answered as the", "industrial device"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter31_asd_disambiguation", svg)
+
+
+def build_chapter_31() -> Path:
+    title = "Learning From Failure, Part 2: User Thumbdowns"
+    doc = configure_document(title)
+    add_cover(doc, 31, title, "PART VI — THE SELF-LEARNING LAYER", "Silence tells a system a query failed. A user's own words tell it why.")
+    add_chapter_heading(doc, 31, title)
+    add_body(doc, "Chapter 30 built a blocklist from the cheapest possible failure signal: silence, a retrieval that returned nothing. This chapter builds the richer, rarer signal — a user who noticed a wrong answer, cared enough to say so, and explained in their own words what was wrong. That explanation is qualitatively different from a zero-chunk retrieval, and it demands a correspondingly richer record and a more careful injection strategy than Chapter 30's simple blocklist.")
+    add_body(doc, "This chapter walks through `user_thumbdowns.json` end to end: what a thumbdown actually captures, how the `bad` command gates that capture behind a minimum feedback length, how a prior thumbdown gets looked up and injected as a `USER-FLAGGED PRIOR FAILURE` block the next time a related query arrives, and a real worked example — this project's own ASD-disambiguation dry run — showing the mechanism catch and correct a genuinely wrong answer on the very next attempt.")
+    add_body(doc, "By the end of this chapter you will be able to design a thumbdown record that captures not just that an answer was wrong but the full trajectory that produced it, explain why exact-match normalized-query lookup is a deliberate trade-off rather than an oversight, and recognize the difference between feedback a retrieval system can act on and feedback it structurally cannot.")
+
+    add_heading(doc, "31.1 The richer signal")
+    add_body(doc, "A zero-chunk retrieval (Chapter 30) is an unambiguous failure — nothing came back, so nothing could have been used to answer the question. A thumbdown is a different, harder case: the answer was grounded in real, relevant-looking chunks, passed the JUDGE phase's automatic quality check, and was still wrong in a way only the user could recognize. `check_answer_quality()` verifies that an answer is *supported by* its retrieved evidence; it has no way to verify that the evidence itself was the *right* evidence for what the user actually meant.")
+    add_body(doc, "This is precisely the gap `run_batch.py`'s Batch 1 is designed to exercise: six consecutive questions about \"ASD\" answered correctly and confidently as Autism Spectrum Disorder — grounded, well-cited, judge-approved — until the seventh question reveals the user meant Adjustable Speed Drives the entire time. Every one of those six answers was internally consistent and evidence-backed. All six were still wrong, and no automatic quality gate built from the retrieved evidence alone could have caught it.")
+
+    add_heading(doc, "31.2 The bad command and MIN_FEEDBACK_LEN")
+    add_body(doc, "`cmd_bad()` is the entry point: it reads `user_feedback` from state, forwards it to `feedback_store.mark_last_bad(feedback=feedback, variants=variants)`, and reports back to the user based on what actually got persisted. The `MIN_FEEDBACK_LEN = 10` constant is the gate — feedback shorter than ten characters flips the last interaction's quality to `USER_THUMBSDOWN` but does *not* create a structured thumbdown record, because ten characters is not enough text to extract any usable signal from.")
+    add_code(doc, '''def cmd_bad(state: GraphState) -> dict:
+    feedback = (state.get("user_feedback") or "").strip()
+    variants = list(services.last_variants_with_chunks)
+    ok = feedback_store.mark_last_bad(feedback=feedback, variants=variants)
+    if not ok:
+        print("Nothing to flag yet.\\n")
+        return {}
+    if feedback and len(feedback) >= MIN_FEEDBACK_LEN:
+        print("Last answer flagged as bad and persisted to user_thumbdowns.json.\\n")
+    elif feedback:
+        print(f"Last answer flagged as bad. Feedback too short (<{MIN_FEEDBACK_LEN} chars) — not persisted.\\n")
+    else:
+        print("Last answer flagged as bad. No feedback provided.\\n")
+    return {}''')
+    add_body(doc, "This three-way branch is worth reading closely: a bare thumbdown with no feedback text still matters (it flips the interaction's quality, keeping it out of Chapter 32's distillation pool), but only feedback meeting the length floor earns the richer treatment this chapter is actually about. Ten characters is deliberately low — \"wrong topic\" is nine characters and would just miss it, while \"wrong answer\" clears it — the floor exists to reject accidental or reflexive thumbs-down, not to demand a full paragraph.")
+
+    add_heading(doc, "31.3 What to capture per thumbdown")
+    add_body(doc, "A thumbdown record captures substantially more than the feedback text alone: the original query, the answer judged bad, the user's feedback verbatim, and — critically — every query variant attempted during that run, each with the chunks it retrieved from both tracks. `_append_thumbdown()` builds exactly this shape, truncating chunk content to 1,000 characters per chunk to keep the record bounded (Chapter 29.1B's sizing discipline applied here to a richer record).")
+    add_figure(doc, diagram_thumbdown_record_31(), "Figure 31.1 — A thumbdown record preserves not just what went wrong, but every search angle that was tried in the run that produced the wrong answer.")
+    add_body(doc, "Capturing every variant, not only the query that produced the final bad answer, is what makes Section 31.6's injection useful rather than merely accusatory. If a future run only knew *that* a question failed, the best it could do is try harder with no direction. Knowing *which specific reformulations* were tried and what each one retrieved gives a future run's `_PROCESS_INSTRUCTIONS` retry logic something concrete to avoid repeating and, by elimination, some sense of which angles remain unexplored.")
+    add_body(doc, "Figure 31.1 lays out this full shape as four field groups, deliberately echoing Chapter 29.1's interaction-record anatomy — a thumbdown record is best understood as an interaction record's evidence and trajectory fields, carried forward and enriched with the one thing a plain interaction never has: the user's own explanation of what specifically was wrong.")
+
+    add_heading(doc, "31.4 Persisting to user_thumbdowns.json")
+    add_body(doc, "`mark_last_bad()` performs two logically related writes: flipping the last interaction's `quality` field, and appending the new thumbdown record. This project's real implementation wraps both in a single MongoDB transaction (ADR-048) specifically because a partial write — the interaction marked bad but no thumbdown record ever created, or vice versa — leaves the two files internally inconsistent with each other in a way that is hard to detect and worse to reason about later. In the original flat-file design this chapter's own era predates, the equivalent discipline is simpler but still real: write the thumbdown record *before* rewriting the interaction's quality field, so a crash between the two steps leaves the richer record intact even if the flag update is lost, rather than the reverse.")
+    add_body(doc, "BUG-044 is the cautionary tale for this exact write: `app_workflow/`'s first port of `cmd_bad` called `mark_last_bad(feedback=...)` without passing `variants` at all, so every thumbdown record was written with an empty `variants` array — Section 31.3's richest field, silently dropped. The record still existed, still had the feedback text, but had nothing for Section 31.6's injection to actually show the model about what was tried and failed. A record that is present but empty in its most important field fails more quietly than a record that never gets written at all.")
+
+    add_heading(doc, "31.5 Looking up prior thumbdowns by normalized query")
+    add_body(doc, "`find_thumbdowns_for_query()` normalizes the incoming query the identical way `_append_thumbdown()` normalized it at write time — lowercased, stripped — and returns every thumbdown record whose `normalized_query` matches exactly. This lookup runs once per new query, before the system prompt is built, so its result can feed directly into Section 31.6's injection.")
+    add_code(doc, '''@staticmethod
+def _normalize_query(q: str) -> str:
+    return q.lower().strip()
+
+def find_thumbdowns_for_query(self, query: str) -> list[dict]:
+    norm = self._normalize_query(query)
+    return [d for d in self._thumbdowns.find({"normalized_query": norm})]''')
+
+    add_heading(doc, "31.6 Injecting USER-FLAGGED PRIOR FAILURE")
+    add_body(doc, "When `find_thumbdowns_for_query()` returns one or more records, `_build_system_prompt()` (Chapter 26.2) builds a dedicated block naming exactly what went wrong last time and listing the reformulations already tried, placed in the *middle* of the prompt — after `_ROLE_AND_RULES`, before `_PROCESS_INSTRUCTIONS` — as a passive \"here is what happened\" block. A second, shorter *active* block, built only from the feedback text itself, is appended after `_PROCESS_INSTRUCTIONS`, closest to the generation point, framed as \"PRIORITY — USER FEEDBACK MUST BE ADDRESSED.\"")
+    add_body(doc, "This split — passive history in the middle, active priority last — is Chapter 26.1's recency discipline applied specifically to thumbdown injection: the full historical context is useful but not the single most important thing the model needs to act on right now, while the distilled instruction to specifically target the user's flagged gap is exactly that, and earns the position recency bias weights most heavily.")
+
+    add_heading(doc, "31.7 Worked example: the ASD disambiguation case")
+    add_body(doc, "`run_batch.py`'s Batch 1 script is the literal transcript of this mechanism working. Questions one through six ask variations of \"What is ASD\" and get confident autism-domain answers. Question seven is scripted as a `bad` command with the feedback: \"I was actually asking about Adjustable Speed Drives, not autism. All your answers were about the wrong topic.\" Question eight re-asks the exact original question — \"What is ASD and what are its main characteristics?\" — and the `USER-FLAGGED PRIOR FAILURE` block built from question seven's feedback is now present in the system prompt for that retry.")
+    add_body(doc, "Figure 31.2 traces this exact three-beat structure — six unchallenged wrong answers, one corrective thumbdown, one corrected re-ask — because the shape generalizes well beyond this specific acronym collision. Any corpus mixing genuinely unrelated domains under overlapping vocabulary will eventually produce this identical pattern, and the fix is never better embeddings or a higher similarity threshold; it is exactly the out-of-band correction this chapter's mechanism exists to capture and replay.")
+    add_figure(doc, diagram_asd_disambiguation_31(), "Figure 31.2 — Six autism-domain answers, one thumbdown, one corrected re-ask — the mechanism this chapter builds, traced through a real scripted batch.")
+    add_body(doc, "This worked example demonstrates the mechanism's actual value precisely because the underlying ambiguity — \"ASD\" genuinely meaning two unrelated things in this project's own mixed corpus — cannot be resolved by better retrieval alone. No amount of tuning `RETRIEVAL_TOP_K` or the similarity threshold fixes a genuinely ambiguous three-letter acronym; only a signal from outside the retrieval pipeline itself, the user's own disambiguating correction, can.")
+
+    add_heading(doc, "31.8 Content-vs-presentation feedback")
+    add_body(doc, "Not every thumbdown carries the same kind of signal, and conflating the two kinds weakens both. Content feedback tells the system it retrieved or reasoned about the *wrong thing* — Batch 1's \"I was actually asking about Adjustable Speed Drives\" is a pure content correction, directly actionable by steering the next retrieval toward a different domain. Presentation feedback tells the system its answer was *about the right thing but shaped wrong* — Batch 13's real scripted feedback, \"The answer was too generic. I wanted to know specifically about the control unit's fault detection role,\" is asking for more specificity on the identical topic, not a different topic entirely.")
+    add_body(doc, "Both are legitimate, useful thumbdowns, and this project's `_append_thumbdown()` captures both identically — but Section 31.6's injection treats them identically too, which is a real limitation worth naming honestly rather than glossing over. A content correction gives the next retrieval a genuinely different query angle to try. A presentation correction gives the next retrieval almost nothing new to search for — the right chunks were probably already being retrieved — and the actual fix belongs more in how the draft is written from those chunks than in what gets searched for next.")
+
+    add_heading(doc, "31.9 Why \"not structured enough\" feedback can't help retrieval")
+    add_body(doc, "Push the presentation-feedback case further and it exposes a structural boundary of this whole mechanism: feedback like \"not structured enough\" or \"too generic\" describes a property of the *generation* step, not the *retrieval* step, and `_PROCESS_INSTRUCTIONS`'s retry path only knows how to do one thing in response to any INSUFFICIENT-style signal — call `retrieve_documents` again with different query angles. Re-retrieving cannot fix a formatting or specificity complaint about chunks that were already the right chunks; it can only ever change *what* gets found, never *how* the found material gets written up.")
+    add_callout(doc, "Common pitfall", "Routing every complaint through the retrieval retry", "A thumbdown-driven retry loop that only knows how to search differently will search differently even when the actual defect was in generation, not retrieval. Recognizing presentation-only feedback and routing it toward a drafting-instruction adjustment, rather than another retrieval round, is a real gap this project's mechanism leaves open rather than one it already closes.")
+
+    add_heading(doc, "31.10 Exact matching vs. fuzzy/semantic matching")
+    add_body(doc, "Section 31.5's lookup is exact-string matching on normalized text — the identical trade-off Chapter 30.2 made for the failed-variants blocklist, and for the identical reason. A thumbdown recorded for \"what is asd\" will not surface for a later \"what does asd mean,\" even though a human would recognize them as the same question. Research topic 38's finding — cosine similarity on sentence embeddings reliably clusters genuine paraphrases above a 0.95 threshold, while Jaccard token overlap misses them — is directly applicable here and was, in fact, the project's own basis for choosing cosine over Jaccard for query-variant deduplication elsewhere in the pipeline.")
+    add_body(doc, "Upgrading Section 31.5's lookup from exact match to embedding-similarity match is a real, well-precedented option — not a hypothetical one — but it is not free: every new query would need an embedding call before the thumbdown lookup could even run, adding latency to a step that currently costs nothing beyond a dictionary or index lookup, and a similarity threshold introduces exactly the same precision/recall tuning burden Chapter 36C dedicates a full chapter to. Exact matching is the conservative default this project shipped with; fuzzy matching is the documented, well-understood upgrade path for a deployment where near-duplicate phrasing turns out to be common enough to justify the added cost.")
+
+    add_body(doc, "Chapter 30's silent failures and this chapter's explicit ones both feed the same downstream question Chapter 32 finally answers: given a growing ledger of what went wrong, what does a system do with everything that went *right*? Distillation is where this project's self-learning layer stops merely avoiding repeated mistakes and starts actively compounding its own verified successes.")
+    add_body(doc, "It is worth closing on what these two chapters, taken together, actually buy a deployment. Neither mechanism makes the underlying retrieval or generation smarter in any general sense — Chapter 30's blocklist and this chapter's thumbdown injection are both narrowly scoped, exact-match, session-spanning corrections to specific, previously-observed failures. Their value is not breadth but reliability: the same mistake, once caught, does not need to be caught again. That is a modest claim, and it is exactly the honest, auditable kind of self-improvement Chapter 28 argued memory injection could deliver without pretending the model itself had learned anything at all.")
+
+    path = OUT_DIR / "Chapter_31_User_Thumbdowns.docx"
+    doc.core_properties.title = f"Chapter 31 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_distillation_pipeline_32() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560">'
+        '<rect width="1200" height="560" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["The distillation pipeline, interaction to stored memory"], size=22, bold_first=True)
+        + svg_labeled_box(40, 90, 340, 110, "load_good(limit=N)", ["OK-quality interactions", "from the feedback store"], fill="#F2F2F2")
+        + svg_arrow(388, 145, 428, 145)
+        + svg_labeled_box(436, 90, 340, 110, "DISTILL_PROMPT per interaction", ["query + answer + source chunks", "→ 1-3 Q&A pairs"], fill="#D9D9D9")
+        + svg_arrow(784, 145, 824, 145)
+        + svg_labeled_box(832, 90, 330, 110, "fix_llm_output parse", ["repaired JSON array", "of question/answer dicts"], fill="#F2F2F2")
+        + svg_arrow(600, 200, 600, 236)
+        + svg_labeled_box(200, 238, 800, 110, "_stable_id(f\"Q: {q}\\nA: {a}\") — SHA-256, 16 hex chars", ["deterministic ID: identical pair always hashes identically"], fill="#D9D9D9")
+        + svg_arrow(600, 348, 600, 384)
+        + svg_labeled_box(200, 386, 800, 110, "collection.add() — only IDs not already present", ["new memory joins learned_qa; duplicates are silently skipped"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter32_distillation_pipeline", svg)
+
+
+def diagram_stable_id_dedup_32() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440">'
+        '<rect width="1200" height="440" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["SHA-256 stable IDs make re-distillation harmless"], size=22, bold_first=True)
+        + svg_labeled_box(60, 100, 500, 130, "Same interaction distilled twice", ["identical \"Q: ... A: ...\" text", "both times"], fill="#F2F2F2")
+        + svg_arrow(560, 165, 620, 165)
+        + svg_labeled_box(640, 100, 500, 130, "Identical SHA-256 hash both times", ["existing_ids already contains it"], fill="#D9D9D9")
+        + svg_arrow(600, 230, 600, 266)
+        + svg_labeled_box(160, 268, 880, 110, "new_mask excludes it — collection.add() called with zero new entries", ["the guard is deterministic hashing, not a fragile equality check on stored text"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter32_stable_id_dedup", svg)
+
+
+def build_chapter_32() -> Path:
+    title = "Learning From Success: The Distillation Engine"
+    doc = configure_document(title)
+    add_cover(doc, 32, title, "PART VI — THE SELF-LEARNING LAYER", "A success is only worth remembering once someone has checked that it actually was one.")
+    add_chapter_heading(doc, 32, title)
+    add_body(doc, "Chapters 30 and 31 built machinery for remembering failure. This chapter builds the mechanism for remembering success — `self_learner.py`, the distillation engine that turns a verified, judge-approved interaction into a reusable, independently-retrievable Q&A pair in the `learned_qa` collection Chapter 33 will teach the retriever to search.")
+    add_body(doc, "The chapter's central discipline is narrower than it might first appear: distillation is not \"summarize every conversation.\" It is a strict pipeline — verified interactions only, grounded strictly in the source chunks that supported the original answer, deduplicated by content hash before ever touching the vector store — because Chapter 28.5's warning about memory pollution applies with full force here. An unchecked distillation loop would not accelerate learning; it would launder unverified model output into permanent, confidently-retrieved \"knowledge.\"")
+    add_body(doc, "By the end of this chapter you will be able to explain why distillation must gate on verified quality rather than distilling every interaction, trace the real `DISTILL_PROMPT` this project ships and why each of its constraints exists, and understand how SHA-256 content hashing makes running the same distillation batch twice a safe, idempotent operation rather than a duplication risk.")
+
+    add_heading(doc, "32.1 The principle: learn only from validated interactions")
+    add_callout(doc, "Definition", "Distillation", "The process of converting a verified interaction — a query, its judge-approved answer, and the chunks that grounded it — into a compact, reusable Q&A pair stored independently for future retrieval, without introducing any claim absent from the original grounding evidence.")
+    add_body(doc, "`run_distillation()` sources its raw material from exactly one place: `self.feedback_store.load_good(limit=batch_size)` — Chapter 29's `load_good()` method, filtered to `quality == \"OK\"` records only. This is not an incidental implementation detail; it is the entire safety mechanism. An `INSUFFICIENT` or `USER_THUMBSDOWN` interaction never reaches `_generate_qa_pairs()` at all, because the JUDGE phase's own verdict (Chapter 16.3) or the user's own thumbdown (Chapter 31) already flagged it as untrustworthy — distillation trusts that upstream gate completely rather than re-deciding quality itself.")
+    add_body(doc, "This single filtering step is what separates this project's distillation design from the \"naive auto-save\" ADR-008 explicitly rejected: \"save every answer — rejected: hallucinations become permanent.\" Gating on verified `OK` quality is the entire difference between a memory system that compounds genuine successes and one that compounds its own worst mistakes with equal confidence.")
+    add_body(doc, "It is worth being precise about what \"verified\" means here, because it is doing a lot of load-bearing work for a single word. `OK` quality means the JUDGE phase's `check_answer_quality()` found the answer's claims traceable to the retrieved chunks — grounding, not correctness in any absolute sense. A grounded answer can still reflect a corpus that is itself wrong, incomplete, or outdated; distillation inherits whatever quality ceiling the source documents already had. This is not a flaw in the distillation design specifically — it is a reminder that \"learn only from verified interactions\" verifies faithfulness to evidence, not truth about the world, and the two are not the same guarantee.")
+
+    add_heading(doc, "32.2 Synthetic Q&A pair generation from verified triples")
+    add_body(doc, "Each verified interaction contributes a (query, answer, source chunks) triple to `_generate_qa_pairs()`, which formats the chunks — learned-QA chunks first, tagged `[LEARNED QA - HIGH PRIORITY]`, then document chunks tagged `[DOCUMENT]`, the identical precedence ordering Chapter 22C.10 established for context assembly — and sends the whole triple to the LLM via `DISTILL_PROMPT`. The output is 1-3 synthetic Q&A pairs, each a *rephrasing* of the original question paired with a *self-contained* answer grounded in the same evidence.")
+    add_body(doc, "Generating multiple rephrasings per interaction, rather than storing the original query verbatim, is a deliberate retrieval-time bet: a future user is far more likely to phrase a related question differently than to type the identical original query, and Chapter 33's hybrid retriever searches `learned_qa` by embedding similarity — a collection with three worded variants of the same underlying answer has three separate chances to match a differently-phrased future query, where storing only the original phrasing would have one.")
+    add_body(doc, "The metadata attached to each stored pair matters as much as the pair's text. `_upsert_pairs()` records `source`, `original_query`, `question`, `answer`, and `interaction_ts` alongside the embedded combined text — enough provenance to trace any retrieved learned-QA chunk back to the specific interaction that produced it, which is exactly the audit trail Chapter 28.5.1 argued a responsible memory system needs before it can support review, correction, or deletion of a specific stored fact. A distilled pair with no path back to its origin would be far harder to correct if the source interaction later turned out to be wrong in some way the original quality gate had not caught.")
+
+    add_heading(doc, "32.3 Strict grounding — no new facts invented")
+    add_body(doc, "`DISTILL_PROMPT`'s rules are explicit and narrow: \"Do not invent facts not present in SOURCE CHUNKS,\" \"Each rephrasing must be semantically distinct,\" \"Answers should be 2-5 sentences.\" This is the same faithfulness discipline Chapter 22B's LBC compression and merge-validation stages enforce on chunk content, applied here one layer downstream — not to compressed context, but to a *new* synthetic artifact being manufactured specifically to be stored and later trusted as if it were as reliable as a source document.")
+    add_body(doc, "The stakes for this particular grounding check are arguably higher than any other in the pipeline. A hallucinated claim in a single answer reaches one user, once. A hallucinated claim that survives distillation into `learned_qa` becomes retrievable evidence for every future query that happens to match it — and Chapter 22C.10's conflict-resolution rule gives learned QA *precedence* over documents when the two disagree. A fabricated fact laundered through distillation would not just persist; it would outrank the real source material the next time a conflict arose.")
+    add_callout(doc, "Common pitfall", "Trusting a judge-approved answer to be trivially re-summarizable", "An answer passing `check_answer_quality()` proves it was grounded *as originally written*, not that any rephrasing of it will automatically stay grounded. The distillation LLM call is a second generation step with its own fabrication risk, which is exactly why `DISTILL_PROMPT` restates the no-invention rule explicitly rather than assuming it's inherited for free.")
+
+    add_heading(doc, "32.4 The distillation prompt, line by line")
+    add_code(doc, '''DISTILL_PROMPT = """You are a knowledge distillation assistant.
+
+Given:
+- ORIGINAL QUESTION: {query}
+- VERIFIED ANSWER: {answer}
+- SOURCE CHUNKS: {chunks}
+
+Your job: produce a JSON array (no markdown, no preamble) of 1-3 objects, each with:
+  "question" : a distinct rephrasing of the original question
+  "answer"   : a concise, self-contained answer grounded ONLY in the source chunks above
+
+Rules:
+- Do not invent facts not present in SOURCE CHUNKS.
+- Each rephrasing must be semantically distinct (different vocabulary).
+- Answers should be 2-5 sentences.
+- Output ONLY the JSON array."""''')
+    add_body(doc, "Every constraint here maps to a specific downstream need. \"1-3 objects\" bounds how much a single interaction can grow the collection, preventing one verbose answer from generating dozens of near-duplicate entries. \"Semantically distinct\" vocabulary directly serves Section 32.2's retrieval-diversity bet — three rephrasings using identical wording would provide no more retrieval coverage than one. \"2-5 sentences\" keeps each stored pair small enough that Chapter 33's hybrid retrieval does not have to compare oversized learned-QA entries against document chunks of very different scale. \"Output ONLY the JSON array\" is the identical structured-output discipline Chapter 25.5 and Chapter 26.7 already established — demonstrated by format, not merely described in prose.")
+
+    add_heading(doc, "32.5 Deduplication with SHA-256 stable IDs")
+    add_body(doc, "Every candidate pair is combined into a single string — `f\"Q: {q}\\nA: {a}\"` — and hashed with SHA-256, truncated to the first 16 hex characters, to produce its ChromaDB entry ID. This is a *content-derived* ID, not a randomly generated or sequentially assigned one: the identical question-answer text always produces the identical ID, regardless of which interaction, which run, or which day generated it.")
+    add_code(doc, '''def _stable_id(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+combined = f"Q: {q}\\nA: {a}"
+uid = _stable_id(combined)
+...
+existing_ids = set(self.collection.get(ids=ids)["ids"])
+new_mask = [i for i, uid in enumerate(ids) if uid not in existing_ids]''')
+    add_body(doc, "Content-derived IDs make `run_distillation()` naturally idempotent: running the exact same batch twice — whether by accident, a retry, or a deliberate re-run — produces the identical set of hashes both times, and `existing_ids` catches every one of them on the second pass. Figure 32.2 traces this guarantee directly. This is a stronger and simpler property than checking for approximate duplicates by embedding similarity would provide, at the cost of being unable to detect two *differently worded* pairs that happen to express the identical fact — an intentional trade-off, matching Chapter 30.2 and Chapter 31.10's identical exact-match-first reasoning.")
+    add_figure(doc, diagram_stable_id_dedup_32(), "Figure 32.2 — Deterministic content hashing means re-running distillation on the same interaction can never create a duplicate entry.")
+
+    add_heading(doc, "32.6 Building self_learner.py")
+    add_body(doc, "`SelfLearner` composes an `EmbeddingManager`, an LLM, a `FeedbackStore`, and its own ChromaDB collection handle into one class with a small public surface: `should_learn()` to check the trigger condition, and `run_distillation(batch_size)` to actually perform a pass. Figure 32.1 traces the full internal pipeline `run_distillation()` drives — load, generate, parse, deduplicate, upsert — end to end.")
+    add_figure(doc, diagram_distillation_pipeline_32(), "Figure 32.1 — Five stages from a batch of verified interactions to new entries in the learned_qa collection, each independently loggable.")
+    add_body(doc, "`_upsert_pairs()` is where Section 32.5's dedup logic actually lives, and it is worth noting what happens when every candidate pair turns out to already exist: the method logs a clear `UPSERT SKIPPED` warning rather than silently returning zero, specifically because a distillation batch that adds nothing is a legitimate, expected outcome (all N good interactions were already distilled in a prior pass) and deserves a different log signature than an actual failure to parse or generate pairs at all — the same operational-visibility discipline Chapter 22.2's `_THIN` separator convention establishes for every other pipeline stage.")
+    add_body(doc, "The embedding step deserves its own mention because it is where `SelfLearner` and the rest of the retrieval pipeline share infrastructure rather than duplicating it. `self.embedding_manager.generate_embedding(texts)` is the identical `EmbeddingManager` instance every retrieval call already uses, meaning a distilled Q&A pair is embedded with the exact same model, the exact same normalization, and therefore the exact same vector space as every document chunk and every future query it will be compared against. A distillation pipeline that embedded with a different model or configuration would produce vectors that are technically storable but not meaningfully comparable — silently degrading retrieval quality for the entire `learned_qa` collection in a way that would be difficult to diagnose after the fact.")
+    add_body(doc, "`fix_llm_output(\"distill_qa\", raw, llm=self.llm)` is the same multi-tier JSON repair pipeline Chapter 13B introduced for every other structured LLM call in this project, gated behind the identical `ENABLE_QA_PAIR_OUTPUT_FIX` and `ENABLE_GLOBAL_LLM_OUTPUT_FIX` flag pair Chapter 36B catalogs. When both flags are off, `_generate_qa_pairs()` falls back to `_parse_to_python(raw)` directly — a smaller, faster parse path with no LLM-based repair tier, appropriate for a deployment that has already confirmed its distillation model reliably produces clean JSON and does not want to pay the latency cost of a repair call that will rarely fire.")
+
+    add_heading(doc, "32.7 Triggering distillation")
+    add_body(doc, "`should_learn()` implements the simplest of the three trigger strategies book index 32.7 names: `good % learn_every_n == 0` — exactly every `LEARN_EVERY_N` (5, by this project's default) successful interactions, checked by a plain modulo on the running `count_good()` total. This is deterministic and requires no separate scheduler process, at the cost of being purely count-based — a deployment with bursty traffic distills in bursts, and one with steady low traffic distills at a steady, predictable cadence regardless of wall-clock time elapsed.")
+    add_table(doc, ["Strategy", "Trigger condition", "Trade-off"], [
+        ["Every N good interactions (shipped)", "count_good() % N == 0", "Simple, deterministic; ignores real time elapsed"],
+        ["Time-based", "Cron or scheduled interval", "Predictable cadence; can fire with zero new material to learn from"],
+        ["Manual (learn command)", "User explicitly invokes it", "Full control; requires someone to remember to run it"],
+    ], [2.35, 2.15, 2.60])
+    add_body(doc, "The manual path is not a fallback for when the automatic trigger fails — it is a first-class, independently useful option this project ships as the `learn` command (Chapter 35.3), letting an operator force a distillation pass immediately after a batch of known-good interactions rather than waiting for the count to cross a multiple of five. A real, still-open finding from this project's own bug ledger is worth citing honestly here: `load_good(limit=N)` returns the *N most recent* good interactions regardless of whether they were already distilled in a prior pass, so a `learn` command invoked twice in quick succession, or an automatic trigger firing on a count that re-includes already-processed records, can re-attempt distillation on interactions Section 32.5's hashing will then correctly recognize and skip — safe, but not free, since the LLM calls in Section 32.2 still run before the duplicate is caught.")
+    add_callout(doc, "Common pitfall", "Mistaking dedup-safety for efficiency", "SHA-256 content hashing guarantees a re-distilled pair never creates a duplicate *entry*, but it does not prevent the *LLM call* that generates that duplicate pair from running again. A watermark or `distilled: true` flag on each interaction record — not yet implemented in this project — would be needed to skip the redundant generation call entirely, not merely its storage.")
+
+    add_body(doc, "This chapter closes the loop Chapter 28 opened: verified success, distilled without inventing anything beyond its own grounding evidence, deduplicated deterministically, stored as an independently retrievable memory. Chapter 33 picks up exactly where this chapter's output lands — the `learned_qa` collection — and asks how a retriever should actually search it alongside the original document corpus.")
+    add_body(doc, "Taken as a whole, this chapter's pipeline is a small, deliberately conservative machine: it does one thing (turn verified success into searchable memory), refuses to do it on unverified input, and refuses to do it twice on the same input. None of the three properties is individually sophisticated, but together they are exactly what makes Chapter 33's retriever able to trust a `learned_qa` hit with something close to the confidence it extends to a source document chunk — a trust that would be unjustified if any part of this chapter's gating had been skipped for the sake of learning faster.")
+
+    path = OUT_DIR / "Chapter_32_Distillation_Engine.docx"
+    doc.core_properties.title = f"Chapter 32 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_hybrid_pool_33() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520">'
+        '<rect width="1200" height="520" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["The original hybrid single-pool merge — and its displacement risk"], size=22, bold_first=True)
+        + svg_labeled_box(60, 90, 480, 100, "documents collection", ["queried with the same", "query embedding"], fill="#F2F2F2")
+        + svg_labeled_box(660, 90, 480, 100, "learned_qa collection", ["queried with the same", "query embedding"], fill="#D9D9D9")
+        + svg_arrow(300, 190, 500, 260)
+        + svg_arrow(900, 190, 700, 260)
+        + svg_labeled_box(310, 262, 580, 100, "One merged list, sorted by score, truncated to top_k", ["a strong document score can push a weaker learned_qa hit out entirely"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 362, 600, 398)
+        + svg_labeled_box(310, 400, 580, 100, "Validators receive the mixed list", ["no place left to express \"prefer learned QA\" precedence"], fill="#F2F2F2")
+        + "</svg>"
+    )
+    return svg_to_png("chapter33_hybrid_pool", svg)
+
+
+def diagram_distance_metric_33() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Same formula, two different metrics, incomparable scores"], size=22, bold_first=True)
+        + svg_labeled_box(80, 100, 480, 150, "documents: hnsw:space=cosine", ["similarity_score = 1 - dist", "is true cosine similarity"], fill="#F2F2F2")
+        + svg_labeled_box(660, 100, 480, 150, "learned_qa: no hnsw:space set", ["defaults to L2 —", "1 - dist is NOT cosine"], fill="#D9D9D9")
+        + svg_arrow(320, 260, 320, 300)
+        + svg_arrow(900, 260, 900, 300)
+        + svg_centered_text(320, 330, ["0.5 threshold =", "true cosine 0.5"], size=15, gap=20, bold_first=True)
+        + svg_centered_text(900, 330, ["0.5 threshold =", "true cosine ~0.75"], size=15, gap=20, bold_first=True)
+        + svg_labeled_box(280, 380, 640, 80, "one MIN_SIMILARITY floor, two different real meanings", [], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter33_distance_metric", svg)
+
+
+def build_chapter_33() -> Path:
+    title = "Hybrid Retrieval Over Documents and Learned Memory"
+    doc = configure_document(title)
+    add_cover(doc, 33, title, "PART VI — THE SELF-LEARNING LAYER", "Two collections that mean different things cannot be searched as if they were one, no matter how similar their vectors look.")
+    add_chapter_heading(doc, 33, title)
+    add_body(doc, "Chapter 32 gave `learned_qa` a steady stream of new, verified entries. This chapter asks the question that stream immediately raises: how should a retriever actually search two collections at once — the original `documents` corpus and the growing `learned_qa` memory — and what goes wrong with the most obvious answer.")
+    add_body(doc, "This project's own retrieval design has a real, documented history worth teaching in order rather than presenting only the current end state. ADR-016 first introduced `learned_qa` as a second collection with a simple mandate: \"retriever.py implements hybrid retrieval across both collections\" — one merged, re-ranked list. Later investigation (Research topic 26) found that single-pool merge had structural pathologies severe enough to motivate a full redesign into the two-track parallel retrieval Chapter 22C already covers from the compression side. This chapter covers it from the retrieval side, and adds the scoring precision — distance-metric consistency, per-collection thresholds, per-collection top-k — that makes either design actually trustworthy.")
+    add_body(doc, "By the end of this chapter you will be able to explain why merging two collections into one ranked list is the intuitive but flawed first design, trace the specific pathologies that motivated this project's move to two independent tracks, and understand why a single similarity threshold or top-k value across two collections with different score distributions is a subtler bug than it first appears.")
+
+    add_heading(doc, "33.1 Two collections, one retriever")
+    add_body(doc, "The original design was architecturally simple: one `RAGRetriever`, one `retrieve()` method, querying both the `documents` and `learned_qa` ChromaDB collections with the identical query embedding and combining whatever came back. This is the natural first design for hybrid retrieval — it requires no new data structures, no precedence rules, and no changes to any downstream code that already expected \"a list of chunks\" from retrieval.")
+    add_body(doc, "The appeal is real: a single merged list is exactly what every consumer downstream of retrieval — the compression pipeline, the validators, the final answer generation — was already built to expect from Chapter 11 onward. Introducing a second collection without changing that shape looks, at first, like a free improvement.")
+
+    add_heading(doc, "33.2 Merging, deduplicating, and re-ranking across collections")
+    add_body(doc, "The merge itself is straightforward: query both collections, tag each result with its origin collection, sort the combined list by `similarity_score` descending, deduplicate by chunk ID, and truncate to the configured `top_k`. `RAGRetriever._rank_collection_results()` — the method this project's current code still uses for within-collection ranking — is a direct descendant of exactly this merge-and-truncate logic, now applied per collection instead of across both at once.")
+    add_body(doc, "Deduplication in a merged pool is more subtle than deduplication within a single collection, because `documents` and `learned_qa` entries can never share an ID by construction — one is chunk-derived, the other is a SHA-256 content hash (Chapter 32.5) — so ID-based dedup alone cannot catch the case where a learned-QA pair and its own source document chunk both appear in the same merged result, saying essentially the same thing in different words.")
+
+    add_heading(doc, "33.3 Weighting learned memory vs raw documents")
+    add_body(doc, "A single merged, score-sorted list has no natural place to express a preference between the two collections — score is score, and a `similarity_score` of 0.71 from `documents` outranks a `similarity_score` of 0.68 from `learned_qa` by the sort alone, regardless of whether learned memory should, in principle, be trusted more for a query it directly matches. Weighting schemes to compensate — multiplying one collection's scores by a boost factor before the merge, for instance — are a real option, but they push an implicit precedence decision into the same numeric space as relevance ranking, where it becomes difficult to reason about independently of the actual similarity math.")
+    add_body(doc, "This is precisely the structural gap Research topic 26 identifies as the deeper problem: \"validators that received mixed lists having no place to express precedence.\" A validator judging a merged list's relevance cannot also apply \"prefer learned QA on conflict\" as a separate, later decision — by the time the list is merged, the information about which collection each entry came from has to be carried alongside every entry just to make that later decision possible at all, and every downstream consumer has to know to look for it.")
+
+    add_heading(doc, "33.4 Updating retriever.py for hybrid behavior")
+    add_body(doc, "The original `retrieve()` method's job was exactly this merge: query, tag, sort, truncate, return one list. Compare this project's current `retrieve()` — which now queries `documents` only, having been superseded for hybrid use by `retrieve_separate()` — and the shape of the change is visible directly in the code that remains.")
+    add_code(doc, '''def retrieve(self, query, top_k=RETRIEVAL_TOP_K, score_threshold=0.0):
+    """Retrieve from the documents collection only."""
+    query_embedding = self._embed_and_log(query)
+    results = self._query_collection(self.vector_store.collection, query_embedding, top_k)
+    documents = self._rank_collection_results(results, limit=top_k, score_threshold=score_threshold)
+    self._last_document_chunks = documents
+    self._last_learned_qa_chunks = []
+    return documents''')
+    add_body(doc, "The docstring — \"Retrieve from the documents collection only\" — is itself a small piece of architectural history: a method that once merged two collections now explicitly disclaims doing so, its hybrid responsibility fully migrated to a sibling method built around two independent result lists instead of one merged one.")
+
+    add_heading(doc, "33.5 Watching the learned collection grow over time")
+    add_body(doc, "A hybrid retriever's behavior is not static — `learned_qa` starts empty and grows with every distillation pass Chapter 32 triggers, which means the *same* retrieval code produces measurably different results on day one versus month three of a deployment's life. Early on, with few or zero learned entries, hybrid retrieval degrades gracefully to something close to document-only retrieval; `retrieve_separate()`'s own guard — `if self.learned_collection and self.learned_collection.count() > 0` — exists specifically so querying an empty or absent learned collection is a no-op rather than an error.")
+    add_body(doc, "As the collection grows, an increasing share of queries plausibly match something in `learned_qa` directly, and Chapter 22C.10's precedence rule starts mattering in practice rather than only in principle. This growth curve is worth monitoring explicitly — Chapter 35.2's `stats` command surfaces the raw count precisely because \"how many entries are in learned_qa\" is a meaningful operational signal, not merely a curiosity, for understanding why a deployment's retrieval behavior in month six differs from its behavior in week one.")
+
+    add_heading(doc, "33.6 Hybrid single-pool vs. two-track parallel retrieval")
+    add_body(doc, "Research topic 26 frames the actual design decision precisely: source-document chunks are \"ground-truth-by-provenance,\" while learned-QA chunks are \"user-validated synthesis\" — two qualitatively different kinds of evidence with different conflict-resolution needs, which \"cannot be made by a cosine-similarity ranker that doesn't even know which collection a chunk came from.\" The single-pool design of Sections 33.1-33.4 collapses that distinction the moment the merge happens; two-track parallel retrieval (`retrieve_separate()`, Chapter 11.5) preserves it all the way through the pipeline.")
+    add_body(doc, "Figure 33.1 traces the single-pool merge through to its actual failure point — not the query or the individual collection searches, both of which work exactly as intended, but the truncation step, where a fixed top_k applied to one combined list has no way to know it is silently discarding a collection's worth of evidence rather than merely trimming excess.")
+    add_figure(doc, diagram_hybrid_pool_33(), "Figure 33.1 — A single merged, truncated list has no room left to express which collection a surviving chunk came from, or to protect a weaker learned-QA hit from being crowded out by a stronger document score.")
+    add_table(doc, ["Property", "Single-pool merge", "Two-track parallel"], [
+        ["Downstream shape", "One list — no code changes needed elsewhere", "Two lists — every consumer must handle both"],
+        ["Precedence expression", "Requires per-entry origin tagging, easy to lose", "Native — each track is independently addressable"],
+        ["Truncation risk", "Strong documents can crowd out weak learned QA", "Each track keeps its own top_k / top_l budget"],
+        ["Validator design", "One validator judging a mixed, ambiguous list", "One validator per track, per collection's own norms"],
+    ], [1.75, 2.55, 2.30])
+    add_body(doc, "The conclusion this project actually reached, per Research topic 26, was unambiguous: \"two-track retrieval is the right architecture for self-learning RAG,\" with each channel \"queried independently... validated independently, deduplicated and merged independently, accumulated independently, compressed independently, and combined only at the LLM context boundary with an explicit conflict-resolution rule.\" This chapter's remaining sections apply to *either* design equally — the scoring precision below matters whether the two collections' results ultimately merge into one list or stay in two.")
+
+    add_heading(doc, "33.7 Distance-metric consistency across collections")
+    add_body(doc, "A subtler failure than the merge-and-truncate problem hides directly in the similarity math: `documents` was created with `hnsw:space = cosine`, but `learned_qa` was created without specifying `hnsw:space` at all, silently defaulting to ChromaDB's L2 distance. Both collections were scored with the identical formula, `similarity_score = 1 - dist`, and filtered through the identical `MIN_SIMILARITY` threshold — but `1 - dist` means genuinely different things depending on which metric actually produced `dist`.")
+    add_body(doc, "On unit-normalized embeddings (which `all-MiniLM-L6-v2` produces), the relationship is `‖a − b‖² = 2 − 2·cos(θ)`, so `1 - dist` under cosine is true cosine similarity, while `1 - dist` under L2 works out to `2·cos(θ) − 1` — the same ranking order, but a completely different threshold meaning. A learned-QA chunk that just cleared a 0.5 floor under L2 corresponds to a true cosine similarity around 0.75; strongly relevant, filtered as if it were only marginally so.")
+    add_body(doc, "Figure 33.2 makes the mismatch concrete: the same formula, the same numeric floor, applied to two collections whose underlying distance semantics were never actually the same thing, producing a threshold that is simultaneously correct for one collection and badly miscalibrated for the other, with no error message anywhere to indicate which.")
+    add_figure(doc, diagram_distance_metric_33(), "Figure 33.2 — The identical 1 − dist formula and the identical 0.5 floor mean genuinely different relevance thresholds depending on which collection's distance metric actually produced the score.")
+    add_body(doc, "This is BUG-030 in this project's own ledger, and its fix required more than a metadata edit: ChromaDB's `get_or_create_collection()` does not migrate an existing collection's distance metric, so correcting `learned_qa` to cosine required a full snapshot-and-restore of the collection's HNSW index — a 374-entry live migration, count-verified, with rollback on failure. The remediation pattern that followed — funnel all collection creation through a single factory, and detect non-canonical distance metrics at startup — is the general lesson: any two collections sharing scoring infrastructure must be created through code that enforces metric consistency at the single point of creation, not assumed to follow from documentation or convention.")
+    add_body(doc, "The root cause is worth stating plainly because it is a genuinely easy trap: `documents` was created early in the project with an explicit `hnsw:space=\"cosine\"` argument, a choice made deliberately at the time. `learned_qa` was created later, by different code (`self_learner.py`'s `get_or_create_learned_qa_collection()`), written without anyone re-checking whether the same explicit argument had been carried over. ChromaDB's silent fallback to L2 when the argument is simply absent means this kind of drift produces no error, no warning, and no visible symptom until someone specifically investigates why learned-QA relevance filtering behaves inconsistently with document filtering under an identical threshold value.")
+
+    add_heading(doc, "33.8 Per-collection score thresholds")
+    add_body(doc, "Once the metric-consistency problem is fixed, a second, independent question remains: should `documents` and `learned_qa` even use the *same* similarity floor, correctly computed or not? This project's evidence-based answer, from Research topic 39's log analysis, was no — the two collections' actual score distributions differ enough to warrant separate floors. Document chunks, retrieved from source PDFs and technical text, showed relevant matches clustering lower; learned-QA entries, being syntactically closer to natural queries by construction (they are themselves distilled question-answer pairs), clustered higher.")
+    add_table(doc, ["Constant", "Evidence-based value", "Why it differs from the other collection"], [
+        ["DOCUMENTS_MIN_SIMILARITY", "0.53", "Source-chunk relevance clusters lower; a tighter floor risks losing real matches"],
+        ["LEARNED_QA_MIN_SIMILARITY", "0.57", "Distilled Q&A pairs read closer to natural queries; irrelevant entries score visibly higher, needing a stricter floor"],
+    ], [2.55, 1.70, 2.55])
+    add_body(doc, "A single shared `MIN_SIMILARITY` — the pre-split default — necessarily gets one of the two collections wrong: set for documents, it under-filters learned QA; set for learned QA, it over-filters documents. Splitting the constant in two is not a tuning nicety, it is the only way for one number to correctly represent two collections whose underlying score distributions genuinely differ.")
+
+    add_heading(doc, "33.9 Per-collection top-k")
+    add_body(doc, "`RETRIEVAL_TOP_K` (documents) and `RETRIEVAL_TOP_L` (learned_qa) exist as two separate constants for the identical reason the thresholds split: `retrieve_separate()` queries each collection with its own depth parameter, independently of how many results the other collection returns. This project's own evidence-based tuning (Research topic 39, later refined by the A/B methodology Chapter 36C covers in full) converged on `RETRIEVAL_TOP_K=4` and `RETRIEVAL_TOP_L=4` — equal in this specific case, but arrived at independently rather than assumed equal by default, and free to diverge again if either collection's evidence changes.")
+    add_body(doc, "Two-track parallel retrieval is what makes independent top-k values meaningful in the first place — in the single-pool design of Sections 33.1-33.4, one shared `top_k` applied to the *merged* list, meaning a change to \"how many documents chunks to fetch\" and \"how many learned-QA chunks to fetch\" could not be tuned separately at all. This is one more concrete way Section 33.6's architectural choice pays for itself: not just cleaner precedence handling, but a retrieval-depth knob per collection that the single-pool design structurally could not offer.")
+
+    add_body(doc, "Chapter 34 turns to a problem this chapter's own merge-and-dedup discussion already previewed: when retrieval runs multiple times across a single agentic loop's iterations, near-duplicate chunks accumulate even within one collection's own results, and the deduplication and merging machinery needed to handle that is its own careful piece of engineering.")
+    add_body(doc, "It is worth closing by naming what this chapter's two case studies — the single-pool-to-two-track redesign and the distance-metric fix — have in common. Neither was visible from reading `retriever.py` in isolation; both required watching the system under real, repeated use and noticing a pattern a single test case would never surface. A displaced learned-QA chunk in one query looks like an unlucky ranking outcome. A misfiled distance metric in one collection looks like a marginally under-performing threshold. Only at the scale of many runs, examined together, did either pattern reveal itself as a structural problem rather than noise — which is exactly the evidence-based tuning discipline Chapter 36C generalizes into a repeatable methodology.")
+
+    path = OUT_DIR / "Chapter_33_Hybrid_Retrieval.docx"
+    doc.core_properties.title = f"Chapter 33 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_greedy_clustering_34() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520">'
+        '<rect width="1200" height="520" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Greedy, star-shaped clustering — not single-link chaining"], size=22, bold_first=True)
+        + svg_labeled_box(60, 100, 260, 110, "chunk[0] — leader", ["compares against every", "later unclaimed chunk"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(200, 210, 200, 250)
+        + svg_labeled_box(60, 252, 260, 90, "chunk[2]: sim ≥ 0.90", ["joins group, claimed"], fill="#D9D9D9")
+        + svg_arrow(200, 342, 200, 378)
+        + svg_labeled_box(60, 380, 260, 90, "chunk[4]: sim ≥ 0.90", ["joins group, claimed"], fill="#D9D9D9")
+        + svg_labeled_box(400, 100, 260, 110, "chunk[1]: sim < 0.90", ["stays unclaimed —", "becomes next leader"], fill="#F2F2F2")
+        + svg_labeled_box(700, 100, 460, 300, "What single-link chaining risks", ["chunk[4] similar to chunk[2] but", "NOT to chunk[0] — single-link", "would still chain all three together"], fill="#D9D9D9")
+        + "</svg>"
+    )
+    return svg_to_png("chapter34_greedy_clustering", svg)
+
+
+def diagram_deferred_drop_34() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460">'
+        '<rect width="1200" height="460" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Deferred drop: mark during the scan, mutate once at the end"], size=22, bold_first=True)
+        + svg_labeled_box(60, 100, 520, 130, "Unsafe pattern", ["del accumulated_chunks[i]", "while iterating over the same list", "— indices shift under you mid-loop"], fill="#F2F2F2")
+        + svg_labeled_box(620, 100, 520, 130, "What this project's code does", ["indices_to_drop.update(group[1:])", "— a plain set, no mutation", "of the list being scanned"], fill="#D9D9D9")
+        + svg_arrow(880, 230, 880, 266)
+        + svg_labeled_box(620, 268, 520, 110, "One list comprehension, after the scan ends", ["[c for i, c in enumerate(chunks) if i not in indices_to_drop]"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter34_deferred_drop", svg)
+
+
+def build_chapter_34() -> Path:
+    title = "Chunk-Level Deduplication and Merging During Retrieval"
+    doc = configure_document(title)
+    add_cover(doc, 34, title, "PART VI — THE SELF-LEARNING LAYER", "The same fact retrieved three times by three different queries is not three facts. Treating it as one is where retrieval-time merging earns its keep.")
+    add_chapter_heading(doc, 34, title)
+    add_body(doc, "Chapter 33 solved which collections to search and how to score what comes back. This chapter solves a problem that shows up regardless of how well-tuned that scoring is: an agentic loop calling `retrieve_documents` two or three times per run (Chapter 23.4) will frequently retrieve the same or a near-identical chunk more than once, from different query phrasings converging on the same underlying passage.")
+    add_body(doc, "This chapter walks through the retrieval-time deduplication and merging logic living inside `_accumulate_track()` in `agent_query.py` — a genuinely careful piece of engineering hiding behind a deceptively short block of code, with a specific similarity threshold, a specific clustering strategy, an LLM-based merge step with real failure handling, and a specific ordering discipline that exists to prevent a real and easy-to-introduce class of bug.")
+    add_body(doc, "By the end of this chapter you will be able to explain why near-duplicate chunks accumulate across iterations even when each individual retrieval call is working correctly, trace the exact greedy clustering algorithm this project's code uses and why it is not the same as textbook single-link clustering, and recognize the deferred-mutation pattern that keeps a merge pass safe against the classic bug of modifying a list while iterating over it.")
+
+    add_heading(doc, "34.1 Why retrievals across iterations produce near-duplicate chunks")
+    add_body(doc, "`_PROCESS_INSTRUCTIONS` deliberately asks for \"SHORT, semantically different queries\" across 2-3 retrieval calls per run (Chapter 26.3) — different angles on the same underlying topic, by design. Different angles on the same topic very often retrieve overlapping source material: a query about \"ASD diagnosis criteria\" and a separate query about \"ASD screening tools\" can both legitimately surface the same paragraph if that paragraph happens to discuss both. Each individual retrieval call is behaving correctly; the redundancy is an emergent property of running several correct, independent searches against one corpus and accumulating everything they return.")
+    add_body(doc, "Left unmerged, this redundancy compounds every cost Part V already quantified — Chapter 23.4's token math, Chapter 24's attention dilution — for zero added information. A chunk retrieved twice does not give the model twice as much evidence; it gives the model the identical evidence twice, at twice the token cost, with no compensating benefit.")
+    add_body(doc, "It is worth distinguishing this problem explicitly from the one Chapter 22's NAC compression stage solves, since both operate on chunk redundancy but at different points in the pipeline and for different reasons. NAC merges *consecutive* chunks from the *same* source document, restoring document flow that chunking (Chapter 7) broke apart — a structural, position-based redundancy. This chapter's retrieval-time merge catches a *content-based* redundancy that can span entirely different source documents and different retrieval calls, with no positional relationship between the duplicated chunks at all. The two mechanisms are complementary, not overlapping: this chapter's merge runs first, during accumulation; NAC runs later, during the compression pipeline proper, on whatever survived accumulation unmerged.")
+
+    add_heading(doc, "34.2 The MERGE_SIMILARITY_THRESHOLD knob")
+    add_body(doc, "`MERGE_SIMILARITY_THRESHOLD = 0.90` is the single number deciding whether two accumulated chunks are similar enough to merge into one. This retrieval-time threshold is deliberately distinct from — and stricter in spirit than — the embedding-first prefiltering threshold ADR-007 identifies for a different stage of the pipeline (DC's redundancy prefiltering, cosine ≥ 0.92 candidate-narrowing before an LLM judge call): the two thresholds serve different purposes even though both operate on cosine similarity between chunk embeddings.")
+    add_body(doc, "A threshold set too low (0.85, for instance) risks merging chunks that are topically related but substantively distinct — collapsing genuinely different facts into one merged chunk, exactly the failure mode Chapter 22B's redundancy-judge prompt guards against explicitly (\"related topic, but different facts\" is a REJECTED verdict, not a CONFIRMED one, in that judge's own worked examples). A threshold set too high (0.95+) risks merging almost nothing, leaving genuine near-duplicates — the same fact restated with minor wording differences across two retrieval calls — sitting in the accumulated pool unmerged, forfeiting the token savings this mechanism exists to capture. 0.90 sits deliberately between those two failure directions: tight enough to require near-paraphrase-level similarity, loose enough to actually catch the common case of the identical passage surfacing from two different query angles.")
+
+    add_heading(doc, "34.3 Cosine similarity at retrieval time")
+    add_body(doc, "The comparison in `_accumulate_track()` runs on `accumulated_chunks` — every chunk retrieved so far across the whole run, not merely the chunks from the current call — using `retriever.embedding_manager.cosine_similarity()` on each chunk's stored `embedding` field. This embedding is computed once, at the moment a chunk first enters the accumulated pool, and reused for every subsequent comparison against it rather than being recomputed on each new incoming chunk.")
+    add_code(doc, '''accumulated_chunks.append({
+    "content": content,
+    "source": source,
+    **({"embedding": retriever.embedding_manager.generate_embedding(content)}
+       if ENABLE_RETRIEVAL_DEDUP_MERGE else {}),
+    **({"chunk_seq": chunk_seq} if isinstance(chunk_seq, int) else {}),
+})''')
+    add_body(doc, "Gating embedding computation behind `ENABLE_RETRIEVAL_DEDUP_MERGE` (Chapter 36B.2) matters for cost, not just code cleanliness: an embedding call for every accumulated chunk is real, measurable latency, and a deployment that has decided deduplication is not worth its cost should not pay for the embeddings dedup would have needed either.")
+
+    add_heading(doc, "34.4 Greedy, star-shaped merging — not single-link clustering")
+    add_body(doc, "The clustering algorithm in `_accumulate_track()` is a specific, deliberate choice, not the only reasonable one. For each unclaimed chunk index `i`, it forms a group by comparing `i` against every later unclaimed index `j`, claiming any `j` whose similarity to `i` clears the threshold — a greedy, star-shaped cluster centered on `i`. This is meaningfully different from single-link (chain) clustering, where `A` similar to `B` and `B` similar to `C` would transitively group `A` with `C` even if `A` and `C` are not directly similar to each other at all.")
+    add_code(doc, '''claimed: set[int] = set()
+merge_groups: list[list[int]] = []
+for i in range(len(accumulated_chunks)):
+    if i in claimed:
+        continue
+    group = [i]
+    for j in range(i + 1, len(accumulated_chunks)):
+        if j in claimed:
+            continue
+        sim = cosine_similarity(accumulated_chunks[i]["embedding"], accumulated_chunks[j]["embedding"])
+        if sim >= MERGE_SIMILARITY_THRESHOLD:
+            group.append(j)
+            claimed.add(j)
+    if len(group) > 1:
+        claimed.add(i)
+        merge_groups.append(group)''')
+    add_body(doc, "Figure 34.1 draws the contrast that matters most between the two clustering strategies directly: a star-shaped group's every member has a verified direct relationship to its leader, while the single-link alternative shown alongside it would permit a chain of only pairwise-adjacent similarities to stand in for group-wide relatedness that was never actually confirmed.")
+    add_figure(doc, diagram_greedy_clustering_34(), "Figure 34.1 — Every member of a group is directly similar to the group's leader; single-link chaining would allow indirectly-related chunks to merge, which this design deliberately avoids.")
+    add_body(doc, "The star-shaped design is a direct, load-bearing consequence of Chapter 22.7's faithfulness concern: every chunk merged into one group is guaranteed to be directly, individually similar to the group's leader, which bounds how far the LLM merge step (Section 34.5) can be asked to reconcile content that might not actually belong together. Single-link clustering would offer no such guarantee — a transitively-chained group could contain a leader and a tail member with no direct similarity to each other at all, asking the merge LLM to faithfully combine content that was never actually shown to be alike.")
+
+    add_heading(doc, "34.5 The _merge_similar_chunks LLM merge step")
+    add_body(doc, "Each confirmed group is handed to `_merge_similar_chunks()` — the same function this project's own bug ledger (BUG-023) flags as shared infrastructure between retrieval-time dedup and NAC compression, used by two different callers that must both be considered whenever its logic changes. It builds `_CHUNK_MERGE_PROMPT` from the group's chunks, normalizes Windows backslash paths in source strings before JSON-encoding them (a real, specific fix — `_normalize_source()` — for a real bug where literal backslashes broke JSON parsing), and calls the merge LLM with retry.")
+    add_body(doc, "The failure path is explicit and conservative: `except (json.JSONDecodeError, KeyError, AttributeError, TypeError)` catches any parse failure and falls back to `similar_chunks[0]` — keeping the first chunk in the group, unmerged, discarding the rest of the group's content entirely rather than risking a malformed or partially-fabricated merge result reaching the accumulated pool. This mirrors Chapter 22B's over-compression guard in spirit: when a repair step cannot produce something trustworthy, the safe fallback is to lose some information cleanly, not to keep something unverifiable.")
+
+    add_heading(doc, "34.6 The mutation-during-iteration bug — and how the code avoids it")
+    add_body(doc, "A tempting but unsafe implementation would delete merged-away chunks from `accumulated_chunks` as soon as each group is resolved — `del accumulated_chunks[j]` inside the same loop that is still scanning the list by index. This is the classic mutate-while-iterating bug: deleting an element shifts every subsequent index down by one, so a loop still using its original index values silently skips elements or compares the wrong pair, and the corruption is often invisible unless specifically tested for.")
+    add_body(doc, "This project's code avoids the entire failure class structurally rather than through careful index bookkeeping: `indices_to_drop: set[int]` accumulates every index the merge groups decided to discard, and the actual list is only ever rebuilt once, after every group has been resolved — `[c for i, c in enumerate(accumulated_chunks) if i not in indices_to_drop]`. No deletion ever happens mid-scan; the scan and the mutation are two fully separate passes.")
+    add_body(doc, "The clustering loop itself follows the identical discipline for a second, related reason: `claimed` is a `set[int]`, checked but never used to physically remove anything from `accumulated_chunks` during the scan. Both the clustering pass (deciding which chunks belong to which group) and the merge-application pass (actually discarding merged-away chunks) read the list's positions as fixed and stable throughout their own execution, and only ever act on that list's actual contents in a step cleanly separated from the reading.")
+    add_body(doc, "Figure 34.2 puts the unsafe pattern and this project's actual pattern side by side specifically so the difference is visible as a structural one — not a matter of being more careful with the same approach, but of choosing an approach where the dangerous mid-scan mutation is never possible in the first place.")
+    add_figure(doc, diagram_deferred_drop_34(), "Figure 34.2 — Marking indices for removal during the scan and removing them in one pass afterward avoids the entire class of index-shift bugs a live deletion would risk.")
+    add_callout(doc, "Common pitfall", "Trusting an index while its container changes", "Any loop that both reads a list by index and removes items from that same list within the loop body is a latent bug, whether or not a specific test case happens to expose it. The deferred-collection pattern — record what to remove, remove it all afterward in one pass — generalizes far beyond chunk merging to any similar scan-and-modify situation.")
+
+    add_heading(doc, "34.7 Re-embedding merged chunks")
+    add_body(doc, "`_merge_similar_chunks()`'s return value includes a freshly computed embedding — `\"embedding\": embedding_manager.generate_embedding(merged_content)` — derived from the *merged* content, not inherited from any of the group's original member chunks. This matters directly for correctness on a run with more than one merge pass: if the agent loops back to RETRIEVE after an INSUFFICIENT verdict (Chapter 16.3) and retrieves more chunks, those new chunks get compared against the *already-merged* pool, and a stale, pre-merge embedding would compare new chunks against content that no longer accurately represents what the merged chunk actually says.")
+    add_body(doc, "This is the same principle Chapter 32.5's distillation dedup relies on from a different angle — a piece of derived data (a hash there, an embedding here) is only trustworthy if it is recomputed whenever the content it represents changes, never carried forward from a prior version of that content.")
+    add_body(doc, "The cost of getting this wrong would be silent rather than crash-visible, which is exactly what makes it worth stating explicitly. A stale embedding does not raise an exception — it simply produces a cosine similarity score computed against content that no longer exists in that form, quietly degrading the accuracy of every future merge decision involving that chunk without any error message pointing to the cause.")
+
+    add_heading(doc, "34.8 Telemetry: logging near-misses to tune the threshold empirically")
+    add_body(doc, "`MERGE_SIMILARITY_THRESHOLD = 0.90` was set once and, as far as this project's own ledger records, has not been revisited with the same evidence-based rigor Chapter 36C documents for the retrieval thresholds. The gap is worth naming as a concrete opportunity rather than glossing over: logging every *near-miss* comparison — pairs that scored close to but just under 0.90 — would build exactly the kind of empirical distribution Research topic 39 used to justify `DOCUMENTS_MIN_SIMILARITY` and `LEARNED_QA_MIN_SIMILARITY`, but for the merge threshold specifically.")
+    add_body(doc, "A minimal version costs almost nothing to add: alongside the existing `sim >= MERGE_SIMILARITY_THRESHOLD` check, log every comparison whose score falls within some band below the threshold (0.80-0.90, say) with both chunks' content previews. Reviewing that log periodically answers the question Section 34.2's reasoning could only address in the abstract — whether 0.90 is actually catching the real near-duplicates this project's own corpus and query patterns produce, or leaving genuine redundancy unmerged just below the line.")
+    add_body(doc, "The methodology this would follow is not a new invention — it is Chapter 36C's A/B log-comparison approach, applied one level deeper than that chapter's own retrieval-threshold focus. Where Chapter 36C compares retrieved-chunk sets across two full config values, a merge-threshold near-miss log would compare *pairwise similarity scores* across a single run, which is a smaller and cheaper instrumentation change but follows the identical underlying principle: a threshold chosen once, by reasoning alone, is a hypothesis, and only production data confirms or corrects it.")
+
+    add_body(doc, "Chapter 35 moves from the mechanisms themselves to the interface a user or operator actually touches — the CLI commands (`bad`, `stats`, `learn`) that trigger, inspect, and control everything Chapters 29 through 34 built.")
+    add_body(doc, "Reading this chapter's three pieces — threshold, clustering strategy, deferred mutation — together, the common thread is that none of them is an accident of implementation convenience. A looser or tighter threshold, single-link instead of star-shaped clustering, or a live delete instead of a deferred one would all still *run* without crashing on the common case. What distinguishes this project's actual choices is that each one was made with a specific downstream consequence in mind — faithfulness under LLM merging, safety against silent index corruption — rather than picked for being merely the first approach that happened to pass a quick manual test.")
+
+    path = OUT_DIR / "Chapter_34_Chunk_Deduplication_Merging.docx"
+    doc.core_properties.title = f"Chapter 34 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_command_dispatch_35() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520">'
+        '<rect width="1200" height="520" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["One input line, four possible destinations"], size=22, bold_first=True)
+        + svg_labeled_box(430, 90, 340, 100, "user_input_node", ["raw.lower() checked against", "exit / stats / learn / bad"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(500, 190, 220, 260)
+        + svg_arrow(560, 190, 460, 260)
+        + svg_arrow(640, 190, 740, 260)
+        + svg_arrow(700, 190, 980, 260)
+        + svg_labeled_box(80, 262, 280, 110, "cmd_exit", ["SystemExit(0)"], fill="#F2F2F2")
+        + svg_labeled_box(380, 262, 280, 110, "cmd_stats / cmd_learn", ["read-only or forced", "distillation pass"], fill="#D9D9D9")
+        + svg_labeled_box(680, 262, 280, 110, "cmd_bad", ["two-step feedback flow", "(Figure 35.2)"], fill="#D9D9D9")
+        + svg_labeled_box(940, 262, 220, 110, "normal query", ["command: \"\" —", "RETRIEVE phase begins"], fill="#F2F2F2")
+        + "</svg>"
+    )
+    return svg_to_png("chapter35_command_dispatch", svg)
+
+
+def diagram_bad_command_flow_35() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440">'
+        '<rect width="1200" height="440" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["The bad command's two-step interactive prompt"], size=22, bold_first=True)
+        + svg_labeled_box(60, 100, 340, 140, "User types: bad", ["command dispatch", "recognizes the keyword"], fill="#F2F2F2")
+        + svg_arrow(408, 170, 448, 170)
+        + svg_labeled_box(456, 100, 340, 140, "System prompts for detail", ["\"What was wrong?\"", "second input() call"], fill="#D9D9D9")
+        + svg_arrow(804, 170, 844, 170)
+        + svg_labeled_box(852, 100, 300, 140, "mark_last_bad(feedback)", ["gated by MIN_FEEDBACK_LEN", "(Chapter 31.2)"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter35_bad_command_flow", svg)
+
+
+def build_chapter_35() -> Path:
+    title = "Interactive Session: CLI Commands for Learning"
+    doc = configure_document(title)
+    add_cover(doc, 35, title, "PART VI — THE SELF-LEARNING LAYER", "The whole self-learning layer is only as usable as the three words that trigger it.")
+    add_chapter_heading(doc, 35, title)
+    add_body(doc, "Chapters 29 through 34 built the machinery — feedback capture, failure memory, distillation, hybrid retrieval, merge deduplication. None of it is directly reachable by a user typing a question. This chapter covers the thin, deliberately small command layer that actually exposes it: three keywords — `bad`, `stats`, `learn` — recognized inline in the same input stream as ordinary questions, dispatched to the functions Chapters 29 through 32 already built.")
+    add_body(doc, "This chapter also looks at a design this project did not ship — a richer slash-command syntax (`/save`, `/correct`, `/forget`) — not as a missing feature, but as a genuine alternative worth weighing against the three-keyword design that was actually chosen, and asks what a CLI needs to tell a user about what just happened without becoming as verbose as the debug log sitting right below it.")
+    add_body(doc, "By the end of this chapter you will be able to trace exactly how a single line of user input gets routed to either a normal query or one of three special commands, understand the two-step interactive prompt `bad` requires and why it is shaped that way, and evaluate a slash-command alternative design against the plain-keyword one this project actually shipped.")
+    add_body(doc, "It is worth naming upfront why a chapter on three short keywords deserves its own place in Part VI at all, rather than being folded as a footnote into the chapters that built the underlying mechanisms. Every mechanism in Chapters 29 through 34 is reachable from code — a Python test harness, a batch script, a direct function call — with no CLI involved whatsoever. But a real user sitting at a terminal has exactly one channel into this system: the text they type. If that channel cannot cleanly express \"this was wrong,\" \"show me the current learning state,\" or \"learn from what just happened now,\" then the self-learning layer's actual usability is bottlenecked by an interface problem no amount of backend sophistication fixes.")
+
+    add_heading(doc, "35.1 The bad command")
+    add_body(doc, "`user_input_node()` is the single dispatch point every line of user input passes through: `raw.lower()` is checked against `{\"exit\", \"quit\"}`, `\"stats\"`, `\"learn\"`, and `\"bad\"` before anything is treated as an ordinary query. Recognizing `bad` sets `state[\"command\"] = \"bad\"` and routes to `cmd_bad()` — but `bad` alone carries no information about *what* was wrong, which is why it is inherently a two-step interaction: the keyword triggers a follow-up prompt asking for the actual feedback text, and that second input is what `cmd_bad()` actually forwards to `mark_last_bad()`.")
+    add_body(doc, "Figure 35.2 traces this two-step shape end to end, from the bare keyword through to the gated persistence call, because the gap between the two steps is precisely where Chapter 31.2's `MIN_FEEDBACK_LEN` threshold gets applied — a detail easy to miss if `bad` is thought of as one atomic action rather than the two genuinely separate inputs it actually is.")
+    add_figure(doc, diagram_bad_command_flow_35(), "Figure 35.2 — The bad command's two-step shape mirrors the reality that a bare thumbs-down and a thumbs-down with an explanation trigger meaningfully different persistence (Chapter 31.2).")
+    add_body(doc, "This two-step shape is not incidental friction — it is the exact seam Chapter 31.2's `MIN_FEEDBACK_LEN` gate depends on. A single-step `bad <reason>` command would work too, but the two-step version makes the *asking* for detail an explicit, visible part of the interaction, nudging a user who might otherwise type a bare `bad` toward providing the richer signal Chapter 31's entire mechanism is built to use.")
+    add_body(doc, "There is a second, quieter reason the two-step design earns its keep: it separates *noticing* a problem from *articulating* it, which are genuinely different cognitive tasks happening at different moments. A user reading a bad answer reacts first — the `bad` keyword captures that reaction immediately, before the moment passes and before `mark_last_bad()` needs anything more than the fact that the last interaction should be flagged. The follow-up prompt then gives that same user a second, separate moment to actually explain what was wrong, without requiring them to have composed that explanation before they had even finished reading the flawed answer. A single-step command would force both to happen at once, under time pressure, likely producing shorter and less useful feedback text as a result.")
+
+    add_heading(doc, "35.2 The stats command")
+    add_body(doc, "`cmd_stats()` is read-only and answers exactly three questions a user or operator might have about the system's learning state: how many interactions have been logged in total, how many were good enough to potentially feed distillation, and how many QA pairs currently live in `learned_qa`.")
+    add_code(doc, '''def cmd_stats(state: GraphState) -> dict:
+    total = feedback_store.count()
+    good = feedback_store.count_good()
+    learned = learned_collection.count()
+    print(f"\\n  Total interactions logged : {total}")
+    print(f"  Successful (OK quality)   : {good}")
+    print(f"  Learned QA pairs in store : {learned}")
+    if get_switches(state)["ENABLE_AUTO_DISTILLATION"]:
+        next_n = LEARN_EVERY_N - (good % LEARN_EVERY_N) if good > 0 else LEARN_EVERY_N
+        print(f"  Next distillation at      : {next_n} more good interaction(s)\\n")
+    else:
+        print("  Automatic distillation    : disabled\\n")
+    return {}''')
+    add_body(doc, "The \"Next distillation at\" line is a small but genuinely useful piece of derived information — it is not stored anywhere, it is computed on the fly from `count_good()` and `LEARN_EVERY_N` (Chapter 32.7's trigger constant), turning an abstract modulo condition into a concrete, human-readable countdown. This is the identical spirit as Chapter 27's state-engineering discipline, applied to a human-facing surface instead of a model-facing one: derive what is needed at the moment it is needed rather than maintaining a separately-tracked \"turns until next distillation\" counter that could drift from the real count.")
+    add_body(doc, "Notice also what `cmd_stats()` deliberately does not report: it shows no breakdown of `INSUFFICIENT` or `USER_THUMBSDOWN` counts, no error rates, no latency figures. This is a scope decision, not an oversight — `stats` answers the specific question \"is the self-learning layer working and how close is it to its next action,\" not the broader question \"is this deployment healthy,\" which belongs to the observability stack Part IV's dry-run tracing already covers. Conflating the two would turn a three-line status check into something closer to a dashboard, at the cost of the quick, scannable answer `stats` is actually designed to give.")
+    add_body(doc, "The conditional branch on `ENABLE_AUTO_DISTILLATION` (Chapter 36B.2) is worth reading closely too: when automatic distillation is switched off, showing a \"next distillation at N more interactions\" countdown would be actively misleading, since no such automatic event will ever fire regardless of how high the good-interaction count climbs. Reporting \"Automatic distillation: disabled\" instead is a small but real instance of a command telling the truth about what the system will actually do, rather than presenting a projection that quietly assumes a configuration the deployment may not have.")
+
+    add_heading(doc, "35.3 The learn command")
+    add_body(doc, "`cmd_learn()` bypasses `should_learn()`'s automatic trigger entirely and calls `run_distillation()` directly, on demand. This is the manual strategy from Chapter 32.7's trigger table, and its value is independent of whether automatic distillation is even enabled — an operator who just finished a batch of known-good interactions (`run_batch.py`'s Batch 12 scripts exactly this: ask a question, force `learn`, then verify the learned count grew) does not want to wait for the count to naturally cross a multiple of `LEARN_EVERY_N`.")
+    add_code(doc, '''def cmd_learn(state: GraphState, config=None) -> dict:
+    print("Forcing distillation now…")
+    added = self_learner.run_distillation(config=config, switches=get_switches(state))
+    print(f"Added {added} QA pair(s) to learned_qa.\\n")
+    return {}''')
+    add_body(doc, "Reporting the exact count added — not merely \"distillation complete\" — closes the loop a user just opened by typing the command: they asked for something to happen, and the response confirms specifically what happened, including the honest zero-pairs-added case Chapter 32.6 already covered as a legitimate, non-error outcome.")
+    add_body(doc, "`run_batch.py`'s Batch 12 script demonstrates why this immediate confirmation matters operationally, not just conversationally: it asks a baseline question, checks `stats`, forces `learn`, checks `stats` again, then re-asks a related question to see whether the newly learned entry gets retrieved. Every step of that sequence depends on the *previous* step's output being trustworthy and immediately visible — a `learn` command that silently succeeded with no count reported would break the script's ability to verify anything at all, since there would be no way to confirm the forced distillation actually did what it claimed before moving on to test its effect.")
+
+    add_heading(doc, "35.4 The /save, /correct, /forget pattern")
+    add_body(doc, "A richer alternative design is worth considering explicitly, even though this project did not build it: slash-prefixed commands, `/save` to force distillation of the last answer regardless of the automatic trigger, `/correct <text>` to combine a thumbdown with an immediate replacement answer in one step, and `/forget <query>` to explicitly remove a specific entry from `learned_qa` rather than waiting for it to age out or be superseded.")
+    add_table(doc, ["Design", "Command surface", "Trade-off"], [
+        ["Plain keywords (shipped)", "bad, stats, learn, exit", "Minimal, no parsing ambiguity with real questions"],
+        ["Slash commands (alternative)", "/save, /correct, /forget, /stats", "More expressive; needs a real parser and collides less by design"],
+    ], [2.30, 2.30, 2.70])
+    add_body(doc, "The plain-keyword design this project shipped has one advantage the slash-command alternative gives up for free: `bad`, `stats`, and `learn` are recognized by exact string match against `raw.lower()`, with no parsing beyond a dictionary lookup, and no risk of a legitimate question accidentally starting with a reserved prefix. A slash-command design trades that simplicity for expressiveness — `/correct <replacement text>` genuinely cannot be expressed in the three-keyword vocabulary at all, since there is no way to attach a payload to `bad` beyond the two-step prompt Section 35.1 already uses for feedback text specifically.")
+    add_body(doc, "`/forget` is the most consequential of the three hypothetical commands, because it is the one closest to Chapter 28.5.1's argument that \"a system that can add experience but cannot locate and remove it is accumulating liability, not learning responsibly.\" This project's shipped design has no user-facing removal path for a specific `learned_qa` entry at all — an operator wanting to remove one would need to interact with the ChromaDB collection directly, outside any CLI command this chapter covers. `/forget` names a real, currently-unaddressed gap, not a nice-to-have.")
+    add_body(doc, "`/save` and `/correct` are lower-stakes but still genuinely useful gaps in the shipped vocabulary. `/save` would let a user force distillation of one specific answer they found valuable, independent of whether that interaction happened to land on a `LEARN_EVERY_N` boundary or whether an operator remembers to run the blanket `learn` command afterward — a more surgical version of Section 35.3's forced distillation, scoped to one interaction instead of the whole eligible batch. `/correct <replacement>` goes further still, combining a thumbdown with an immediate, user-supplied better answer in a single step, rather than requiring the system to blindly re-retrieve and hope the next attempt lands closer to what the user actually wanted — effectively letting the user write the `learned_qa` entry directly instead of leaving it entirely to distillation's own judgment.")
+    add_body(doc, "None of these three hypothetical commands would be difficult to build on top of the machinery Chapters 29 through 34 already provide — `/save` is a thin wrapper around a single-interaction call to `_generate_qa_pairs()` and `_upsert_pairs()`, `/forget` is a `collection.delete(ids=[...])` call away, and `/correct` mostly needs a way to accept multi-line input for the replacement text. The reason to walk through them here is not that they are hard, but that naming a command surface explicitly — even one that was never built — is itself a useful exercise: it makes clear which capabilities this project's self-learning layer structurally supports today and which ones would require new user-facing entry points before they could ever be used, no matter how ready the underlying storage and retrieval logic already is.")
+
+    add_heading(doc, "35.5 User-friendly logging and progress messages")
+    add_body(doc, "Every command in this chapter prints directly to the user-facing terminal — `print()`, not `logger.debug()` — a deliberate separation this project maintains throughout: the debug log (Chapter 22) is the detailed, developer-facing trace of exactly what happened at every stage; the terminal output a command produces is the short, human-facing summary of what the user actually needs to know right now.")
+    add_body(doc, "Figure 35.1 revisits this chapter's opening dispatch diagram from the logging angle specifically: every one of its four destinations owns its own small, self-contained burst of `print()` output, and none of them depends on the caller enabling any particular log level to be seen. That independence from logging configuration is itself a design requirement, not a coincidence — a CLI command whose confirmation only appears at DEBUG level has effectively failed silently for any user running at the default INFO level.")
+    add_figure(doc, diagram_command_dispatch_35(), "Figure 35.1 — Every line of input passes through one dispatch point before becoming either a special command or an ordinary query.")
+    add_callout(doc, "Common pitfall", "Routing operator commands through the debug log", "A `stats` or `learn` command whose only output is a DEBUG-level log line is invisible to a user running the CLI with default logging levels (Chapter 23's `console_level=INFO` default). Commands a user directly invokes need a `print()`-level response guaranteed to reach the terminal, independent of whatever log verbosity happens to be configured.")
+    add_body(doc, "This distinction generalizes past this specific project: any interactive command a user directly triggers should confirm what happened in plain, immediate terms — count added, feedback persisted or rejected, distillation forced — while the detailed *why* and *how* stays in the log stream for whoever needs to debug a problem later. Chapter 22's dry-run trace and this chapter's command output are not competing for the same audience, and conflating them serves neither well.")
+
+    add_body(doc, "Chapter 36 asks the question this entire self-learning layer has been building toward and this chapter's `stats` command only partially answers: not just how many interactions were logged or how many pairs were distilled, but whether any of it actually made the system's answers measurably better.")
+    add_body(doc, "That gap is worth stating plainly as this chapter closes. `stats` reports activity — counts of interactions, counts of learned pairs — not outcomes. A deployment could show a healthy, steadily growing `learned_qa` count while its actual answer quality stayed flat or even regressed, and nothing in this chapter's command surface would surface that discrepancy. Activity metrics are necessary for operating the system day to day, but they are not evidence of the thing the system is actually meant to achieve, which is precisely the distinction Chapter 36 exists to draw out.")
+
+    path = OUT_DIR / "Chapter_35_CLI_Commands_For_Learning.docx"
+    doc.core_properties.title = f"Chapter 35 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_baseline_timeline_36() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["The same fixed eval set, run at two points in time"], size=22, bold_first=True)
+        + svg_labeled_box(60, 100, 500, 150, "Week 0 — baseline", ["learned_qa empty", "fixed question set run once", "answers scored and archived"], fill="#F2F2F2")
+        + svg_arrow(590, 175, 650, 175)
+        + svg_labeled_box(660, 100, 500, 150, "Week N — after real usage", ["learned_qa has grown", "identical question set re-run", "answers scored the same way"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 250, 600, 286)
+        + svg_labeled_box(200, 288, 800, 110, "Compare, question by question — not just an aggregate score", ["a single regressed answer can hide inside an unchanged average"], fill="#D9D9D9")
+        + "</svg>"
+    )
+    return svg_to_png("chapter36_baseline_timeline", svg)
+
+
+def diagram_stdin_monkeypatch_36() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["run_batch.py drives an unmodified agent through its own front door"], size=22, bold_first=True)
+        + svg_labeled_box(60, 100, 500, 130, "_ScriptedStdin(questions)", ["a scripted list stands in for", "a human typing at the prompt"], fill="#F2F2F2")
+        + svg_arrow(590, 165, 650, 165)
+        + svg_labeled_box(660, 100, 500, 130, "builtins.input = _patched_input", ["every input() call inside", "agent_query.py is redirected"], fill="#D9D9D9")
+        + svg_arrow(600, 250, 600, 286)
+        + svg_labeled_box(200, 288, 800, 110, "agent_query.main() runs completely unmodified", ["the production code path is exactly what a real user's session would execute"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter36_stdin_monkeypatch", svg)
+
+
+def build_chapter_36() -> Path:
+    title = "Evaluating Whether Self-Learning Actually Works"
+    doc = configure_document(title)
+    add_cover(doc, 36, title, "PART VI — THE SELF-LEARNING LAYER", "A growing memory collection is evidence of activity. Only a repeated, comparable measurement is evidence of improvement.")
+    add_chapter_heading(doc, 36, title)
+    add_body(doc, "Chapter 35 closed by naming the gap this chapter fills: `stats` reports how much has been learned, never whether learning it helped. This chapter builds the evaluation discipline that actually answers that question — a fixed baseline, a repeatable fixture-driven test harness, and a comparison methodology precise enough to catch a regression that an aggregate score would hide.")
+    add_body(doc, "The chapter leans heavily on `run_batch.py`, a tool already introduced in earlier chapters as a source of real, grounded examples (the ASD-disambiguation batch in Chapter 31.7, the self-learning pipeline batch in Chapter 35.3) but never examined for what it actually is: a genuinely clever piece of test infrastructure that drives the unmodified, production `agent_query.main()` entry point through a scripted conversation, with no changes to the code under test at all.")
+    add_body(doc, "By the end of this chapter you will be able to design a fixed evaluation set that stays comparable across repeated runs over time, explain exactly how `run_batch.py`'s stdin monkey-patching lets it exercise real production code rather than a test-only stub, and know what evaluating against published RAG benchmarks like Self-RAG, RAGAS, and Pistis-RAG can and cannot tell you about a project this specific.")
+
+    add_heading(doc, "36.1 Baseline accuracy before learning kicks in")
+    add_callout(doc, "Definition", "Baseline run", "A recorded set of answers to a fixed question set, captured before any self-learning mechanism has had a chance to influence retrieval — the reference point every later comparison measures against.")
+    add_body(doc, "A claim like \"the learned_qa collection improved answer quality\" is unfalsifiable without a baseline captured *before* that collection had any entries to retrieve from. This is not a subtle methodological point — it is the entire difference between a genuine before/after comparison and a single after-only snapshot that merely describes the system's current state with no reference point to measure improvement against.")
+    add_body(doc, "Capturing a baseline is operationally simple given Chapter 35's `stats` command: run the fixed evaluation set (Section 36.2) against a fresh deployment with `learned_qa` at zero entries, archive every answer alongside its `request_id`, and only then let the system accumulate real usage and distilled memory. Skipping this step is the single most common way an evaluation effort fails before it starts — by the time someone thinks to ask \"did this help,\" the collection has already grown past zero and the true starting point is gone for good.")
+    add_body(doc, "A subtler trap is capturing a baseline that is technically \"before learning\" but not actually comparable to the run it will later be measured against. If the source corpus changes between baseline and comparison — new documents ingested, old ones removed — any observed difference conflates corpus drift with learning effect, and the evaluation can no longer isolate which one actually produced a given change in answer quality. A rigorous baseline freezes not just `learned_qa` at zero, but the entire evaluation context: same corpus, same model, same configuration flags (Chapter 36B), varying only the one thing under test.")
+
+    add_heading(doc, "36.2 Building a fixed evaluation set")
+    add_body(doc, "`run_batch.py`'s fifteen `BATCHES` entries are not fifteen independent smoke tests — read together, they are a single, deliberately structured 100-question fixed evaluation set, each batch targeting a specific failure category: disambiguation (Batch 1), zero-chunk situations (Batch 3), multi-source synthesis (Batch 4), hallucination-risk partial-knowledge-base topics (Batch 5), and — directly relevant to this chapter — the self-learning pipeline itself (Batch 12).")
+    add_table(doc, ["Batch", "Category", "What it stresses"], [
+        ["1", "ASD disambiguation + thumbdown", "Cross-domain acronym collision, Chapter 31's mechanism"],
+        ["3", "Zero-chunk situations", "Out-of-corpus queries, Chapter 30's blocklist"],
+        ["5", "Hallucination-risk partial KB", "Grounding discipline under incomplete evidence"],
+        ["12", "Self-learning pipeline", "stats → learn → stats → re-ask, this chapter's exact subject"],
+        ["13", "Multi-turn thumbdown refinement", "Whether feedback actually steers the next retrieval"],
+    ], [0.85, 2.55, 3.20])
+    add_body(doc, "A fixed evaluation set earns the adjective \"fixed\" by staying byte-for-byte identical across every run it is used for — the moment a question's wording changes between one evaluation and the next, any difference in the answer conflates two variables (did the system change, or did the question) that a genuine before/after comparison needs kept separate.")
+
+    add_heading(doc, "36.3 Driving repeated runs with run_batch.py")
+    add_body(doc, "`run_batch.py` solves the repeatability problem with a technique worth understanding in its own right: `_ScriptedStdin` replaces `sys.stdin`, and `builtins.input` is monkey-patched to pull from a scripted list of questions and commands instead of a human typing at a keyboard — then `agent_query.main()` is imported and called completely unmodified. The production code has no idea it is being tested; every `input(\"Your question: \")` call inside it receives the next scripted entry exactly as if a person had typed it.")
+    add_body(doc, "Figure 36.2 traces this substitution at exactly the layer it happens — not inside `agent_query.py` itself, which remains completely untouched, but one level below it, at the boundary Python's own `input()` builtin crosses to reach the terminal.")
+    add_figure(doc, diagram_stdin_monkeypatch_36(), "Figure 36.2 — Monkey-patching stdin, not the agent itself, means the exact production code path runs under test — no test-only branches, no mocked internals.")
+    add_code(doc, '''def _patched_input(prompt=""):
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    return scripted.readline().rstrip("\\n")
+
+import builtins
+builtins.input = _patched_input
+...
+import agent_query
+agent_query.main()''')
+    add_body(doc, "This is a meaningfully stronger testing discipline than calling `run_agent()` directly with hand-constructed arguments would be — it exercises the *entire* interactive loop, including the REPL prompt logic, the `bad`/`stats`/`learn` command dispatch Chapter 35 covered, and the exact sequencing a real session produces, all without a single line of `agent_query.py` needing to know it is under test. A `_Tee` class simultaneously mirrors every line of output to both the live terminal and a timestamped log file, so a batch run produces both real-time visibility and a permanent, diffable record.")
+
+    add_heading(doc, "36.4 Measuring answer quality over time")
+    add_body(doc, "Chapter 16.3's automatic `check_answer_quality()` verdict — `OK` or `INSUFFICIENT` — is one legitimate signal to track across repeated baseline runs, and it costs nothing extra to collect since it already runs on every interaction. But it answers only \"was this answer grounded,\" not \"was this the *best* answer the system could have given\" — a subtler question that generally still needs human judgment, or an LLM-as-judge comparison against the archived baseline answer for the identical question.")
+    add_figure(doc, diagram_baseline_timeline_36(), "Figure 36.1 — The same fixed question set, scored the same way, run at two separated points in time, compared question by question rather than only as an aggregate.")
+    add_body(doc, "The comparison granularity matters as much as the metric itself. An aggregate \"quality score\" that stays flat between baseline and a later run can hide real movement in both directions — three questions genuinely improved by newly-distilled memory, three questions genuinely regressed by something else entirely, netting out to no visible change at all. Comparing question by question, not only in aggregate, is the only way to catch that kind of cancellation.")
+    add_body(doc, "This granularity requirement is exactly why Figure 36.1 draws the comparison as two archived, timestamped snapshots rather than a single trend line — a trend line invites reading only its slope, while two explicit snapshots, kept and compared question by question, invite the more demanding but more honest question of which specific answers moved, and in which direction.")
+
+    add_heading(doc, "36.5 Detecting memory drift and regression")
+    add_body(doc, "\"Memory drift\" names a specific risk Chapter 28.5 already previewed in principle: as `learned_qa` grows, its influence on retrieval grows with it (Chapter 33.5), and if any distilled entry was subtly wrong — grounded in a source that was itself outdated, or a rephrasing that drifted slightly from its original meaning during Chapter 32's distillation step — that entry's influence compounds with every future query it happens to match, rather than staying an isolated, one-time error.")
+    add_body(doc, "Detecting drift requires exactly the repeated-baseline discipline Sections 36.1 and 36.4 already built: a question the fixed evaluation set answered correctly at week 0 that now answers *worse* at week 8, despite the corpus itself being unchanged, is the signature symptom. This is precisely why the evaluation set must stay fixed and the comparison must stay question-by-question — a regression on one specific, previously-correct question is exactly the kind of local signal an aggregate score is most likely to bury.")
+    add_callout(doc, "Common pitfall", "Treating a growing learned_qa count as a health metric on its own", "Chapter 35.2's `stats` command reports collection size, not collection correctness. A steadily growing count with no accompanying baseline comparison is consistent with both a genuinely improving system and a slowly drifting one — the count alone cannot distinguish between them.")
+
+    add_heading(doc, "36.6 When to manually review and prune the learned collection")
+    add_body(doc, "Section 36.5's drift detection tells you *that* a regression happened; it does not by itself tell you *which* `learned_qa` entry caused it, since a single query typically matches against several stored entries at once. A manual review pass — reading through the `original_query`, `question`, and `answer` metadata Chapter 32.6 stores per entry — is the practical next step once drift is suspected on a specific question, narrowing the search to whichever entries plausibly matched that question's embedding.")
+    add_body(doc, "Chapter 35.4's hypothetical `/forget` command is the tool this workflow is missing today — this project's shipped design has no CLI path for removing a specific entry once manual review identifies it as the culprit, only direct ChromaDB collection access outside any command this book has covered. A practical periodic review cadence — monthly, or triggered specifically by a detected regression — is a reasonable operational default even without that tooling gap closed, since a slow, curated pruning process still beats an uncurated collection that only ever grows.")
+
+    add_heading(doc, "36.7 Comparing to research benchmarks")
+    add_body(doc, "This project's own evaluation approach is worth placing next to the broader published literature on evaluating retrieval-augmented and self-improving systems, not to claim parity with any of them, but to understand what each measures and where this chapter's methodology sits relative to that landscape. RAGAS, a widely used open-source evaluation framework, decomposes RAG quality into separable metrics — faithfulness (are claims grounded in retrieved context), answer relevancy, context precision, and context recall — computed largely via LLM-as-judge scoring rather than exact-match comparison. Self-RAG, a research architecture rather than an evaluation tool, trains a model to emit explicit reflection tokens deciding when to retrieve and critiquing its own generation's support and relevance, treating quality control as something learned into the model rather than layered on top of it as a separate pipeline stage. Pistis-RAG frames its contribution around trustworthiness specifically — content-centric, multi-stage scaffolding aimed at keeping a RAG pipeline's outputs verifiably grounded across a longer generation process.")
+    add_table(doc, ["Framework", "What it measures", "Relation to this project's approach"], [
+        ["RAGAS", "Faithfulness, relevancy, context precision/recall — via LLM judge", "Conceptually close to check_answer_quality (Ch16) and validate_retrieval (Ch11)"],
+        ["Self-RAG", "Learned reflection tokens deciding retrieve/critique", "This project's judge logic is a separate pipeline stage, not learned into the model"],
+        ["Pistis-RAG", "End-to-end trustworthiness across multi-stage generation", "Analogous in spirit to the NAC→DC→LBC faithfulness guards (Ch22B)"],
+    ], [1.35, 3.05, 3.20])
+    add_body(doc, "The honest comparison to draw is architectural, not a leaderboard ranking: this project's `check_answer_quality()`, `validate_retrieval()`, and the compression-stage faithfulness guards are all separate, auditable, swappable pipeline stages rather than behavior trained into the model itself — closer in philosophy to RAGAS's decomposed, externally-measured metrics than to Self-RAG's internalized reflection. This project's fixed-batch evaluation methodology (Sections 36.1-36.5) is a lighter-weight, project-specific instrument than any of these published frameworks — genuinely useful for catching this specific deployment's own regressions, but not a substitute for the broader, cross-system benchmarking these frameworks are actually designed to support.")
+
+    add_heading(doc, "36.8 The long-lived single-process benchmark runner")
+    add_body(doc, "`run_batch.py` launches a fresh Python process per invocation, appropriate for `app/`'s imperative architecture but a poor fit once `app_workflow/`'s LangGraph rewrite (Chapter 19B) introduced genuinely stateful, expensive-to-initialize services — the MongoDB client, tracing setup (Phoenix/LangSmith/Langfuse), the learned-QA vector-store view — that a fresh process re-pays the cost of on every single batch. This project's own `run_all_workflow_batches.py`, documented in `Architecture.md`'s 2026-07-13 and 2026-07-14 entries, addresses exactly this: it starts one long-lived `app_workflow/api.py` subprocess, polls `GET /stats` until the service reports ready, and then fires all fifteen `BATCHES` — the identical fixture dictionary Section 36.2 already covers, reused rather than reimplemented — as roughly 100 HTTP requests against that one persistent process, with no inter-query delay.")
+    add_body(doc, "The architectural payoff named in this project's own history is state persistence across the entire suite: in-memory services, tracing context, the MongoDB client connection, and the learned-QA collection's live view all survive from the first scripted question to the last, meaning Batch 12's self-learning pipeline test (ask, force-learn, verify count grew, re-ask) and every batch after it observe the *same*, continuously-evolving `learned_qa` state — a far closer approximation of a real multi-user deployment's actual operating conditions than fifteen independently-launched, freshly-initialized processes would provide.")
+    add_body(doc, "This design also makes drift detection (Section 36.5) meaningfully cheaper to run at scale: a single long-lived process working through a hundred scripted scenarios back-to-back produces one continuous, chronologically ordered log rather than fifteen disjoint ones that would need to be stitched together afterward just to reconstruct the order in which the learned collection actually evolved during the run.")
+
+    add_body(doc, "Part VI closes with this chapter's core lesson stated plainly: every mechanism from Chapter 29's feedback ledger through Chapter 35's CLI commands is only as trustworthy as the evaluation discipline that can actually detect when one of them stops working. Part VII turns from the self-learning layer specifically to the broader concerns of running this whole system in production — deployment, observability at scale, and the operational discipline the rest of this book's mechanisms all eventually depend on.")
+    add_body(doc, "The two remaining chapters in this arc extend the evaluation discipline this chapter established into two adjacent, equally necessary directions. Chapter 36B asks how a deployment isolates *which* pipeline stage is responsible for an observed change, using the same kind of controlled, repeatable comparison this chapter applied to self-learning specifically. Chapter 36C applies that identical evidence-based discipline to the retrieval thresholds Chapter 33 introduced, closing the loop between a number chosen by reasoning alone and a number confirmed, or corrected, by real production data.")
+
+    path = OUT_DIR / "Chapter_36_Evaluating_Self_Learning.docx"
+    doc.core_properties.title = f"Chapter 36 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_flag_catalogue_36b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560">'
+        '<rect width="1200" height="560" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Twelve independent kill-switches, one per pipeline stage"], size=22, bold_first=True)
+        + svg_labeled_box(40, 90, 350, 105, "Sub-query generation", ["ENABLE_SUB_QUERY_GENERATION"], fill="#F2F2F2")
+        + svg_labeled_box(420, 90, 350, 105, "Retrieval dedup/merge", ["ENABLE_RETRIEVAL_DEDUP_MERGE", "+ its own VALIDATION flag"], fill="#D9D9D9")
+        + svg_labeled_box(800, 90, 350, 105, "Retrieval validation", ["ENABLE_RETRIEVAL_VALIDATION"], fill="#F2F2F2")
+        + svg_labeled_box(40, 210, 350, 105, "NAC / DC / LBC", ["three independent", "compression-stage flags"], fill="#D9D9D9")
+        + svg_labeled_box(420, 210, 350, 105, "Answer draft + quality check", ["ENABLE_ANSWER_DRAFT_CREATION", "ENABLE_ANSWER_QUALITY_CHECK"], fill="#F2F2F2")
+        + svg_labeled_box(800, 210, 350, 105, "Distillation", ["ENABLE_AUTO_DISTILLATION", "ENABLE_QA_PAIR_GENERATION"], fill="#D9D9D9")
+        + svg_arrow(600, 330, 600, 366)
+        + svg_labeled_box(140, 368, 920, 110, "ENABLE_GLOBAL_LLM_OUTPUT_FIX — the master switch", ["above every per-stage *_OUTPUT_FIX flag —", "a stage's own output-fix flag only matters if this one is also true"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter36b_flag_catalogue", svg)
+
+
+def diagram_switch_resolution_36b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460">'
+        '<rect width="1200" height="460" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Per-request overrides, resolved once, read everywhere"], size=22, bold_first=True)
+        + svg_labeled_box(60, 100, 340, 130, "config.py defaults", ["DEFAULT_SWITCHES —", "20 ENABLE_* flags"], fill="#F2F2F2")
+        + svg_arrow(408, 165, 448, 165)
+        + svg_labeled_box(456, 100, 340, 130, "resolve_switches(overrides)", ["request JSON overlays only", "known, bool-typed keys"], fill="#D9D9D9")
+        + svg_arrow(804, 165, 844, 165)
+        + svg_labeled_box(852, 100, 300, 130, "GraphState[\"switches\"]", ["resolved once per request"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 250, 600, 286)
+        + svg_labeled_box(200, 288, 800, 110, "get_switches(state) — every node reads the same resolved dict", ["falls back to config.py defaults when no \"switches\" key exists at all"], fill="#F2F2F2")
+        + "</svg>"
+    )
+    return svg_to_png("chapter36b_switch_resolution", svg)
+
+
+def build_chapter_36b() -> Path:
+    title = "Feature-Flag-Driven Development for RAG Pipelines"
+    doc = configure_document(title)
+    add_cover(doc, "36B", title, "PART VI — THE SELF-LEARNING LAYER", "A pipeline stage that cannot be turned off cannot be isolated, and a stage that cannot be isolated cannot be debugged.")
+    add_chapter_heading(doc, "36B", title)
+    add_body(doc, "Every mechanism this book has covered — NAC, DC, LBC, retrieval validation, dedup-merge, answer drafting, auto-distillation — exists in this project's code behind its own `ENABLE_*` boolean in `config.py`. This chapter steps back from any single stage to look at the flag architecture itself: why every stage needed its own kill-switch, how this project used flag combinations as an actual debugging methodology rather than only a deployment convenience, and how a per-request override system lets a single running service serve different configurations to different callers simultaneously.")
+    add_body(doc, "The chapter draws directly on a real bug this project's own ledger records — BUG-022, found specifically *because* flag-combination testing existed — as the clearest evidence that a feature-flag architecture is not free: every flag doubles the number of code paths that must actually work, and a codebase that adds flags without testing the states they create is accumulating a debugging burden it has not yet paid for.")
+    add_body(doc, "By the end of this chapter you will be able to catalogue a pipeline's flags by functional area rather than as an undifferentiated list, understand why a separate output-fix flag layered on top of a stage flag is a deliberate two-axis design rather than redundancy, and trace exactly how a per-request override travels from an API request body to the specific node that reads it.")
+
+    add_heading(doc, "36B.1 Why every pipeline stage needs a kill-switch")
+    add_callout(doc, "Definition", "Feature flag (this project's usage)", "A boolean configuration constant that fully enables or disables one pipeline stage's execution, allowing that stage to be isolated for debugging, A/B compared against its absence, or disabled entirely in a degraded-but-functional deployment.")
+    add_body(doc, "A pipeline with no flags at all is a pipeline where every bug report starts from the full, entangled system — there is no way to ask \"does this problem still happen with compression turned off\" without editing code and redeploying. Chapter 34's merge-similarity logic, Chapter 22B's three-stage compression, Chapter 16's draft-then-judge cycle: each is complex enough on its own that isolating it from its neighbors is often the fastest way to determine whether an observed problem originates inside that stage or somewhere else entirely.")
+    add_body(doc, "This is precisely the isolation Research topic 25 in this project's own research ledger describes `run_combinations.py` providing: \"running identical queries through different flag combinations exposed hidden dependencies, undocumented assumptions, and unsupported execution paths that normal testing never exercised.\" A flag is not merely an off switch for production — it is a debugging instrument, deliberately built to let a specific stage's contribution be isolated from everything around it.")
+
+    add_heading(doc, "36B.2 The config.py flag catalogue")
+    add_body(doc, "This project's flags cluster into recognizable functional areas rather than forming one undifferentiated list: sub-query generation, retrieval dedup/merge (with its own nested validation flag), retrieval validation, the three independent compression stages (NAC, DC, LBC) plus their shared validation flag, answer draft creation, answer quality checking, automatic distillation, QA-pair generation, and — cutting across all of the above — a single global LLM output-repair switch.")
+    add_figure(doc, diagram_flag_catalogue_36b(), "Figure 36B.1 — Flags cluster by functional area; the global output-fix switch sits above every per-stage flag as a second, independent axis of control.")
+    add_body(doc, "Grouping by functional area rather than reading the flags as one flat list matters for exactly the reason Chapter 36B.8 formalizes later: a flag whose neighbors are all part of the same stage (NAC's `ENABLE_NAC_COMPRESSION` next to DC's and LBC's own flags) invites the natural question of whether all three should default together or whether independent control is genuinely needed — a question a flat, alphabetized list of twenty booleans makes much harder to ask.")
+
+    add_heading(doc, "36B.3 Per-stage output-fix flags as an independent layer")
+    add_body(doc, "`ENABLE_QA_PAIR_OUTPUT_FIX`, `ENABLE_RETRIEVAL_VALIDATION_OUTPUT_FIX`, `ENABLE_COMPRESSION_OUTPUT_FIX`, and their siblings are not duplicates of their parent stage's own flag — they control a genuinely separate concern, Chapter 13B's multi-tier JSON repair pipeline, layered on top of whether the stage itself runs at all. A stage can be enabled with its own output-fix flag disabled, meaning that stage runs but any malformed LLM output it produces falls back to `_parse_to_python()` directly, with no repair attempt.")
+    add_code(doc, '''if ENABLE_QA_PAIR_OUTPUT_FIX and ENABLE_GLOBAL_LLM_OUTPUT_FIX:
+    llm_result, _ok = fix_llm_output("distill_qa", raw, llm=self.llm)
+else:
+    llm_result = _parse_to_python(raw)''')
+    add_body(doc, "Both conditions must hold — the stage-specific flag *and* `ENABLE_GLOBAL_LLM_OUTPUT_FIX` — which is precisely the two-axis design Figure 36B.1's stacked master switch depicts: the global flag is a single, fast way to disable repair everywhere at once (useful for isolating whether a bug lives in the repair layer itself), while the per-stage flags allow finer-grained control once the global switch is confirmed on.")
+    add_body(doc, "BUG-022 is the direct cost of this flexibility, discovered specifically through the `run_combinations.py` ladder testing Section 36B.1 already named: several fallback paths in `validators.py` and `context_compression.py` were written assuming output repair had already run, and crashed with `AttributeError` when a flag combination disabled it. The fix — routing the no-repair fallback through `_parse_to_python()` explicitly rather than assuming pre-parsed structure — is the general lesson every new flag combination should be validated against: a flag that is never actually tested in its \"off\" state is a flag whose off state is unverified, not one that is known to work.")
+
+    add_heading(doc, "36B.4 Building an all-flags-true baseline run")
+    add_body(doc, "Flag-combination testing needs a fixed reference point the same way Chapter 36.1's evaluation needed a baseline: one run with every flag at its default `True` value, against the identical fixed question set Chapter 36.2 already catalogued, captured and archived before any flag gets deliberately flipped off. Every subsequent single-flag-disabled run is compared against this one reference, isolating the effect of exactly one changed variable at a time.")
+    add_body(doc, "This baseline-first discipline is the same principle Chapter 36.1 applied to self-learning evaluation, generalized to configuration testing broadly: a difference is only interpretable relative to a known, fixed starting point. A flag-combination test run with no baseline to compare against can observe that a flag-off run *produces* some particular output, but cannot say whether that output represents a regression, an improvement, or simply a different valid path through the pipeline.")
+
+    add_heading(doc, "36B.5 Disabling one subsystem at a time")
+    add_body(doc, "The \"all flags true except one\" methodology this project's own `run_combinations.py` implements is a ladder in the literal sense: start from the all-true baseline, flip exactly one flag to `False`, run the identical fixed question set, and diff the result against the baseline before moving to the next flag. This isolates each stage's individual contribution to the pipeline's behavior — a change observed with only `ENABLE_NAC_COMPRESSION=False` is attributable specifically to NAC, uncontaminated by any other simultaneous change.")
+    add_callout(doc, "Common pitfall", "Disabling multiple flags at once to save time", "Flipping two flags off simultaneously to test faster halves the number of runs needed but destroys the isolation the whole methodology exists to provide — an observed difference could now be caused by either flag, by their interaction, or by neither alone. One flag per run is slower but is the only version of this test that actually answers \"what does this specific stage do.\"")
+
+    add_heading(doc, "36B.6 The post-retrieval-separation dry run")
+    add_body(doc, "The single-flag-at-a-time ladder is not the only use for this methodology — comparing chunk output *before* and *after* a structural refactor is the identical discipline applied to an architecture change rather than a flag. When retrieval was split from a single merged pool into the two-track parallel design Chapter 33.6 covers, the validating question was not \"does a flag work\" but \"do the two collections still retrieve the same underlying content they did before the split, just organized differently\" — answered by running the identical fixed question set through both the pre-split and post-split code and diffing the resulting chunk sets question by question.")
+    add_body(doc, "This is a structural application of Chapter 36.4's comparison discipline: any change large enough to alter what a pipeline retrieves or produces — a flag flip or a full architectural refactor — earns the identical treatment, a fixed question set run before and after, compared at a granularity fine enough to catch a real difference hiding inside an unchanged aggregate.")
+
+    add_heading(doc, "36B.7 Cross-run diffing for regression hunting")
+    add_body(doc, "This project's own `extract_logs.py` (Research topic 40, and Chapter 36C's own subject) is the general-purpose tool this comparison methodology depends on at scale: it parses debug logs from any two runs and extracts the specific, comparable fields — retrieval parameters, per-chunk scores, validation verdicts, LLM call counts — needed to diff them meaningfully, rather than requiring a human to manually scroll through two multi-thousand-line raw logs looking for differences by eye.")
+    add_body(doc, "A structured diff tool matters here for the identical reason Chapter 24.6's `[CTXSIZE]` instrumentation mattered for context-size stress testing: the raw capability to run two configurations and eyeball the difference exists without any special tooling, but at any real scale — fifteen batches, a hundred questions, twenty flags — manual comparison stops being practical long before it stops being theoretically possible. The tooling is what makes the methodology repeatable rather than a one-time, heroic manual effort.")
+
+    add_heading(doc, "36B.8 What to flag-gate vs. what to hard-wire")
+    add_body(doc, "Not every piece of configurable behavior deserves a flag, and BUG-022 is the concrete argument for restraint: each flag is a real, ongoing maintenance cost, since every fallback path it creates must be independently tested and kept correct. A reasonable heuristic, consistent with which constants this project actually gated versus left hard-coded: flag-gate a stage if disabling it produces a legitimately different but still-functional pipeline (skipping LBC still produces a usable, if less refined, answer); hard-wire a constant if there is no meaningful \"disabled\" behavior for it to fall back to.")
+    add_table(doc, ["Question to ask", "Flag-gate if...", "Hard-wire if..."], [
+        ["Does a \"disabled\" state make sense?", "Yes — the pipeline still functions without it", "No — there is no coherent behavior with it \"off\""],
+        ["Will it need A/B comparison?", "Yes — Chapter 36.1's evaluation discipline applies", "No — its value doesn't change the pipeline's shape"],
+        ["Does disabling it require new fallback code?", "The fallback is worth the maintenance cost", "The fallback cost isn't justified by the flag's value"],
+    ], [2.85, 2.85, 2.90])
+    add_body(doc, "`MERGE_SIMILARITY_THRESHOLD` (Chapter 34.2) is a useful contrast case: it is a tunable *value*, not a stage that can be meaningfully \"disabled\" — there is no coherent \"off\" state for a similarity threshold the way there is for NAC or LBC. Constants like this belong in `config.py` as tunable values, revisited through Chapter 36C's evidence-based tuning methodology, but they do not need the full `ENABLE_*` flag treatment this chapter otherwise recommends.")
+    add_body(doc, "`MAX_ITERATIONS` and `MAX_TOTAL_RETRIEVALS` (Chapter 23) sit at a similar point on this same spectrum — genuinely tunable, but with no meaningful \"disabled\" state a boolean flag could express. Setting either to an arbitrarily large number would functionally disable the guardrail, but that is a very different interface from an explicit `ENABLE_ITERATION_CAP` flag, and this project's own choice to leave them as plain integer constants rather than flag-gating them is consistent with the heuristic this section proposes: a value with no coherent \"off\" state belongs in `config.py` as a number to tune, not in the `ENABLE_*` catalogue as a switch to flip.")
+
+    add_heading(doc, "36B.9 Per-request flag overrides")
+    add_body(doc, "`switches.py` extends the flag architecture from a single, process-wide configuration into a per-request one: `resolve_switches(overrides)` takes a request's JSON body, overlays only its known, boolean-typed keys onto `DEFAULT_SWITCHES`, and the merged dictionary is stored once in `GraphState[\"switches\"]` for that request's entire graph execution. Every node reads the resolved value via `get_switches(state)` rather than importing the `ENABLE_*` constants directly — the identical single-source-of-truth discipline Chapter 27.6 established, applied here to per-request configuration instead of per-run counters.")
+    add_body(doc, "Figure 36B.2 traces this resolution as a strict one-way pipeline — overrides flow in once, at the very start of a request, and every node downstream reads the identical already-resolved dictionary rather than re-consulting `config.py` or the original request body at any later point.")
+    add_figure(doc, diagram_switch_resolution_36b(), "Figure 36B.2 — Overrides are resolved exactly once per request and threaded through GraphState; no node ever reads a raw config constant directly.")
+    add_code(doc, '''def resolve_switches(overrides: dict | None) -> dict[str, bool]:
+    merged = dict(DEFAULT_SWITCHES)
+    if overrides:
+        for key, value in overrides.items():
+            if key in SWITCH_NAMES and isinstance(value, bool):
+                merged[key] = value
+    return merged''')
+    add_body(doc, "The type and key-name filtering here is a deliberate hard filter (Chapter 27.4's principle, applied to a request body instead of a query string): an unrecognized key or a non-boolean value is silently dropped rather than corrupting the merged dictionary or raising an exception that would crash an otherwise-valid request over one malformed override field. This lets one running `app_workflow/api.py` instance serve a full-featured request and a deliberately degraded, minimal-pipeline request side by side, from the identical deployed code, differing only in what each request's own body asked to override.")
+    add_body(doc, "The `get_switches()` fallback deserves its own note, because it is what keeps this per-request system backward-compatible with entry points that never adopted it. `main.py`'s CLI entrypoint calls `run_agent()` without ever constructing a `GraphState[\"switches\"]` entry at all, and `get_switches(state)` handles that absence gracefully: `state.get(\"switches\") or DEFAULT_SWITCHES` falls through to the process-wide defaults exactly as if no override system existed. A node written against `get_switches()` behaves identically whether it is called from a request that specified overrides, a request that specified none, or a caller that never knew the override system existed at all — one function signature, three call patterns, no special-casing required in the node's own logic.")
+
+    add_body(doc, "Chapter 36C closes Part VI by applying this exact evidence-based discipline — baseline, controlled comparison, structured log diffing — to the specific numeric thresholds Chapter 33 introduced, turning `RETRIEVAL_TOP_K`, `DOCUMENTS_MIN_SIMILARITY`, and their siblings from reasoned defaults into values confirmed, or corrected, by this project's own production logs.")
+    add_body(doc, "The thread connecting every section of this chapter is worth naming explicitly as it closes: a flag is only as valuable as the discipline built around using it. `ENABLE_NAC_COMPRESSION` sitting in `config.py`, unused by any deliberate testing methodology, is barely more useful than no flag at all — its value comes entirely from Section 36B.5's ladder testing actually exercising its off state, from Section 36B.9's per-request overrides actually letting a caller choose it deliberately, and from BUG-022's lesson actually being absorbed into how new flags get validated going forward. A feature-flag architecture is infrastructure for a testing discipline, not a substitute for one.")
+
+    path = OUT_DIR / "Chapter_36B_Feature_Flag_Driven_Development.docx"
+    doc.core_properties.title = f"Chapter 36B — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_ab_comparison_36c() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520">'
+        '<rect width="1200" height="520" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Three real configs, two real queries, one dominant winner"], size=22, bold_first=True)
+        + svg_labeled_box(40, 90, 350, 160, "K=5 / 0.50 / 0.50", ["baseline", "simple: 148 calls", "complex: 205 calls,", "3 INSUFFICIENT"], fill="#F2F2F2")
+        + svg_labeled_box(425, 90, 350, 160, "K=4 / 0.55 / 0.60", ["aggressive", "simple: 42 calls", "complex: 37 calls, but", "2/3 variants starved"], fill="#D9D9D9")
+        + svg_labeled_box(810, 90, 350, 160, "K=4 / 0.53 / 0.57", ["intermediate", "simple: 30 calls", "complex: 30 calls,", "0 starved, correct"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 270, 600, 306)
+        + svg_labeled_box(200, 308, 800, 120, "Lowest call count on BOTH query types, zero verdict failures, no starvation", ["call count alone would have picked the aggressive config and shipped a regression"], fill="#F2F2F2")
+        + "</svg>"
+    )
+    return svg_to_png("chapter36c_ab_comparison", svg)
+
+
+def diagram_tuning_loop_36c() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["A repeatable tuning loop, not a one-time reasoning exercise"], size=22, bold_first=True)
+        + svg_labeled_box(40, 100, 340, 130, "Fixed fixture query set", ["one simple, one complex,", "multi-domain query"], fill="#F2F2F2")
+        + svg_arrow(388, 165, 428, 165)
+        + svg_labeled_box(436, 100, 340, 130, "Run under config candidate", ["timestamped debug log", "captured per run"], fill="#D9D9D9")
+        + svg_arrow(784, 165, 824, 165)
+        + svg_labeled_box(832, 100, 330, 130, "extract_logs.py diff", ["calls, verdicts,", "score distributions"], fill="#F2F2F2")
+        + svg_arrow(600, 230, 600, 266)
+        + svg_labeled_box(240, 268, 720, 110, "Evidence-based decision — repeat for the next candidate config", ["the identical loop, run again, is how a config value stays current"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter36c_tuning_loop", svg)
+
+
+def build_chapter_36c() -> Path:
+    title = "Evidence-Based Retrieval Tuning From Production Logs"
+    doc = configure_document(title)
+    add_cover(doc, "36C", title, "PART VI — THE SELF-LEARNING LAYER", "A threshold chosen by reasoning alone is a hypothesis. Only production logs turn it into a finding.")
+    add_chapter_heading(doc, "36C", title)
+    add_body(doc, "Chapter 33 introduced `RETRIEVAL_TOP_K`, `RETRIEVAL_TOP_L`, `DOCUMENTS_MIN_SIMILARITY`, and `LEARNED_QA_MIN_SIMILARITY` as per-collection values, chosen because the two collections' score distributions genuinely differ. This chapter closes Part VI by showing exactly how this project arrived at the specific numbers behind those constants — not by reasoning about score distributions in the abstract, but by running real queries under real candidate configurations and comparing the actual debug logs those runs produced.")
+    add_body(doc, "This chapter is the most log-grounded in the book, because the case study behind it is unusually well documented in this project's own research ledger: three named configurations, two representative queries, and exact LLM-call-count deltas recorded for each — a genuine A/B comparison with a result that overturned the config a shallower metric would have chosen.")
+    add_body(doc, "By the end of this chapter you will be able to explain why hand-picked thresholds are a reasonable starting point but not a stopping point, run the same A/B log-comparison methodology this project used to move from a conservative baseline to evidence-confirmed values, and recognize the specific failure mode — a metric that improves while correctness silently regresses — that makes call-count-only tuning dangerous.")
+
+    add_heading(doc, "36C.1 Why hand-picked thresholds fail")
+    add_body(doc, "Chapter 33.8's `DOCUMENTS_MIN_SIMILARITY = 0.53` and `LEARNED_QA_MIN_SIMILARITY = 0.57` did not start at those values — this project's initial deployment used a single, conservative `MIN_SIMILARITY = 0.5` floor for both collections, chosen the way most first thresholds are chosen: a reasonable-sounding round number, picked before any real usage data existed to calibrate it against. A hand-picked threshold is not wrong to start with — Research topic 39 explicitly frames the conservative 0.5 starting point as the correct initial choice specifically *because* no evidence base yet existed — but treating it as a permanent value rather than a starting hypothesis is the actual failure.")
+    add_body(doc, "The knobs that most need this recalibration share a common property: their correct value depends on the *actual* score distribution a specific corpus and a specific embedding model produce, which is empirical information no amount of reasoning about cosine similarity in the abstract can substitute for. `RETRIEVAL_TOP_K`, `RETRIEVAL_TOP_L`, and both per-collection similarity floors are all in this category — reasonable to estimate initially, but genuinely wrong to leave uncalibrated once real traffic exists to calibrate them against.")
+    add_body(doc, "This is worth distinguishing sharply from constants where hand-picking genuinely is the right permanent answer. `MAX_ITERATIONS`, Chapter 23's iteration cap, is chosen against a fixed, external constraint — Groq's rate limit and this project's own token-budget math — that does not shift based on what the corpus happens to contain. A retrieval threshold's correct value, by contrast, is a direct function of the embedding model's actual output distribution for actual queries and actual chunks, which no engineer can derive from first principles with any real precision. The dividing line is whether the constant is anchored to an external, stable fact or to an empirical distribution only production traffic can reveal.")
+
+    add_heading(doc, "36C.2 The A/B log-comparison methodology")
+    add_callout(doc, "Definition", "A/B log comparison", "Running an identical query set through two or more candidate configurations and comparing the resulting debug logs on multiple axes — call count, verdict quality, and answer correctness — rather than trusting any single metric in isolation to pick a winner.")
+    add_body(doc, "This project's own `extract_logs.py` — a 443-line standalone script — parses `app_workflow/run_logs/` debug logs and extracts exactly the fields a config comparison needs: collection query parameters, per-chunk cosine scores, validation verdicts, and LLM call counts. The methodology built around it, per Research topic 40, is precise: select one simple in-domain query and one complex multi-domain query, execute each under every candidate configuration, and compare the resulting logs on three axes simultaneously rather than one.")
+    add_body(doc, "Using exactly two query types — one simple, one deliberately complex — is a deliberate minimal design, not an oversight. A single query type risks tuning toward whatever that one type happens to reward; a simple and a complex query together are enough to reveal the specific failure mode Section 36C.4 covers, where a configuration that looks strictly better on an easy case turns out to starve a harder one.")
+    add_body(doc, "It is worth being precise about what makes this a genuine A/B comparison rather than merely running the pipeline twice. Every other variable — the corpus, the embedding model, the LLM, the prompt templates — stays fixed across all three configurations tested; only the specific config values named in each candidate change. Without that discipline, an observed difference in call count or correctness could be caused by anything that happened to differ between the two runs, not necessarily the configuration values under test. Fixing every variable except the one being evaluated is what turns a pair of log files into actual evidence rather than two anecdotes.")
+
+    add_heading(doc, "36C.3 Choosing RETRIEVAL_TOP_K and RETRIEVAL_TOP_L from observed distributions")
+    add_body(doc, "Research topic 39's log analysis found the signal directly: at the pre-tuning default of 5 chunks per collection, validation (`validate_document_retrieval` / `validate_learned_qa_retrieval`, Chapter 11's relevance judge applied per track) consistently dropped 2-3 chunks as irrelevant, leaving only 2-3 genuinely useful chunks per collection reaching compression. The fifth-ranked chunk was below threshold or irrelevant in the majority of observed runs — meaning the pipeline was paying for a retrieval, an embedding comparison, and a validator judgment on a chunk that got discarded more often than not.")
+    add_body(doc, "Reducing to `RETRIEVAL_TOP_K = 4` and `RETRIEVAL_TOP_L = 4` was the direct, evidence-based response: fewer chunks retrieved per call, minimal recall loss (since the discarded fifth chunk was already usually being rejected by validation anyway), and a smaller validator workload per retrieval — Chapter 23.4's token math made concrete by production log evidence rather than by reasoning about chunk counts in the abstract.")
+    add_body(doc, "It is worth naming why this particular signal — the fraction of retrieved chunks a downstream validator subsequently rejects — is such a clean way to right-size `top_k` specifically. `validate_retrieval()` (Chapter 11) already runs on every retrieval call regardless of whether anyone is tuning `top_k` at all, which means the evidence this section relies on was not collected by any special instrumentation built for this analysis — it was sitting in the existing debug logs the whole time, in the ordinary `[VALIDATE-RETRIEVAL]` verdict lines every run already produces. Evidence-based tuning did not require building new measurement infrastructure here; it required someone to actually go back and read what the infrastructure already in place had been recording.")
+
+    add_heading(doc, "36C.4 Choosing the per-collection similarity floors")
+    add_body(doc, "The full three-configuration comparison — `K=5/0.50/0.50` (baseline), `K=4/0.55/0.60` (aggressive), `K=4/0.53/0.57` (intermediate) — is where this chapter's case study earns its place as the clearest demonstration of why call count alone is an insufficient metric. On the simple, single-domain query, LLM call counts dropped from 148 (baseline) to 42 (aggressive) to 30 (intermediate) — a result that, read in isolation, would make the aggressive configuration look like the obvious winner.")
+    add_body(doc, "The complex, three-variant \"ASD\" query told a different story entirely: baseline used 205 calls with 3 INSUFFICIENT verdicts and 2 retrieval retries; the aggressive config dropped to 37 calls with zero INSUFFICIENT verdicts, but 2 of 3 query variants retrieved zero chunks at all — the higher similarity floor was starving retrieval on a genuinely harder, multi-domain query, and the model filled the resulting gap by hallucinating a domain meaning for \"ASD\" rather than admitting insufficient evidence. The intermediate config used 30 calls, zero INSUFFICIENT verdicts, all three variants retrieved real content, and the answer was correct.")
+    add_code(doc, '''Simple query  — LLM calls: baseline 148 -> aggressive 42 -> intermediate 30
+Complex query — LLM calls: baseline 205 -> aggressive 37  -> intermediate 30
+Complex query — variants starved (0 chunks): baseline 0 -> aggressive 2/3 -> intermediate 0
+Complex query — INSUFFICIENT verdicts:       baseline 3 -> aggressive 0   -> intermediate 0''')
+    add_body(doc, "Figure 36C.1 lays these three configurations side by side specifically so the trap in reading only the top row is visible at a glance — call count alone ranks the aggressive configuration ahead of the intermediate one on both queries, and only the starvation and verdict rows beneath it reveal why that ranking would have been the wrong one to ship.")
+    add_figure(doc, diagram_ab_comparison_36c(), "Figure 36C.1 — The aggressive config wins on call count alone; only checking correctness on the harder query reveals it was starving retrieval, not genuinely improving efficiency.")
+    add_body(doc, "The precise language Research topic 40 uses for this finding is worth repeating exactly: \"LLM call count is a necessary but insufficient metric — answer correctness on representative multi-domain queries must also be verified, because a threshold that is too high will silently starve retrieval and cause hallucination rather than routing to `no_context_answer`.\" A cleaner failure would have been the system honestly admitting it had no answer (Chapter 8's `NO_CONTEXT_ANSWER` path); the actual failure was worse — confident, fluent, wrong.")
+    add_body(doc, "This particular failure mode connects directly back to Chapter 24's long-context reliability zones and Chapter 25's account of why a small model under-resourced on evidence tends to fill the gap with something plausible-sounding rather than an honest admission of insufficiency. A similarity floor set too high does not make the model more careful — it starves the model of the very evidence that would have let it be careful, and an 8B model denied real evidence for a genuinely answerable-seeming question does not reliably default to silence.")
+
+    add_heading(doc, "36C.5 Detecting silent regressions")
+    add_body(doc, "The aggressive configuration's failure is the template for a broader risk this chapter's methodology exists to catch: a change that looks like a strict improvement on every metric someone happened to check can still be a regression on a dimension nobody checked. A \"cleanup\" refactor — reordering a validation step, adjusting a default without re-running the A/B comparison, simplifying a scoring formula — can silently shift retrieval behavior in exactly this way, passing every existing automated test (none of which typically assert on *which* chunks got retrieved, only that retrieval returned *something*) while quietly degrading real answer quality on the harder query types those tests never happened to include.")
+    add_body(doc, "This is precisely why Chapter 36B.6's before/after chunk-set comparison and this chapter's A/B methodology are the same discipline applied to two different kinds of change — a config value and a structural refactor. Neither kind of change is safe to ship on the strength of \"the tests still pass\" alone when the tests in question were never designed to catch a shift in retrieval quality specifically.")
+    add_body(doc, "A useful operational habit follows directly from this: treat any change touching `retriever.py`, the collection query parameters, or any of the four threshold constants this chapter covers as requiring the Section 36C.2 methodology before merge, not as a nice-to-have follow-up. A pull request that changes `DOCUMENTS_MIN_SIMILARITY` by a few hundredths, reviewed only by reading the diff, looks trivial — one number changed. Whether that trivial-looking diff starves retrieval on the next multi-domain query the way the aggressive configuration did is not something the diff itself can answer; only running the fixed query pair through it and checking the resulting logs can.")
+    add_callout(doc, "Common pitfall", "Trusting green tests to catch a retrieval regression", "A test suite asserting that `retrieve_documents` returns a non-empty list will pass whether that list contains the five most relevant chunks in the corpus or five barely-relevant ones. Retrieval quality regressions need the A/B methodology this chapter builds, not unit-test coverage, because the failure mode is a change in *which* correct-shaped result comes back, not a crash or an empty response.")
+
+    add_heading(doc, "36C.6 Building a repeatable tuning loop")
+    add_body(doc, "The methodology this chapter has walked through generalizes into a loop, not a one-time project: maintain the fixed simple-and-complex query pair, run it under any new candidate configuration, capture a timestamped debug log the way this project's `app_workflow/run_logs/` convention already does, and diff the result against the current production configuration using `extract_logs.py` before ever changing a default in `config.py`.")
+    add_body(doc, "Figure 36C.2 draws this loop as a cycle rather than a line for a specific reason: the fourth step's output — an evidence-based decision — feeds directly back into the first step the next time a config change is even being considered, rather than terminating the process once `K=4/0.53/0.57` shipped. The loop is the reusable asset; today's specific numbers are simply its most recent output.")
+    add_figure(doc, diagram_tuning_loop_36c(), "Figure 36C.2 — The same four-step loop applies to every future config candidate; repeatability, not a single successful run, is what makes evidence-based tuning durable.")
+    add_body(doc, "Research topic 40 states this repeatability explicitly as the intended legacy of the work: \"the methodology is repeatable: run the same query pairs against any future config candidate, compare debug logs with `extract_logs.py`.\" A configuration value tuned once and never revisited drifts back toward being a hand-picked guess the moment the corpus, the embedding model, or the query patterns it was tuned against change — the loop, not the specific numbers `K=4/0.53/0.57` happen to represent today, is this chapter's actual, durable contribution.")
+
+    add_body(doc, "Part VI closes here, on exactly the discipline it opened with in Chapter 29: nothing in this self-learning layer — not the feedback ledger, not the failure blocklist, not distillation, not retrieval tuning — is trustworthy by assertion alone. Every mechanism this part of the book built earns its place in production the same way, through a fixed reference point, a controlled comparison, and a willingness to let real logs overturn a reasonable-sounding guess. Part VII turns to what it takes to run all of it, together, in production.")
+    add_body(doc, "Looking back across all ten chapters of this part, the throughline is the same one this final chapter states most explicitly: a system that can learn from its own history — failed queries, thumbdowns, verified successes, retrieval logs — is only as trustworthy as its own willingness to be measured against that history rather than merely accumulating it. Chapter 29's ledger, Chapter 32's distillation gate, and this chapter's threshold evidence are three instances of the identical discipline, applied to three different kinds of accumulated experience, and none of them would mean anything without the fixed baselines and repeatable comparisons that turn raw accumulation into an actual, falsifiable claim of improvement.")
+
+    path = OUT_DIR / "Chapter_36C_Evidence_Based_Retrieval_Tuning.docx"
+    doc.core_properties.title = f"Chapter 36C — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_verdict_taxonomy_37() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520">'
+        '<rect width="1200" height="520" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["A binary PASS/FAIL hides which of five distinct failures actually happened"], size=21, bold_first=True)
+        + svg_labeled_box(40, 90, 340, 150, "Binary verdict", ["PASS or FAIL only", "one bit of information", "no route to the fix"], fill="#F2F2F2")
+        + svg_arrow(388, 165, 428, 165)
+        + svg_labeled_box(436, 90, 724, 150, "check_answer_quality() verdict set", ["GROUNDED, PARTIALLY_FABRICATED, OVERCLAIMED,", "OFF_TOPIC, UNKNOWN — five verdicts, five distinct fixes"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 270, 600, 306)
+        + svg_labeled_box(60, 308, 340, 130, "BUG-065 / BUG-066", ["evaluator infra failure", "and guard-rail-not-", "semantics look like PASS"], fill="#D9D9D9")
+        + svg_labeled_box(430, 308, 340, 130, "BUG-067", ["scores after the", "deletion already", "happened — no rollback"], fill="#D9D9D9")
+        + svg_labeled_box(800, 308, 360, 130, "BUG-068", ["no gate at all on the", "final synthesized text", "the user actually reads"], fill="#D9D9D9")
+        + "</svg>"
+    )
+    return svg_to_png("chapter37_verdict_taxonomy", svg)
+
+
+def diagram_evaluator_triangulation_37() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["No single tool is the evaluator — three mechanisms triangulate"], size=21, bold_first=True)
+        + svg_labeled_box(40, 100, 340, 150, "LLM-as-judge validators", ["validate_retrieval, validate_merge,", "validate_redundancy, validate_lbc,", "check_answer_quality — inline"], fill="#F2F2F2")
+        + svg_labeled_box(430, 100, 340, 150, "extract_logs.py", ["443-line log parser", "retrieval / verdict / timing", "events from production runs"], fill="#D9D9D9")
+        + svg_labeled_box(820, 100, 340, 150, "run_combinations.py", ["ablation ladder over", "ENABLE_* flags — quality,", "faithfulness, latency axes"], fill="#F2F2F2")
+        + svg_arrow(210, 250, 400, 320)
+        + svg_arrow(600, 250, 600, 320)
+        + svg_arrow(990, 250, 800, 320)
+        + svg_labeled_box(240, 328, 720, 110, "A lightweight in-house evaluator, assembled from three narrow tools", ["none built as a formal evaluation library, none individually sufficient"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter37_evaluator_triangulation", svg)
+
+
+def build_chapter_37() -> Path:
+    title = "Evaluation Frameworks for RAG"
+    doc = configure_document(title)
+    add_cover(doc, 37, title, "PART VII — PRODUCTION, DEPLOYMENT, AND BEYOND", "A retrieval pipeline that has never been measured against anything is not reliable — it is merely unexamined.")
+    add_chapter_heading(doc, 37, title)
+    add_body(doc, "Every earlier part of this book built a mechanism and then, in the same chapter, showed a way to check whether that mechanism actually worked: Chapter 11's relevance judge, Chapter 20's quality-control gate, Chapter 36C's A/B log comparison. This chapter steps back from any single mechanism and asks the more general question those chapters kept answering piecemeal — what does it actually mean to evaluate a RAG system, and what does the published literature offer that this project's own homegrown checks do not?")
+    add_body(doc, "The honest answer, worked out across this chapter's five sections, is that this project never adopted a packaged RAG evaluation framework. It built three narrow, purpose-specific tools instead — an inline LLM-as-judge layer, a production-log parser, and a feature-flag ablation harness — and relied on their combination rather than on any single scoring library. That choice is itself instructive: understanding *why* a team with real production traffic and a real self-learning layer chose triangulation over a packaged framework is more useful than a survey of framework feature lists.")
+    add_body(doc, "By the end of this chapter you will be able to name the standard retrieval and generation metrics the RAG-evaluation literature uses, explain what RAGAS, TruLens, and DeepEval each actually measure, describe this project's real in-house alternative in concrete terms, and recognize the four distinct ways an automated evaluator can quietly fail — each one drawn from a real bug this project shipped and fixed.")
+
+    add_heading(doc, "37.1 Retrieval metrics — recall@k, precision@k, MRR, nDCG")
+    add_callout(doc, "Definition", "Recall@k / Precision@k / MRR / nDCG", "Recall@k is the fraction of all truly relevant documents that appear somewhere in the top k retrieved results. Precision@k is the fraction of the top k results that are actually relevant. Mean Reciprocal Rank (MRR) scores the position of the first relevant result — 1/rank, averaged across queries. Normalized Discounted Cumulative Gain (nDCG) extends this to graded relevance, discounting a relevant result's contribution the further down the ranked list it appears.")
+    add_body(doc, "These four numbers are the standard vocabulary of information-retrieval evaluation, and every one of them shares the same hard requirement: a labeled ground truth, a fixed set of queries each paired with a known-correct set of relevant documents, established independently of whatever system is being scored. Recall@k and precision@k tell you, respectively, whether the system found the right things and whether what it found was mostly right; MRR and nDCG go further and reward ranking the best result near the top rather than merely including it somewhere in the list.")
+    add_body(doc, "This project's retrieval pipeline (Chapter 11) has never had such a labeled set to score against, and its research record is explicit about why: Research topic 8 evaluates BM25 hybrid scoring, Maximal Marginal Relevance for diversity, and cross-encoder reranking as retrieval-ranking upgrades, and states plainly that none of them is implemented — \"current pipeline uses cosine similarity only.\" Cosine similarity against an embedding index is a ranking signal, not a metric; it produces an ordering, but nothing in this project computed recall@k or nDCG against it, because doing so would require a curated set of query/relevant-document pairs this project never built. Research topic 52's gap analysis against LangSmith names this directly: a curated evaluation dataset separate from production logs is listed as a missing piece, not a completed one.")
+    add_body(doc, "That gap is worth sitting with rather than glossing over, because it is common, not unusual. A curated retrieval-evaluation set has to be built by someone reading real queries and real chunks and manually labeling relevance — expensive, slow to keep current as a corpus grows, and easy to defer indefinitely in favor of shipping the next feature. Section 37.4 shows what this project measured instead of recall@k, and it is worth previewing here: this project's `validate_document_retrieval`/`validate_learned_qa_retrieval` judges (Chapter 11) score relevance per-chunk, per-request, in production, which is a very different and much noisier signal than recall@k against a fixed labeled set — but it is a signal that actually existed and actually ran on every real query, where the formal metric never did.")
+
+    add_heading(doc, "37.2 Generation metrics — faithfulness, answer relevancy, context precision")
+    add_callout(doc, "Definition", "Faithfulness / Answer relevancy / Context precision", "Faithfulness measures whether every claim in a generated answer is actually supported by the retrieved context (the opposite of hallucination). Answer relevancy measures whether the answer actually addresses the question asked, independent of whether it's grounded. Context precision measures whether the retrieved context that was actually used to generate the answer was relevant, as opposed to noise the model had to filter past.")
+    add_body(doc, "These three names come from the RAGAS literature (Section 37.3), but this project implements something that maps closely onto faithfulness and answer relevancy without ever naming them that way. `check_answer_quality()` in `app_workflow/nodes/check_answer_quality.py` runs the `GROUNDING_PROMPT` against every synthesized answer and classifies it into one of five verdicts rather than a single faithfulness score: `GROUNDED`, `PARTIALLY_FABRICATED`, `OVERCLAIMED`, `OFF_TOPIC`, or `UNKNOWN`. The prompt's own internal structure makes the mapping explicit — RULE 1 checks sentence-by-sentence fabrication (faithfulness), RULE 2 checks topical relevance (answer relevancy), and RULE 3 checks completeness and calibration against what the retrieved context actually supports.")
+    add_body(doc, "A five-way verdict taxonomy is a deliberately richer design than a single pass/fail faithfulness score, and the reason is operational rather than academic: each of the five verdicts implies a different downstream action. `PARTIALLY_FABRICATED` and `OVERCLAIMED` both indicate a faithfulness problem, but they are different failures — the first invents content the context never supported, the second overstates confidence in content the context only weakly supports — and a system that only ever produced a binary FAIL would conflate them, along with the genuinely different `OFF_TOPIC` failure (Section 37.1's context-precision idea in miniature: the model answered *something*, just not the question asked) and the honest `UNKNOWN` case, where the judge itself couldn't confidently classify the answer at all. Figure 37.1 makes this collapse concrete.")
+    add_figure(doc, diagram_verdict_taxonomy_37(), "Figure 37.1 — Collapsing five distinct generation failures into one PASS/FAIL bit destroys the information a fix actually needs; three real bugs (065, 066, 067) show what a coarser gate would have missed.")
+    add_body(doc, "The same faithfulness-adjacent judging pattern appears earlier in the pipeline, not just at final answer synthesis. `validate_merge`, `validate_redundancy`, and `validate_lbc` (all in `app_workflow/services/validators.py`) apply structurally similar LLM-as-judge checks to merge faithfulness, deduplication redundancy, and compression faithfulness respectively — each one is, in effect, a context-precision or faithfulness check scoped to one intermediate pipeline stage rather than the final answer. Chapter 22B's semantic compression and Chapter 34's chunk deduplication both depend on exactly this pattern of judge-per-stage rather than judge-only-at-the-end, precisely because a faithfulness failure introduced during compression is much cheaper to catch immediately than to trace back to from a bad final answer.")
+
+    add_heading(doc, "37.3 RAGAS, TruLens, DeepEval — tools of the trade")
+    add_callout(doc, "Definition", "RAGAS / TruLens / DeepEval", "RAGAS is an open-source library purpose-built for RAG evaluation, computing faithfulness, answer relevancy, and context precision/recall as LLM-judged scores against a reference dataset. TruLens instruments a running application to compute its own \"RAG Triad\" (context relevance, groundedness, answer relevance) plus general LLM-app feedback functions, with a dashboard for cross-run comparison. DeepEval is a pytest-style testing framework that expresses evaluation metrics as assertions, making RAG evaluation runnable inside a normal CI test suite.")
+    add_body(doc, "None of these three appears anywhere in this project's codebase or its research ledger — a direct search across `docs/Research.md` and the full Memora source tree turns up zero references to RAGAS, TruLens, or DeepEval by name. That absence is worth stating plainly rather than working around, because the honest reason is instructive: this project's evaluation research effort went almost entirely toward LLM-application *observability* platforms — Phoenix, LangSmith, and Langfuse (Chapter 38) — rather than toward RAG-specific scoring libraries layered on top of them.")
+    add_body(doc, "The three tools are not redundant with each other, and knowing the difference matters when a team is choosing among them for a project that, unlike this one, decides to adopt one. RAGAS is metric-first: it assumes you already have a reference dataset and want standardized faithfulness/relevancy/precision numbers out of it, and its scores are the closest published equivalent to the five-way verdict `check_answer_quality()` produces internally. TruLens is instrumentation-first: it wraps a live application and computes its RAG Triad continuously, closer in spirit to this project's inline `validate_*` judges than to a one-time offline scoring run. DeepEval is workflow-first: it exists to make evaluation metrics assertable inside `pytest`, so that a faithfulness regression fails a CI build the same way a broken unit test would — a discipline this project never built for its LLM-judge layer, since none of `validate_retrieval`, `check_answer_quality`, or the others runs as part of an automated test gate today.")
+    add_body(doc, "The clearest real analog to \"should we adopt a packaged evaluation framework\" reasoning this project actually did is documented in Research topics 52 and 54, comparing LangSmith, Phoenix, and Langfuse rather than RAGAS/TruLens/DeepEval specifically. Topic 58's proposed (but never implemented) two-level Langfuse scoring scheme — trace-level scores like `answer_quality`, `groundedness`, and `coverage`, plus observation-level scores like `retrieval_relevance` and `compression_faithfulness` — is the closest this project ever got to sketching a RAGAS-shaped metric taxonomy, and it is worth naming explicitly that it remained a planning document: \"None of Scores, Evaluators, Human Annotation, or Datasets are populated yet ... this is planning/reference material for a future evaluation-harness effort,\" per the research record. A reader adopting RAGAS, TruLens, or DeepEval on a new project is doing, formally, exactly what that unfinished plan sketched.")
+    add_callout(doc, "Common pitfall", "Treating a packaged framework as a substitute for domain judgment", "RAGAS's context-precision score and this project's `validate_retrieval` judge both ultimately depend on an LLM deciding what counts as \"relevant\" — a packaged framework does not remove that judgment call, it only standardizes how the judgment gets asked and reported. Adopting RAGAS without first deciding, the way `check_answer_quality`'s `GROUNDING_PROMPT` does, exactly what counts as fabrication versus overclaiming versus off-topic for your own domain just moves the ambiguity into a black box with a more official-looking number attached to it.")
+
+    add_heading(doc, "37.4 Building a lightweight in-house evaluator")
+    add_body(doc, "This project's actual evaluation approach, assembled piece by piece across earlier chapters rather than designed as a single system, is a triangulation of three narrow tools, none of which alone constitutes a full evaluator. Figure 37.2 lays the three out side by side.")
+    add_figure(doc, diagram_evaluator_triangulation_37(), "Figure 37.2 — Three narrow, purpose-built tools stand in for a packaged evaluation framework; each covers a gap the other two leave open.")
+    add_body(doc, "The first leg is the inline LLM-as-judge layer this chapter has already covered — `validate_document_retrieval`, `validate_learned_qa_retrieval`, `validate_merge`, `validate_redundancy`, `validate_lbc`, and `check_answer_quality`. What makes this leg unusual compared to a typical offline evaluation harness is that it runs on every live production request and its verdicts change what the pipeline does next — a FAIL retrieval verdict triggers a retry, a failed redundancy check blocks a deletion. Research topic 58 names this distinction precisely, describing these as \"control-plane judges ... which do alter routing,\" in contrast to the shadow judges a packaged framework like RAGAS or TruLens would run offline, after the fact, with no power to change the request they're scoring.")
+    add_body(doc, "`app_workflow/services/validators.py` defines the structured shape every one of these judges returns, and the shape itself is worth reading closely — it is a per-chunk evidence array with a required reason, not a bare verdict string:")
+    add_code(doc, '''class RetrievalCheckResult(TypedDict):
+    verdict: str          # "PASS" | "PARTIAL" | "FAIL"
+    per_chunk: list[dict]  # [{"chunk_id": ..., "relevant": bool, "reason": str}, ...]''')
+    add_body(doc, "Chapter 38.19's still-open BUG-035 is the direct cautionary tale for why this per-chunk array exists at all rather than a single verdict field: a validator's own top-level `verdict` has been observed disagreeing with its own `per_chunk` evidence in the same response, which means an evaluator that only reads `verdict` and never inspects `per_chunk` is trusting exactly the field this project's own bug ledger already caught lying.")
+    add_body(doc, "The second leg is `extract_logs.py`, the 443-line log parser Chapter 36C's A/B comparison methodology depends on. It turns the unstructured text of `app_workflow/run_logs/` debug output into structured retrieval, verdict, and timing events — effectively converting every production request into a lightweight evaluation record after the fact, without requiring a dedicated logging schema built in advance. This is the closest thing this project has to an offline evaluation dataset: not a curated set of labeled queries, but the accumulated trace of everything the system was actually asked in production.")
+    add_body(doc, "The third leg is `run_combinations.py`, the ablation harness first introduced in Research topic 20 and exercised across ten scripted runs in the 2026-06-09 development session. Rather than scoring a fixed output against a fixed metric, it evaluates *combinations of feature flags* against three axes — answer quality, faithfulness, and latency — turning the `ENABLE_*` switch catalogue from Chapter 36B into the evaluation's independent variable. This is precisely how BUG-020 and BUG-021 were discovered: not by a metric crossing a threshold, but by specific flag combinations crashing or silently doing nothing during a systematic sweep.")
+    add_body(doc, "None of these three tools alone is a RAG evaluator in the RAGAS sense. The `validate_*` judges score individual live requests but never aggregate into a dataset-level number. `extract_logs.py` structures data but computes no metric of its own — it is preprocessing for the A/B comparison a human still reads and judges. `run_combinations.py` evaluates configuration space, not answer quality directly. A lightweight in-house evaluator, built this way, is not a single artifact a team designs up front — it accretes, tool by tool, out of whatever the project already needed for another reason, and the discipline that makes the accretion actually useful is remembering to run all three together rather than trusting any one of them in isolation.")
+
+    add_heading(doc, "37.5 Human evaluation: when automation isn't enough")
+    add_body(doc, "Every automated judge this chapter has covered is itself an LLM call, and an LLM call judging another LLM call's output inherits a structural blind spot: a failure mode neither the generator nor the judge model was ever trained to recognize as a failure will sail through both unnoticed. This project hit that limit directly and responded with a manual audit rather than a better prompt — Research topic 51's quality audit, conducted by a human reading real production debug traces (with graphify and parallel subagents assisting the reading, not the judging) rather than by any `validate_*` function.")
+    add_body(doc, "That audit scored real traces on five axes — output-structure malformation, hallucination, instruction-following, task completion, and relevance — the same conceptual territory `check_answer_quality`'s five verdicts cover, but scored by a human specifically because the automated judges' own reliability was the thing under question. An LLM-as-judge system cannot audit itself for the ways it systematically fails; only a human reading the raw trace, unmediated by another model's summary of it, can catch a judge that has learned to rubber-stamp a familiar-looking wrong answer.")
+    add_body(doc, "BUG-065 is the concrete case that makes this limit vivid rather than theoretical. When the Hugging Face inference router returned HTTP 402 errors under load, the `judge_llm` calls behind several `validate_*` functions silently failed and defaulted to an `UNKNOWN` verdict — and in the affected production log, most of what looked like \"clean\" verdicts were actually judges that never ran at all, not judges that genuinely approved the content. An automated dashboard tracking the *rate* of PASS verdicts would have shown a healthy-looking trend line for exactly the window where evaluation coverage had silently collapsed to near zero; only a human reading the actual log lines, the way Research topic 51's audit did, caught that the judges themselves were absent rather than agreeing.")
+    add_body(doc, "The practical rule this leaves a reader with is not \"replace automation with humans\" — the `validate_*` layer runs on every request precisely because a human cannot review every request — but \"budget periodic human review of the judges, not just of the system the judges are watching.\" A human audit does not need to run on every request the way a control-plane validator does; it needs to run often enough, and read raw enough evidence, to catch the specific failure an automated judge is structurally unable to catch about itself: that it has quietly stopped judging at all, or has learned to approve a category of wrong answer the way BUG-066's length-ratio guard let fabricated citation text through untouched.")
+    add_callout(doc, "Common pitfall", "Auditing the system but never auditing the judges", "BUG-067 is the sharpest version of this trap: `check_answer_quality`'s successor validator for chunk deletion scored redundancy *after* the deletion had already happened, with no rollback path — meaning a bad verdict didn't just fail to catch a problem, it had no way to undo one it caused. A validator's placement in the pipeline is itself part of what a human audit needs to check; a technically correct verdict that arrives after the damage is already committed evaluates nothing that still matters.")
+    add_body(doc, "Part VII continues from here into the platforms this chapter's judges and logs actually run on top of — Phoenix, LangSmith, and Langfuse — and the debugging techniques that make a production trace legible enough for either an automated judge or a human auditor to read in the first place.")
+
+    path = OUT_DIR / "Chapter_37_Evaluation_Frameworks_for_RAG.docx"
+    doc.core_properties.title = f"Chapter 37 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_three_vantage_points_38() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Three vantage points, three questions, one shared trace"], size=21, bold_first=True)
+        + svg_labeled_box(40, 100, 340, 160, "Application logs", ["logger_config.py", "getLogger(__name__) per file", "\"what did this module do?\""], fill="#F2F2F2")
+        + svg_labeled_box(430, 100, 340, 160, "LLM-call traces", ["Phoenix / LangSmith / Langfuse", "prompts, outputs, tokens", "\"what did the model see?\""], fill="#D9D9D9")
+        + svg_labeled_box(820, 100, 340, 160, "Framework-level spans", ["OTel + OpenInference", "node/chain boundaries", "\"how did the run flow?\""], fill="#F2F2F2")
+        + svg_arrow(210, 260, 400, 320)
+        + svg_arrow(600, 260, 600, 320)
+        + svg_arrow(990, 260, 800, 320)
+        + svg_labeled_box(240, 328, 720, 110, "_TracingHandler mirrors log records onto the active span", ["one log line, visible from all three vantage points at once"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter38_three_vantage_points", svg)
+
+
+def diagram_tracerprovider_eviction_38() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500">'
+        '<rect width="1200" height="500" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["BUG-076 — a third backend silently evicts the first one's exporter"], size=21, bold_first=True)
+        + svg_labeled_box(60, 90, 500, 130, "register() installs Phoenix", ["global TracerProvider gets a", "SimpleSpanProcessor(Phoenix)"], fill="#F2F2F2")
+        + svg_arrow(600, 155, 660, 155)
+        + svg_labeled_box(660, 90, 480, 130, "Langfuse CallbackHandler starts", ["calls add_span_processor() again", "treats existing processor as disposable"], fill="#D9D9D9")
+        + svg_arrow(320, 220, 320, 260)
+        + svg_arrow(900, 220, 900, 260)
+        + svg_labeled_box(60, 262, 500, 110, "Phoenix spans silently stop exporting", ["dashboard goes quiet, no error raised"], fill="#F2F2F2")
+        + svg_labeled_box(660, 262, 480, 110, "LangfuseSpanProcessor now owns the provider", ["confirmed via direct object inspection"], fill="#F2F2F2")
+        + svg_arrow(600, 372, 600, 408)
+        + svg_labeled_box(160, 410, 880, 78, "Fix (unapplied): register(set_global_tracer_provider=False) + instrument(tracer_provider=tp)", [], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter38_tracerprovider_eviction", svg)
+
+
+def build_chapter_38() -> Path:
+    title = "Observability Platforms and Debugging"
+    doc = configure_document(title)
+    add_cover(doc, 38, title, "PART VII — PRODUCTION, DEPLOYMENT, AND BEYOND", "A bug an operator cannot see is not a bug that is absent — it is a bug that is winning.")
+    add_chapter_heading(doc, 38, title)
+    add_body(doc, "This project's earliest debugging tool was `print()`, and ADR-033 counted the exact cost of staying with it: roughly 370 unstructured `print()` calls scattered across fourteen-plus production modules, with no level filtering, no timestamps, and no way to tell which module emitted which line once stdout scrolled past. Chapters 22 and 22B already introduced the dry-run trace and the semantic-compression pipeline this project's observability stack now watches; this chapter is about the stack itself — the logging module, the three tracing backends run in parallel, and the debugging techniques a production RAG pipeline actually needs once print-statement debugging stops scaling.")
+    add_body(doc, "What makes this chapter's material unusually well documented is that this project ran three observability backends — Arize Phoenix, LangSmith, and Langfuse — side by side against live traffic, not as a bake-off decided from documentation alone. That decision produced real, dated bugs: a non-recording span that silently swallowed log mirroring, a UI that persisted events the human eye could never find, a Windows console encoding crash, and a third backend that quietly evicted a second one's exporter. Each is a genuine lesson about the gap between a tracing library's promise and its behavior under this project's specific constraints.")
+    add_body(doc, "By the end of this chapter you will be able to explain why structured logging and distributed tracing solve different problems that still need to be bridged, describe what each of the three vantage points — application logs, LLM-call traces, and framework-level spans — actually shows an operator, and recognize each of the concrete observability bugs this project shipped and fixed (or, in one case, is still living with) well enough to avoid repeating them.")
+
+    add_heading(doc, "38.1 Why print-statements stop scaling")
+    add_body(doc, "ADR-033's inventory is the concrete argument for structured logging: roughly 370 `print()` calls across fourteen-plus modules, none of them filterable by severity, none of them timestamped, none of them attributable to the module that emitted them without reading surrounding context. `docs/Architecture.md` records the scale of the eventual fix plainly — every one of those calls became a `logger.debug`/`.info`/`.warning`/`.error` call. The specific failure ADR-033 names is losing diagnostic information silently: an operator who forgot to redirect stdout to a file before a long run had no record of what happened at all, because a `print()` call that nobody was watching leaves no trace once the terminal scrolls past it.")
+    add_body(doc, "Three properties separate structured logging from print-statement debugging, and each maps to a real cost this project paid before fixing it: trace granularity (a `DEBUG`-level line an operator can turn off in production but still keep for a local repro), cross-run comparison (a per-run debug file, timestamped and named consistently, that Chapter 36C's `extract_logs.py` methodology depends on existing at all), and shareable evidence (a log line another engineer — or an AI coding assistant — can read out of context and still understand, because it carries its own module name and severity rather than relying on surrounding `print()` calls for context).")
+
+    add_heading(doc, "38.2 The three vantage points")
+    add_body(doc, "This project's observability stack answers three distinct questions, and conflating them is the most common way a debugging session gets stuck. Application logs answer \"what did this specific module do, and in what order?\" — the domain of `logger_config.py`, covered in Section 38.3. LLM-call traces answer \"what exactly did the model see, and what did it return?\" — captured by Phoenix, LangSmith, and Langfuse (Sections 38.7-38.18), each storing the full prompt/response payload alongside token counts and latency. Framework-level spans answer \"how did control flow move through the pipeline as a whole?\" — the OpenTelemetry/OpenInference layer (Section 38.6) that turns a LangGraph run into a nested tree of spans rather than a flat sequence of log lines.")
+    add_body(doc, "Figure 38.1 draws these three vantage points as parallel views onto the same underlying event, converging through the one mechanism this project built specifically to unify them — the `_TracingHandler` covered in Section 38.5. None of the three vantage points alone is sufficient for most real debugging sessions: a log line tells you a validator failed, a trace tells you which chunk it failed on, and a span tells you whether the failure happened before or after a retry — Section 38.19's retrieval-failure debugging walkthrough uses exactly this combination.")
+    add_figure(doc, diagram_three_vantage_points_38(), "Figure 38.1 — Application logs, LLM-call traces, and framework spans answer different questions about the same event; the _TracingHandler is what lets one log line answer all three at once.")
+
+    add_heading(doc, "38.3 Structured logging across the pipeline")
+    add_callout(doc, "Definition", "`getLogger(__name__)`", "The standard Python logging idiom of requesting a logger named after the current module's dotted import path, so that every log record carries the identity of the module that emitted it and can be filtered, routed, or silenced per-module without touching a single line of application code.")
+    add_body(doc, "`app_workflow/services/logger_config.py` centralizes this project's entire logging configuration behind one `setup_logging()` function, and thirty-four separate modules under `app_workflow/` call `getLogger(__name__)` rather than configuring their own handlers. `setup_logging()` guards against being run twice with a private `_CONFIGURED_ATTR` marker, and routes output to two destinations at two different levels: the console handler stays at `INFO` specifically to avoid flooding the terminal with the `DEBUG`-level chatter that `httpcore`, `httpx`, and `groq._base_client` would otherwise produce on every HTTP call, while a per-run debug file captures everything down to `DEBUG`.")
+    add_body(doc, "One detail worth naming because it is easy to get backwards: `logger_config.py` includes a `_DynamicStdoutHandler` that re-resolves `sys.stdout` at emit time rather than capturing it once at setup. Without this, a test harness or a wrapper script that redirects stdout after logging has already been configured would keep writing to the original, now-detached stream — a subtle failure mode that looks like logging silently stopped working when in fact it kept working against a file descriptor nobody is reading anymore.")
+
+    add_heading(doc, "38.4 The Python logging hierarchy in a multi-module project")
+    add_body(doc, "Python's `logging` module builds an implicit tree from dotted module names: a logger named `app_workflow.nodes.retrieve` is a child of `app_workflow.nodes`, which is a child of `app_workflow`, which is a child of the root logger — and by default, every log record a child logger emits propagates upward through that chain unless a logger's `propagate` attribute is explicitly set to `False`. This is why `getLogger(__name__)` scattered across thirty-four modules still produces a single, centrally configured stream: each module's logger inherits its handlers and level from the root configuration `setup_logging()` installs once, rather than needing per-module setup.")
+    add_body(doc, "This project uses the propagation chain deliberately for three diagnostic loggers — `llm_data_check`, `llm_json_tries`, and `llm_io` — which set `propagate = True` explicitly rather than relying on the default, ensuring their high-volume, narrowly scoped diagnostic output reaches the same root handlers (and therefore the same debug file and the same `_TracingHandler` mirroring) as every other module's logging, without requiring those three loggers to configure their own file handlers separately.")
+
+    add_heading(doc, "38.5 Bridging Python logging into distributed traces")
+    add_callout(doc, "Definition", "`_TracingHandler`", "A custom `logging.Handler` subclass, installed alongside the console and file handlers, that mirrors every log record onto whichever tracing backend currently has an active run or span — LangSmith's run context and Phoenix's OTel span context — and silently no-ops when neither is active, so ordinary local script runs are unaffected.")
+    add_body(doc, "`_TracingHandler` exists because `logger.info(\"...\")` and `span.add_event(\"...\")` are, by default, two completely separate universes — a log line written during a traced LangGraph run would otherwise be invisible from inside the trace viewer, forcing an operator to correlate a debug file against a trace UI by timestamp. The handler closes that gap by attaching every log record as an event on the currently active span, so a trace opened in Phoenix or LangSmith shows the exact log lines that were emitted during that specific run, in order, alongside the LLM calls and node transitions.")
+    add_body(doc, "The handler's own source comments explain a subtlety that becomes Section 38.9's bug: Phoenix's LangChain integration (`OpenInferenceTracer`) tracks its spans in its own internal registry keyed by LangChain's `run_id`, rather than through OpenTelemetry's ambient current-span context — which means the standard `opentelemetry.trace.get_current_span()` call that would normally find \"the span in progress\" does not see Phoenix's spans at all. `_TracingHandler` has to reach into `OpenInferenceTracer`'s internal `_spans_by_run` registry directly, keyed by the same `run_id` LangSmith already tracks, to find the span it needs to mirror onto.")
+
+    add_heading(doc, "38.6 OpenTelemetry, OpenInference, and semantic conventions")
+    add_callout(doc, "Definition", "OpenTelemetry / OpenInference", "OpenTelemetry (OTel) is the vendor-neutral standard for producing, collecting, and exporting traces, metrics, and logs — the plumbing every backend in this chapter ultimately speaks. OpenInference is a semantic-conventions layer built on top of OTel specifically for AI applications, defining a standard vocabulary of span attributes (prompt, completion, token counts, retrieval documents) so that any OTel-compatible backend can render an LLM call meaningfully without backend-specific instrumentation code.")
+    add_body(doc, "The layering matters because it explains why this project could run three different tracing backends against the same instrumentation: `LangChainInstrumentor().instrument()`, called once in `phoenix_tracing.py`, patches LangChain's internals to emit OpenInference-shaped OTel spans regardless of which backend is listening. Phoenix, LangSmith, and Langfuse each consume that same OTel/OpenInference span stream through a different exporter — the semantic-conventions layer is what makes \"add a second backend\" a configuration change rather than a rewrite of every LLM call site.")
+
+    add_heading(doc, "38.7 Arize Phoenix as primary")
+    add_callout(doc, "Definition", "No-data-egress constraint", "A hard requirement that no prompts, retrieved chunks, queries, or model outputs ever leave the local network — ruling out any hosted tracing backend that would require sending trace payloads to an external SaaS endpoint.")
+    add_body(doc, "ADR-063 states this constraint in exactly those terms and it is the deciding factor behind Phoenix's role as this project's primary backend: Phoenix runs fully self-hosted, so trace data — including full prompts and retrieved chunk text — never crosses the local network boundary. The same ADR explicitly weighs LangSmith's self-hosted option and rejects it as \"Enterprise-licensed, Kubernetes/on-prem-oriented ... too heavy/expensive for a solo local project,\" which is why LangSmith stays in the stack only as a hosted, parallel comparison backend (Section 38.10) rather than the primary.")
+
+    add_heading(doc, "38.8 The phoenix_tracing.py bootstrap")
+    add_body(doc, "The entire Phoenix integration is four lines, gated behind `ENABLE_PHOENIX_TRACING` in `config.py`:")
+    add_code(doc, '''def setup_phoenix_tracing():
+    endpoint = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:4317")
+    project_name = os.getenv("PHOENIX_PROJECT_NAME", "rag-work")
+    register(project_name=project_name, endpoint=endpoint, auto_instrument=True)
+    LangChainInstrumentor().instrument()''')
+    add_body(doc, "`register()` — Phoenix's own bootstrap helper — installs a global `TracerProvider` pointed at the local Phoenix collector, and `LangChainInstrumentor().instrument()` patches LangChain to emit spans into it. `setup_phoenix_tracing()` is called from both entry points, `main.py` and `api.py` (Section 38.16 explains why this duplication matters), and must run before `setup_logging()` installs `_TracingHandler`, since the handler needs an active `TracerProvider` to mirror log records onto.")
+
+    add_heading(doc, "38.9 Why get_current_span() sometimes returns a non-recording span")
+    add_body(doc, "BUG-071 is the concrete failure this section exists to explain. Source inspection of `openinference-instrumentation-langchain`'s `OpenInferenceTracer` found that it never calls `context.attach()` or `tracer.start_as_current_span()` — the two mechanisms OpenTelemetry's ambient current-span context normally relies on. Instead it stores every span it creates in its own internal `self._spans_by_run: Dict[UUID, Span]` dictionary, keyed by LangChain's `run_id`, entirely outside OTel's contextvar-based tracking. The direct consequence: any code calling the standard `opentelemetry.trace.get_current_span()` inside a Phoenix-instrumented LangChain call gets back a non-recording span — technically valid, but attached to nothing, and any event added to it vanishes.")
+    add_body(doc, "The guard `_TracingHandler` uses is the fix: rather than trusting `get_current_span()`, it retrieves LangSmith's own `run_id` (which LangChain does propagate correctly) and looks that ID up directly in `OpenInferenceTracer`'s internal `_spans_by_run` registry via `LangChainInstrumentor()._tracer.get_span(run_id)`. This is a reminder worth generalizing beyond Phoenix specifically: an instrumentation library's public API contract (\"spans are ambient and discoverable via `get_current_span()`\") is not guaranteed by the fact that the library emits OTel-shaped spans — it is only guaranteed if the library actually uses OTel's context-propagation primitives internally, and the only way to know for certain is to read the instrumentation library's source, the way this bug's diagnosis did.")
+
+    add_heading(doc, "38.10 LangSmith in parallel")
+    add_body(doc, "ADR-063's impact statement is direct about why LangSmith stays active as a second backend even after Phoenix was chosen as primary: \"so the two backends can keep being compared on live traffic.\" Running two tracing backends against the same requests is not redundancy for its own sake — Section 38.18's decision matrix and Section 38.11's UI-rendering gap both depend on having had real, comparable trace data from both systems rather than reasoning about their feature lists in the abstract.")
+
+    add_heading(doc, "38.11 The LangSmith UI's rendering surface")
+    add_body(doc, "BUG-072 is a sharp lesson in the gap between \"data was recorded\" and \"data is visible.\" Custom log events this project sent into LangSmith were, per direct API verification, fully persisted server-side — a direct query against the LangSmith API confirmed forty-three events present. But none of them rendered anywhere in the LangSmith web UI on the account and plan this project used: not the Feedback tab, not the Input/Output tabs, not the Attributes tab, not the waterfall timeline. A trace that looked complete via the API looked silently incomplete to a human reading the dashboard.")
+    add_body(doc, "The mitigation this project built — `trace_events.py`, a dedicated event-shaping layer — no longer exists in the current codebase; only its compiled bytecode remains, and its behavior is preserved here strictly through the ledger's description rather than a source excerpt this book can verify directly. The lesson survives the lost file intact: never trust a tracing backend's dashboard as proof that data is or is not present. When a trace looks incomplete in a UI, query the backend's API directly before concluding the instrumentation failed — the instrumentation may be working perfectly and the rendering layer may simply not have a surface built for what you sent it.")
+
+    add_heading(doc, "38.12 Langfuse as a third backend")
+    add_callout(doc, "Definition", "Callback-based vs. ambient instrumentation", "Ambient instrumentation (Phoenix, LangSmith) patches a library once at import time so every subsequent call is traced automatically, with no per-call opt-in required. Callback-based instrumentation (Langfuse) requires every call site to explicitly pass a callback handler through LangChain's `config={\"callbacks\": [...]}` mechanism — a call site that omits it is simply invisible to Langfuse, silently, with no error.")
+    add_body(doc, "Langfuse's `langfuse.langchain.CallbackHandler` is the entire mechanism, and the contrast with Phoenix's `auto_instrument=True` bootstrap is total: Phoenix and LangSmith patch LangChain's internals once and see every call from then on, while Langfuse only sees the specific calls that were handed its callback object explicitly. This design choice — deliberate on Langfuse's part, not an oversight — is what makes Section 38.13's config-threading work mandatory rather than optional.")
+
+    add_heading(doc, "38.13 Explicit config threading through the LLM call chain")
+    add_body(doc, "BUG-075 is what happens when a callback-based backend meets a codebase that assumed ambient instrumentation was the only kind. Roughly forty call sites across eleven files never threaded LangChain's `config` object — the vehicle carrying Langfuse's `CallbackHandler` — through the full chain from the FastAPI request handler down to the actual `llm.invoke()` call, so Langfuse saw only a fraction of real traffic. Two separate causes compounded the gap: LangGraph only auto-forwards `config` to node functions that explicitly declare a `config` parameter in their signature, and the `ThreadPoolExecutor` hop inside Section 39.7's timeout pattern breaks ambient contextvar propagation on its own, meaning even functions that did receive `config` could lose it the moment their LLM call crossed a thread boundary.")
+    add_body(doc, "ADR-067 records the fix as a project-wide discipline rather than a one-off patch: every `llm.invoke(...)` call site was updated to `llm.invoke(messages, config=config, **kwargs)` explicitly, and every node function in the call chain was audited to confirm it both accepted and forwarded `config`. The generalizable rule: any tracing mechanism that is not truly ambient needs its carrier object threaded through literally every hop of a call chain, including thread-pool boundaries — a single missed hop silently drops that segment of the trace with no exception raised anywhere.")
+
+    add_heading(doc, "38.14 The Langfuse-evicts-Phoenix bug")
+    add_body(doc, "BUG-076 remains open in this project's own bug ledger, which makes it a rarer kind of chapter material — a documented, understood, but not-yet-fixed production issue rather than a closed case study. Its root cause, confirmed by direct object inspection rather than inference: Phoenix's `TracerProvider.add_span_processor()` treats its own installed processor as disposable — labeled internally as a \"default,\" safe to replace — the first time any other library calls `add_span_processor()` on the same global provider. The moment Langfuse's callback handler initializes and calls that same method, Phoenix's `SimpleSpanProcessor` is silently swapped out for Langfuse's `LangfuseSpanProcessor`.")
+    add_body(doc, "The confirming evidence is exact: inspecting the provider's registered processors before and after Langfuse initialization showed the tuple change from `(<phoenix.otel.otel.SimpleSpanProcessor ...>,)` to `(<langfuse._client.span_processor.LangfuseSpanProcessor ...>,)` — not an addition, a replacement. Phoenix's dashboard goes quiet from that point forward with no exception, no warning, nothing an operator would notice without specifically checking whether Phoenix traces stopped arriving. Figure 38.2 diagrams the sequence.")
+    add_figure(doc, diagram_tracerprovider_eviction_38(), "Figure 38.2 — A global TracerProvider is a shared, mutable resource; the second backend to call add_span_processor() can silently evict the first, with no exception raised on either side.")
+    add_callout(doc, "Common pitfall", "Treating a global TracerProvider as safe for multiple backends by default", "The verified fix for BUG-076 — not yet applied in this project's live code — is `register(..., set_global_tracer_provider=False)` on the Phoenix side combined with `LangChainInstrumentor().instrument(tracer_provider=tp)` passing that same provider explicitly, rather than letting each backend reach for whatever provider happens to be globally registered. Any project running two or more OTel-based tracing backends together should verify this explicitly rather than assuming coexistence is safe by default.")
+
+    add_heading(doc, "38.15 Windows console encoding failures")
+    add_body(doc, "BUG-073 is a specifically Windows failure mode this project hit in `trace_events.py`: a `UnicodeEncodeError` reading `\"'charmap' codec can't encode character '\\u2248'...\"` (an approximately-equal sign, ≈) whenever trace payload text containing non-ASCII characters — often produced by an LLM itself — hit a console still using Windows' legacy `cp1252` code page rather than UTF-8. The fix was to reconfigure stdout to UTF-8 with an error-tolerant encoding mode at startup, rather than trying to strip or escape every non-ASCII character an LLM might ever emit into a trace payload.")
+    add_body(doc, "The general lesson holds even though the specific wrapper's source no longer exists in this codebase to quote directly: any logging or tracing pipeline that might carry LLM-generated text through a Windows console needs an explicit UTF-8 stdout reconfiguration at startup, because the character an LLM chooses to emit is not something application code controls, and the failure only surfaces the first time a genuinely non-ASCII character appears in real traffic — which can be long after initial deployment.")
+
+    add_heading(doc, "38.16 The main-CLI-never-initialized-tracing regression")
+    add_body(doc, "BUG-069 is a checklist-shaped bug: only `api.py` called `setup_phoenix_tracing()`, and `main.py` — this project's CLI entry point — never registered a `TracerProvider` at all, meaning every CLI-driven run produced zero Phoenix traces while API-driven runs worked correctly. The bug was invisible from inside `api.py` because that entry point was correct; it only surfaced when someone ran the CLI and wondered why Phoenix's dashboard showed nothing for that session.")
+    add_body(doc, "The durable habit this leaves behind is an entry-point audit, not a one-time fix: any project with more than one way to start the application — a CLI, an API server, a batch script, a test harness — needs every entry point checked for the same tracing-bootstrap call, in the same order relative to `setup_logging()` (Section 38.8's ordering requirement), rather than assuming that fixing it in one entry point fixed it everywhere.")
+
+    add_heading(doc, "38.17 Langfuse Scores, Datasets, and Annotations")
+    add_body(doc, "Beyond basic call tracing, Langfuse exposes three higher-level features this project researched but never populated in production: Scores (numeric or categorical judgments attached to a trace or observation, either human- or LLM-assigned), Datasets (curated collections of inputs, optionally with expected outputs, for repeatable evaluation runs), and Annotations (structured human review workflows layered on top of live traces). These map closely onto the gap Chapter 37.3 named directly — a curated evaluation dataset separate from production logs is exactly what Langfuse Datasets are built to hold, and this project never built one.")
+    add_body(doc, "Where these features genuinely help is when prompt-version management or production cost-attribution become active priorities — tracking which prompt version produced which score, or which trace's token cost drove a billing spike — rather than as a replacement for the inline `validate_*` judges this project already runs on every request. Where they duplicate existing tooling: a Langfuse Score recording \"did this answer pass groundedness\" is measuring the same thing `check_answer_quality()`'s verdict already measures, just moved into a different system of record. Adopting Scores/Datasets/Annotations without first deciding whether they replace or merely mirror the existing `validate_*` layer risks maintaining two parallel evaluation records that can quietly drift apart.")
+
+    add_heading(doc, "38.18 Choosing between the three")
+    add_table(
+        doc,
+        ["Axis", "Phoenix", "LangSmith", "Langfuse"],
+        [
+            ["Hosting", "Self-hosted (chosen primary)", "Hosted; self-hosted rejected as too heavy", "Self-hosted or hosted"],
+            ["Instrumentation", "Ambient (auto-instrument)", "Ambient (env-var based)", "Callback-based, explicit"],
+            ["Data egress", "None — meets the constraint", "Hosted plan sends data out", "Configurable by deployment"],
+            ["UI reliability (this project)", "Reliable for custom events", "BUG-072 — events invisible in UI", "Reliable, but BUG-076 risk"],
+            ["Distinct strength", "No-egress compliance", "Familiar LangChain-native UX", "Scores/Datasets/Annotations"],
+        ],
+        [1.55, 1.65, 1.65, 1.45],
+    )
+    add_body(doc, "The decision matrix is not \"pick one\" so much as \"know what each one is for\": this project's actual answer was to run all three simultaneously specifically because no single axis dominated the others, and Section 38.14's still-open bug is the direct cost of that choice. A reader building a new project without this project's specific no-data-egress constraint and without the appetite to debug cross-backend interference should treat \"run three tracing backends at once\" as a deliberate, expensive research decision this project made on purpose — not a default recommendation.")
+
+    add_heading(doc, "38.19 Debugging retrieval failures")
+    add_body(doc, "Two open bugs in this project's own retrieval-validation layer are the clearest real teaching material for this section, because both were caught only by reading raw log evidence rather than trusting a summary field. BUG-031 found that the judge model's response was truncated under certain conditions, causing an entire document-track's worth of retrieved chunks to silently disappear from the validated result — invisible unless an operator compared the count of chunks retrieved against the count of chunks that survived validation.")
+    add_body(doc, "BUG-035 is sharper still: a validator's own top-level summary verdict disagreed with its own structured `per_chunk` evidence array in the same response — the summary said PASS while individual chunk verdicts inside the same JSON object said FAIL. The project's own bug record states the generalizable anti-pattern plainly: \"Trusting an LLM-emitted summary field that disagrees with its own structured evidence is a general anti-pattern.\" Debugging a retrieval failure, per both of these still-open bugs, means reading the structured per-chunk evidence directly rather than trusting whatever single-line verdict a validator chose to summarize it as.")
+
+    add_heading(doc, "38.20 Debugging LangGraph flows that don't terminate")
+    add_body(doc, "This project's real non-termination story is not about LangGraph's built-in recursion-limit configuration — that mechanism exists in the framework but was never the failure mode this project actually hit. BUG-062 is the real, sourced case: `combine_tracks`, the node joining the documents and learned-QA retrieval tracks, fired twice per request because the two tracks reached it at unequal depths in the graph, and LangGraph's fan-in triggers a joining node once for each predecessor path that arrives rather than waiting for all of them together by default. Reading the debug log's timestamps was what surfaced it — `[COMBINE_TRACKS] learned_qa=4 documents=0 combined=4` followed moments later by `... documents=2 combined=6`, two separate firings of a node that should only run once. The fix, per ADR-057, was LangGraph's `defer=True` node option, which explicitly waits for every predecessor branch to complete before firing.")
+    add_body(doc, "Before this project migrated to LangGraph at all, its original imperative agent loop used a simpler but equally real non-termination guard, documented in BUG-F013: hard caps of `MAX_ITERATIONS = 6` and `MAX_TOOL_CALLS_PER_ITERATION = 5`, with a total retrieval ceiling of `MAX_TOTAL_RETRIEVALS = 5` across the whole run. Both stories point at the same underlying debugging principle regardless of which framework generation produced them: a run that never stops is diagnosed by reading the actual sequence and count of node or tool invocations in the debug log, not by staring at the final hung state alone — the log's timestamps are what reveal a double-firing node or a runaway retry loop that a snapshot of \"where is it stuck right now\" cannot.")
+
+    add_heading(doc, "38.21 Function-level tracing beyond node boundaries")
+    add_callout(doc, "Definition", "`@traced_operation` / `instrument_namespace`", "`traced_operation(name)` is a decorator that wraps an arbitrary function in a `RunnableLambda`, so a call nests inside the ambient LangChain trace hierarchy even though it is not itself a LangGraph node. `instrument_namespace(globals(), group, exclude={...})` applies that decorator automatically to every function and method defined in a module, letting an entire file opt into fine-grained tracing with one call rather than decorating each function by hand.")
+    add_body(doc, "`operation_tracing.py` exists because LangGraph's own node boundaries are coarser than what a debugging session usually needs — a single node like `dedup_merge_documents` can call several internal helper functions, and without function-level tracing, a trace shows only that the node ran and how long it took in total, not which internal step consumed the time. ADR-068 records the decision to apply `instrument_namespace` across all seventeen `app_workflow/` node and service modules, each with its own carefully chosen `exclude` set to avoid double-instrumenting functions that are already LangGraph nodes in their own right — for example, `nodes/dedup_merge.py` excludes `dedup_merge_documents`, `dedup_merge_learned_qa`, `validate_dedup_merge_documents`, and `validate_dedup_merge_learned_qa` specifically because those four are already traced as graph nodes, and `nodes/query_variants.py` excludes `generate_query_variants` for the same reason.")
+
+    add_heading(doc, "38.22 Shaping the trace payload")
+    add_body(doc, "Instrumenting every function in seventeen modules risks the opposite failure from Section 38.1's problem — not too little visibility, but an unreadable flood of oversized trace payloads. `operation_tracing.py`'s `TraceSpec` dataclass and its `_summarize()` helper exist to prevent that: `_summarize()` recursively walks a function's arguments and return value, capping recursion at a depth of three, truncating any text field past `_MAX_TEXT_CHARS` (2,000 characters), and truncating any list or dict past `_MAX_COLLECTION_ITEMS` (20 items) — both now promoted to named constants in `config.py` rather than left as magic numbers buried in the tracing module. A numpy array's shape is recorded in place of its full contents, and a service object (a database client, an embedding model handle) is reduced to its class name rather than serialized in full.")
+    add_body(doc, "`_include_argument()` is the companion filter deciding which function arguments are worth tracing at all — `self`, `cls`, `config`, `callbacks`, `client`, and `handler` are all excluded by name, because tracing the identity of a service object or the ambient config-threading object from Section 38.13 adds noise to every single traced call without adding diagnostic value. Together, `TraceSpec`'s per-operation policy registry and these two size/noise filters are what let `instrument_namespace` be applied broadly across seventeen modules without producing traces too bloated to actually read.")
+
+    add_heading(doc, "38.23 The dedicated LangfuseHandler")
+    add_body(doc, "`langfuse_logging.py` adds a fourth root log handler, distinct from `_TracingHandler`, specifically because Langfuse's data model treats a log line as its own kind of observation — an `event` — rather than merely an annotation on an existing span the way Phoenix and LangSmith's mirroring works. `LangfuseHandler` converts every `LogRecord` it receives into a Langfuse `event` observation attached to the currently active Langfuse trace, using a `ContextVar`-based re-entrancy guard to stop the SDK's own internal logging (which itself goes through Python's `logging` module) from triggering an infinite feedback loop of the handler logging about logging.")
+    add_body(doc, "ADR-069 records a deliberate reversal in this handler's minimum level: it was initially set to `INFO`, matching the console handler's level, then explicitly changed to `DEBUG`. The ADR's own reasoning is worth quoting directly: \"The `INFO` → `DEBUG` level change was a deliberate reversal, not an oversight ... filtering them out at the handler defeats the point of adding this handler at all.\" The insight generalizes: a dedicated tracing-oriented log handler should default to the most permissive level that does not itself cause performance problems, because its entire purpose is capturing detail a human is not watching in real time — filtering it down to `INFO` just to match a console handler's noise budget defeats the reason the second handler exists.")
+
+    add_body(doc, "Part VII continues from this chapter's traces and logs into what they cost to produce and what a production pipeline can do to spend less of both time and money generating them — Chapter 39 turns from watching the pipeline run to making it run more cheaply.")
+
+    path = OUT_DIR / "Chapter_38_Observability_Platforms_and_Debugging.docx"
+    doc.core_properties.title = f"Chapter 38 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_thread_timeout_39() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["The portable per-call timeout — and its one real caveat"], size=21, bold_first=True)
+        + svg_labeled_box(40, 100, 340, 150, "ThreadPoolExecutor(1)", [".submit(llm.invoke, ...)", "no signal.alarm — works", "the same on Windows/Linux"], fill="#F2F2F2")
+        + svg_arrow(388, 175, 428, 175)
+        + svg_labeled_box(436, 100, 340, 150, "future.result(timeout=N)", ["N calibrated from real p95s:", "LLM 150s, retrieval 10s,", "embedding 5s"], fill="#D9D9D9")
+        + svg_arrow(600, 250, 600, 286)
+        + svg_labeled_box(140, 288, 920, 140, "TimeoutError reaches the caller", ["but the background thread is NOT killed, only abandoned —", "a slow call keeps running invisibly until it finishes on its own"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter39_thread_timeout", svg)
+
+
+def diagram_llm_tier_split_39() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Routing cheap operations to a cheaper model"], size=21, bold_first=True)
+        + svg_labeled_box(40, 100, 340, 160, "llm — user-facing generation", ["llama-3.1-8b-instruct", "draft + final answer synthesis", "needs the strongest reasoning"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_labeled_box(430, 100, 340, 160, "judge_llm — binary/graded checks", ["Qwen2.5-7B-Instruct, temp 0.0", "validate_retrieval, validate_merge,", "check_answer_quality"], fill="#F2F2F2")
+        + svg_labeled_box(820, 100, 340, 160, "json_fix_llm — structural repair", ["Qwen2.5-Coder-3B-Instruct", "smallest model in the split —", "repair, not reasoning"], fill="#D9D9D9")
+        + svg_arrow(600, 270, 600, 306)
+        + svg_labeled_box(220, 308, 760, 110, "Research topic 41 — a fourth, latency-driven tier is still in exploration, not yet routed", ["the three-way split is real and shipped; full per-stage tiering is aspirational"], fill="#F2F2F2")
+        + "</svg>"
+    )
+    return svg_to_png("chapter39_llm_tier_split", svg)
+
+
+def build_chapter_39() -> Path:
+    title = "Performance and Cost Optimization"
+    doc = configure_document(title)
+    add_cover(doc, 39, title, "PART VII — PRODUCTION, DEPLOYMENT, AND BEYOND", "A pipeline that is correct but slow is not yet finished; it is finished when the seconds and the dollars have been accounted for as carefully as the answer was.")
+    add_chapter_heading(doc, 39, title)
+    add_body(doc, "Chapter 23 already established the token-budget math that determines what fits in a context window; this chapter turns to the second constraint every production system eventually has to answer for — what the pipeline costs in wall-clock seconds and in dollars, and which of those costs are worth spending engineering effort to reduce. This project's own `timing_tracker.py` singleton has been recording exactly this data on every run since ADR-043, which makes this chapter unusually well grounded: the long-tail latency numbers, the timeout values, and the concurrency-control design this chapter covers are all measured facts from real runs, not estimates.")
+    add_body(doc, "It is equally important to be honest about what this project never built. There is no embeddings cache, no retrieval cache, no LLM-response cache, and no index quantization anywhere in this codebase — this chapter says so plainly where it applies, rather than describing tooling that does not exist as though it does. What the project does have — calibrated per-call timeouts, a fairness-preserving concurrency gate, a three-way LLM cost/capability split, and a very literal illustration of why call-count reduction (Chapter 36C) was the biggest lever this project ever pulled — is real, measured, and worth teaching in detail.")
+    add_body(doc, "By the end of this chapter you will be able to explain where the seconds in a multi-stage RAG pipeline actually go, describe this project's real timeout and concurrency-control mechanisms and the specific bugs that shaped their exact parameters, and know which performance techniques (batching, model tiering) this project implemented versus which (caching, quantization) remain external-literature techniques it never adopted.")
+
+    add_heading(doc, "39.1 Batching embeddings — sweet-spot batch sizes")
+    add_body(doc, "This project's own GPU-ingestion research found the sweet spot empirically rather than by formula: a batch size of 128-512 suited an RTX 5050 laptop GPU's 8GB of VRAM running `all-MiniLM-L6-v2`, with diminishing returns observed beyond 256. The live default, `BATCH_SIZE = 512` in `app_workflow/config.py`, sits at the top of that observed range. Worth noting for anyone tempted to blame batch size for a slow ingest: the original slowness this research was chasing turned out not to be a GPU-throughput problem at all — it was caused by writing to ChromaDB once per small batch rather than embedding in bulk and inserting in bulk, and the real fix was restructuring the write pattern, not tuning the embedding batch size in isolation.")
+
+    add_heading(doc, "39.2 Caching at every layer")
+    add_callout(doc, "Common pitfall", "Assuming a self-learning RAG system has a cache layer", "This project has no embeddings cache, no retrieval cache, and no LLM-response cache anywhere in its codebase — an exhaustive search for `cache`, `lru_cache`, and similar patterns across both pipelines confirms this. The only real functional analog is `SelfLearner`'s distillation into a `learned_qa` collection (Chapter 32): every five successful interactions get distilled and re-embedded, and a future similar query can retrieve that distilled answer directly — which behaves like a semantic response cache in effect, even though this project's own documentation never frames it that way.")
+    add_body(doc, "The general literature's three standard caching layers are each worth understanding even though this project implements none of them directly. An embeddings cache keyed on exact text avoids re-encoding identical chunks across repeated ingestion runs. A retrieval cache keyed on a normalized query (Chapter 30's `_normalize_query()` pattern would be the natural key) avoids repeating an expensive vector search for a query variant this project has already seen. An LLM-response cache keyed on the full prompt avoids paying for an identical generation twice — valuable specifically for the validator prompts Chapter 37 covered, which are far more likely to see near-identical inputs across requests than final-answer generation is.")
+    add_body(doc, "The reason this project never built any of the three is worth stating rather than glossing over: its actual traffic pattern — a small number of users, genuinely varied queries, and a self-learning layer already designed to surface repeat-relevant content through retrieval rather than exact-match lookup — never produced the cache-hit-rate justification a formal cache layer needs to earn its complexity. A reader building a higher-traffic system should treat this section as a checklist of what to add, not as a description of what this project already has.")
+
+    add_heading(doc, "39.3 Reducing token usage in prompts")
+    add_body(doc, "Chapter 22B's semantic compression is this project's real, measured answer to prompt token reduction — LBC achieved roughly a 27.6% size reduction in testing, trading a small amount of LLM call time for a meaningfully smaller downstream prompt. A second, structural technique appears at the conversation-history level rather than the retrieved-context level: once a request's token count crosses a 500-token gate, the compression pipeline (NAC, DC, LBC) is skipped entirely rather than run and then discarded, and prior raw `retrieve_documents` tool-result messages are scrubbed from the conversation history and replaced with a placeholder specifically to keep the context window lean across a multi-turn agent loop, rather than letting every prior retrieval's full text accumulate turn over turn.")
+
+    add_heading(doc, "39.4 Picking cheaper models for cheap steps")
+    add_body(doc, "Section 39.11 covers this project's real three-way LLM split in detail; the principle behind it is simple enough to state on its own: a step that only needs to emit a binary or small-enum verdict — PASS/FAIL, GROUNDED/OVERCLAIMED/etc. — does not need the same model capacity as a step that has to synthesize a coherent, well-reasoned final answer from scratch. Routing the first kind of step to a smaller, cheaper model and reserving the largest model for genuine generation is the same idea Chapter 25 covered from the small-model-capability angle, applied here specifically as a cost lever rather than a correctness one.")
+
+    add_heading(doc, "39.5 Async and parallel retrieval")
+    add_body(doc, "This project's own cross-pipeline benchmark is the clearest possible demonstration of parallel retrieval's real cost impact: on the same query set, the LangGraph pipeline (`app_workflow`, using LangGraph's `Send()` fan-out to dispatch every query variant concurrently) averaged 13 minutes 51 seconds total with 5 minutes 16 seconds spent on retrieval, against the older sequential `app` pipeline's 28 minutes 28 seconds total with 18 minutes 16 seconds on retrieval — roughly a 2x overall speedup, concentrated almost entirely in the retrieval stage. `dedup_merge.py`'s own inline comment states the design directly: the per-track dedup-merge nodes for the documents and learned-QA collections \"run in parallel,\" reflecting the same two-track design Chapter 33 introduced from a retrieval-correctness angle now paying off as a latency win too.")
+
+    add_heading(doc, "39.6 Index compression and quantization")
+    add_callout(doc, "Common pitfall", "Assuming a project using ChromaDB has quantized its index", "This project's vector store uses ChromaDB's default HNSW index, uncompressed — no product quantization, scalar quantization, or IVF clustering appears anywhere in the codebase or research ledger. This project's own research explicitly frames HNSW as future-proofing for a corpus that, at roughly 1,181 chunks, was still small enough that exact brute-force search remained feasible; HNSW's approximate ~95-99% recall was adopted for headroom, not because compression was already a bottleneck.")
+    add_body(doc, "For a corpus large enough that HNSW's memory footprint itself becomes the constraint — not this project's scale, but a plausible next stage for a reader's own system — product quantization compresses each vector into a small set of learned sub-vector codes, trading a controlled amount of recall accuracy for a large reduction in index memory. This is genuinely external-literature material relative to this project's own history: worth knowing, not worth presenting as something this codebase has done.")
+
+    add_heading(doc, "39.7 Thread-based per-call timeouts")
+    add_callout(doc, "Definition", "`ThreadPoolExecutor.submit(...) + future.result(timeout=N)`", "A portable pattern for imposing a hard wall-clock timeout on any blocking call: submit the call to a single-worker thread pool, then wait on the returned future with an explicit timeout, raising a `concurrent.futures.TimeoutError` if the call has not completed in time.")
+    add_body(doc, "ADR-042 and this project's own research record the reasoning behind choosing this pattern over the alternatives, and both rejected alternatives are worth knowing specifically because they are the first thing most engineers reach for. `signal.alarm` is Windows-incompatible and cannot interrupt a call that is blocked inside a C extension holding the GIL — a real constraint for a project whose embedding and LLM libraries do exactly that. Per-library timeout parameters were the other rejected option, simply because neither ChromaDB nor SentenceTransformers exposes one for the specific calls this project makes. The thread-pool pattern works identically across platforms and around any library that offers no timeout hook of its own:")
+    add_code(doc, '''with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _executor:
+    _future = _executor.submit(llm.invoke, messages, **kwargs)
+    try:
+        response = _future.result(timeout=LLM_RESPONSE_TIMEOUT_SECONDS)
+    except concurrent.futures.TimeoutError:
+        raise LLMResponseTimeoutError(LLM_RESPONSE_TIMEOUT_SECONDS)''')
+    add_body(doc, "This exact pattern appears at six separate call sites across both pipelines — `llm_caller.py`, `retriever.py`, and `embedding_manager.py`, each with a timeout value BUG-051 calibrated from real measured p95 latencies rather than a guessed round number: `LLM_RESPONSE_TIMEOUT_SECONDS = 150` against a measured LLM p95 of roughly 75 seconds (2x headroom), `RETRIEVAL_TIMEOUT_SECONDS = 10` against a measured ChromaDB p95 of roughly 0.7 seconds (about 14x headroom), and `EMBEDDING_ENCODING_TIMEOUT_SECONDS = 5` against a measured encode p95 of roughly 0.02 seconds (about 250x headroom). Figure 39.1 shows the pattern's one real limitation.")
+    add_figure(doc, diagram_thread_timeout_39(), "Figure 39.1 — future.result(timeout=N) reliably stops the caller from waiting, but the abandoned thread keeps running invisibly to completion; this pattern bounds wait time, not resource usage.")
+    add_body(doc, "The limitation Figure 39.1 names is stated explicitly in this project's own code comments and worth repeating verbatim in spirit: the background thread is not killed when a timeout fires, only abandoned. A caller stops waiting for the result, but the slow call itself keeps consuming CPU, holding a connection, or waiting on a hung external service until it eventually finishes (or the process exits) — this pattern bounds how long a caller waits, not how much work the abandoned call continues to do in the background.")
+
+    add_heading(doc, "39.8 Semaphores vs FIFO queue for LLM-call serialization")
+    add_body(doc, "BUG-053 is the concrete failure that forced this project to move past a naive concurrency primitive: under two genuinely concurrent `/query` requests, an `asyncio.Lock` failed to serialize Groq API calls correctly, because `asyncio.Lock` is not a cross-thread mutex and this project's calls were crossing thread boundaries (Section 39.7's thread-pool timeout pattern is exactly the kind of boundary that breaks naive `asyncio` synchronization). This project's own research is explicit about why a plain counting semaphore would not have been the right replacement either: \"Semaphores are insufficient for the token-quota exhaustion problem because they provide no guarantee that a 429-holding thread will regain the gate before new arrivals\" — a semaphore enforces a concurrency limit, but says nothing about serving order, so a thread that just hit a rate limit could be starved indefinitely by newly arriving requests cutting in front of it.")
+    add_body(doc, "ADR-044's replacement is a genuine FIFO queue built from `queue.Queue[threading.Event]` combined with a `threading.Lock` — `_gate_acquire()` and `_gate_release_to_next()` in `llm_caller.py` — guaranteeing that whichever thread has been waiting longest is the next one released, regardless of how many new requests arrive while it waits. The distinction this bug and its fix teach generalizes past this specific project: a semaphore answers \"how many can run at once,\" while a FIFO queue additionally answers \"in what order do waiters get served,\" and a system where fairness under rate-limit pressure matters needs the second guarantee, not just the first.")
+
+    add_heading(doc, "39.9 Exponential backoff with jitter as an architectural pattern")
+    add_callout(doc, "Common pitfall", "Assuming this project's retry logic still uses jitter", "`llm_caller.py`'s `_rate_limit_delay()` still computes classic exponential backoff (`base_seconds * 2**(attempt - 1)`), but jitter was deliberately removed. Its own docstring explains why: \"Jitter is intentionally absent: with the FIFO gate only one thread calls Groq at a time, so there is no collision to de-synchronize.\"")
+    add_body(doc, "This removal is itself the more interesting lesson than the backoff formula alone. Jitter — randomizing the exact delay so that multiple clients backing off from the same failure don't all retry at the exact same instant and collide again — solves a *concurrent-collision* problem specifically. Once Section 39.8's FIFO gate guaranteed that only one thread ever calls the LLM provider at a time, the collision jitter exists to prevent became structurally impossible, and the parameter that removed it (`LLM_RATE_LIMIT_BACKOFF_JITTER_SECONDS`) was deleted from `config.py` entirely rather than left in place unused. The architectural lesson: exponential backoff and jitter solve two different problems — pacing retries, and desynchronizing concurrent retriers — and a concurrency-model change elsewhere in a system can make the second one moot even while the first remains necessary.")
+
+    add_heading(doc, "39.10 The GPU-driver failure fallback")
+    add_body(doc, "BUG-057, still open in this project's bug ledger, documents a specifically Windows hardware failure: an RTX 5050 laptop GPU reporting `ConfigManagerErrorCode = 43` — a driver-level crash state — causing `torch.cuda.is_available()` to return `False` even though the installed `torch==2.11.0+cu128` build is genuinely CUDA-capable, and `nvidia-smi` itself failing with exit code 4. The bug record is explicit that this is a Windows driver failure, not application code: \"Not a PyTorch or project-code issue.\"")
+    add_body(doc, "The fallback that keeps the pipeline running through this failure is a single line in `embedding_manager.py`: `self.device = \"cuda\" if torch.cuda.is_available() else \"cpu\"`. There is no explicit Code-43 detection anywhere in the code — the fallback is unconditional and automatic, silently routing to CPU embeddings whenever CUDA reports itself unavailable for any reason at all, Code 43 included. This is a deliberately conservative design: rather than trying to distinguish a genuine driver crash from a machine that simply has no GPU, the code treats \"CUDA unavailable\" as a single condition with a single fallback, accepting slower CPU-bound embedding generation over a hard failure of the entire ingestion or query path.")
+
+    add_heading(doc, "39.11 The merge_llm / judge_llm / json_fix_llm split")
+    add_body(doc, "ADR-018 introduced this project's original three-instance model split, and its own rationale is worth quoting directly: \"`judge_llm` can be upgraded to `llama-3.3-70b-versatile` ... while `llm` stays on `llama-3.1-8b-instant`\" — the explicit design intent was decoupling the model powering user-facing generation from the model powering internal judgment calls, so each could be tuned independently for its own cost/capability tradeoff. The live configuration keeps `judge_llm` on `Qwen2.5-7B-Instruct` at temperature 0.0 (deterministic, appropriate for a verdict-producing judge) and adds a fourth, even smaller model — `json_fix_llm`, on `Qwen2.5-Coder-3B-Instruct` — dedicated purely to structural JSON repair rather than reasoning, per ADR-055.")
+    add_figure(doc, diagram_llm_tier_split_39(), "Figure 39.2 — Three models, three cost/capability points: the smallest model does the narrowest job, and only the user-facing generation step pays for the largest one.")
+    add_body(doc, "Figure 39.2 is worth reading against Research topic 41's proposed further extension, which classifies pipeline stages into three latency/cost tiers — binary-judge steps (a 3B-class model is sufficient), faithful-rewrite steps (needing roughly 4-7B capability), and user-facing generation (needing the strongest available model) — but the record is explicit that this classification remains in an exploration phase, with no code changes committed toward full per-stage routing. What is genuinely live in production is the three/four-instance split this section describes in detail; the fully generalized tiered-routing vision is a real, sourced research direction this project has not yet built.")
+
+    add_heading(doc, "39.12 Latency budgeting in a multi-stage pipeline")
+    add_body(doc, "The most important finding in this project's own latency data is where the seconds concentrate: BUG-051's calibration numbers put LLM call p95 latency at roughly 75 seconds against a ChromaDB retrieval p95 of roughly 0.7 seconds and an embedding-encode p95 of roughly 0.02 seconds — a difference of two to four orders of magnitude. Nearly every second a request spends in this pipeline is spent waiting on an LLM call, not on retrieval or embedding, which is precisely why Chapter 36C's threshold-tuning work — reducing LLM call *count* from 148 to 30 on a simple query and from 205 to 30 on a complex one — was a far larger latency win than any retrieval-side optimization this chapter covers could have been on its own.")
+    add_body(doc, "This is the chapter's central lesson stated plainly: when nearly all latency lives in one stage type, the highest-leverage optimization is reducing how many times that stage type gets invoked, not making each invocation marginally faster. Section 39.5's parallel-retrieval win and this section's call-count observation are not competing explanations for this project's real 2x cross-pipeline speedup — they are complementary, but the call-count reduction from Chapter 36C's evidence-based tuning did more of the actual work, because it attacked the stage where the seconds were actually concentrated.")
+
+    add_heading(doc, "39.13 The singleton timing_tracker.py")
+    add_body(doc, "`app/timing_tracker.py` is a small, deliberately simple singleton module — its own docstring states the design directly: \"Singleton timing tracker that records per-phase durations to a JSON file. Initialized by `logger_config.setup_logging()`; all other modules call `record()` or `record_llm()` without needing the file path.\" Four functions cover the entire interface:")
+    add_code(doc, '''def initialize(json_path: Path) -> None: ...
+def record(category: str, duration: float) -> None: ...
+def record_llm(caller_tag: str, duration: float) -> None: ...
+def _write() -> None: ...''')
+    add_body(doc, "`record_llm()` resolves a caller tag like `\"AGENT-DRAFT\"` or `\"CAQ-JUDGE\"` to one of nine tracked categories — Sub-Query Generation, Total DB Retrieval Time, Total DB Retrieval Validation Time, Total Merge Time for Retrieved Chunks, Total Validation Time for Merged Chunks, Compression, Draft Generation, CAQ, and Final Generation — and no-ops silently for any tag it doesn't recognize, rather than raising. `_write()` flushes the entire accumulated JSON structure synchronously on every single call, a design ADR-043 defends explicitly against the performance cost it might seem to invite: \"a run that crashes mid-way still produces a partially-populated JSON,\" trading a small per-call write cost for a durability guarantee that a hung or crashed run's partial timing data is never lost.")
+    add_body(doc, "The resulting per-run JSON file is where this chapter's most striking number comes from, and it deserves to be quoted exactly rather than summarized: this project's own development record states that \"the timing file includes, among other observations, retrieval-validation calls from milliseconds to roughly 102 s, merge calls up to roughly 310 s, merged-chunk validation up to roughly 374 s, and compression calls above 12 minutes.\" A long tail this wide — the same operation taking anywhere from single-digit milliseconds to over twelve minutes — is why `timing_tracker.py` records every individual call rather than only an aggregate mean per category: a mean across that distribution would hide the twelve-minute outliers entirely, and those outliers, not the typical case, are usually what a latency-budgeting effort actually needs to find and explain.")
+
+    add_body(doc, "Chapter 40 turns from performance to safety — the same production pipeline this chapter measured and tuned is also the pipeline an attacker gets to send input to, and the next chapter covers what has to hold even when that input is adversarial.")
+
+    path = OUT_DIR / "Chapter_39_Performance_and_Cost_Optimization.docx"
+    doc.core_properties.title = f"Chapter 39 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_dual_pipeline_41() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560">'
+        '<rect width="1200" height="560" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Two pipelines, two ports, one shared lifespan pattern"], size=21, bold_first=True)
+        + svg_labeled_box(60, 90, 500, 170, "app/api.py — port 8000", ["LangChain sequential pipeline", "QueryResponse includes", "request_id, iterations, variants"], fill="#F2F2F2")
+        + svg_labeled_box(640, 90, 500, 170, "app_workflow/api.py — port 8001", ["LangGraph parallel-track pipeline", "QueryResponse: answer, quality,", "sources only — no request_id"], fill="#D9D9D9")
+        + svg_arrow(310, 260, 310, 300)
+        + svg_arrow(890, 260, 890, 300)
+        + svg_labeled_box(60, 302, 500, 120, "Five shared routes", ["/query, /feedback/bad,", "/stats, /learn, /quit"], fill="#F2F2F2")
+        + svg_labeled_box(640, 302, 500, 120, "Same five routes", ["plus optional switches", "on QueryRequest"], fill="#D9D9D9")
+        + svg_arrow(600, 422, 600, 458)
+        + svg_labeled_box(160, 460, 880, 90, "Shared lifespan pattern", ["build context at startup, clear it at shutdown"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter41_dual_pipeline", svg)
+
+
+def diagram_duplicatekey_idempotency_41() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460">'
+        '<rect width="1200" height="460" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["A unique index turns a race into a guaranteed error, not a guess"], size=20, bold_first=True)
+        + svg_labeled_box(40, 90, 520, 150, "Check-then-insert (racy)", ["exists = find_one(request_id)", "if not exists: insert_one(...)", "two retries can both pass the check"], fill="#F2F2F2")
+        + svg_labeled_box(640, 90, 520, 150, "Unique index + insert (safe)", ["insert_one(record) directly", "second retry's insert_one()", "raises DuplicateKeyError itself"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + svg_arrow(600, 250, 600, 286)
+        + svg_labeled_box(160, 288, 880, 130, "except DuplicateKeyError: log \"duplicate interaction log skipped (node retry)\", return", ["a LangGraph node retry after a transient failure cannot double-write the same interaction"], fill="#D9D9D9")
+        + "</svg>"
+    )
+    return svg_to_png("chapter41_duplicatekey_idempotency", svg)
+
+
+def build_chapter_41() -> Path:
+    title = "Deployment"
+    doc = configure_document(title)
+    add_cover(doc, 41, title, "PART VII — PRODUCTION, DEPLOYMENT, AND BEYOND", "The pipeline that answers a query correctly in a notebook is not yet a system anyone else can rely on.")
+    add_chapter_heading(doc, 41, title)
+    add_body(doc, "Every prior chapter of this book ran its pipeline as a script or a CLI session. This chapter covers the last step that turns it into something another program — a frontend, a Postman client, a second engineer's test — can actually call: a FastAPI service wrapped around each pipeline, a real feedback-persistence backend that survived a genuine scaling problem, and a mechanism for overriding pipeline behavior per request without a restart. As in earlier chapters, the material here is a mix of what this project actually built and general production practice it never had reason to build — this chapter is explicit throughout about which is which.")
+    add_body(doc, "The two most fully realized parts of this chapter are also its most concretely sourced: `app/api.py` and `app_workflow/api.py`, running the LangChain and LangGraph pipelines side by side on ports 8000 and 8001, and the MongoDB migration this project's feedback layer went through once the original JSONL ledger (Chapter 29) could no longer keep up. Both come with real bugs — a duplicate-key race, a replica-set requirement, an index-definition mismatch — that are worth more to a reader than a clean textbook description of either mechanism would be.")
+    add_body(doc, "By the end of this chapter you will be able to describe how this project's two pipelines are each wrapped in a FastAPI service and what their response shapes actually differ on, explain why a multi-document MongoDB transaction requires a replica set and how this project satisfies that requirement locally, and recognize `DuplicateKeyError` as a genuinely safer idempotency guard than a check-then-insert pattern for a LangGraph node that might retry.")
+
+    add_heading(doc, "41.1 Wrapping the agent in a FastAPI service")
+    add_body(doc, "Both pipelines follow the same lifespan pattern, differing mainly in what gets built at startup. `app/api.py`'s `lifespan` handler constructs an `EmbeddingManager` and `VectorStore`, raising `RuntimeError(\"Vector store is empty. Run ingest.py first.\")` if the index has no documents in it, then builds the retriever, tools, `FeedbackStore`, and `SelfLearner`, storing all of it in a module-level `_ctx` dictionary that request handlers read from. `app_workflow/api.py`'s lifespan is structured slightly differently on purpose: it imports `build_graph` and the `services` module lazily, inside the function body rather than at module load time, specifically — per its own code comment — \"so that a `SystemExit` from `services.py` (empty vector store) surfaces as a startup failure rather than a module-level crash,\" a distinction that matters because a module-level crash can produce a confusing import-time traceback instead of a clean, catchable startup error.")
+    add_body(doc, "Graceful shutdown in both services is a single deliberately simple endpoint: `POST /quit` sends `os.kill(os.getpid(), signal.SIGTERM)` to the running process and returns `{\"status\": \"shutting down\"}, letting uvicorn's own signal handling perform a clean shutdown rather than requiring an operator to find and kill the process externally.")
+
+    add_heading(doc, "41.2 Running two pipelines side by side")
+    add_body(doc, "`app/api.py` serves the original LangChain sequential pipeline on port 8000; `app_workflow/api.py` serves the LangGraph parallel-track pipeline on port 8001. Running both at once, against the same corpus, is what made Chapter 39.5's real cross-pipeline latency comparison possible in the first place — a benchmark run against only one pipeline could describe that pipeline's absolute latency, but only running both side by side against the same queries could produce the roughly 2x speedup figure this book has cited from Chapter 39 onward. Figure 41.1 lays the two services out together.")
+    add_figure(doc, diagram_dual_pipeline_41(), "Figure 41.1 — Two independently deployable services share a lifespan pattern and route surface, differing in pipeline implementation and response shape.")
+
+    add_heading(doc, "41.3 The endpoint surface")
+    add_body(doc, "Both APIs expose the same five routes: `POST /query`, `POST /feedback/bad`, `GET /stats`, `POST /learn`, and `POST /quit`. `app_workflow/api.py` adds one additional layer of protection its LangChain counterpart doesn't need: a reserved-word guard, `_COMMAND_INPUTS = {\"bad\", \"stats\", \"learn\", \"exit\", \"quit\"}`, rejecting any of those five literal strings sent as a `/query` payload with an HTTP 400 — a defense against a client accidentally sending a CLI-style command string (Chapter 35's interactive commands) to the wrong endpoint rather than calling the dedicated route for it.")
+    add_body(doc, "`POST /feedback/bad`, not a bare `/bad`, is the real route name — ADR-047 chose the `request_id`-keyed feedback path specifically because a bare `/bad` route gives no way to identify *which* prior query a thumbs-down applies to once more than one request may be in flight.")
+
+    add_heading(doc, "41.4 Request/response Pydantic models")
+    add_body(doc, "The two pipelines' request models diverge specifically around the `switches` mechanism (Section 41.16), but their response shapes diverge more sharply, and the difference is worth internalizing precisely because it is easy to assume the two APIs are interchangeable when they are not. `app/api.py`'s `/query` handler returns whatever `run_agent()` produces plus an injected `request_id`: `answer`, `sources`, `iterations`, `quality`, `document_chunks`, `learned_qa_chunks`, `variants`, and `request_id`. `app_workflow/api.py`'s `/query` handler returns a deliberately narrower shape:")
+    add_code(doc, '''return {"answer": answer, "quality": quality, "sources": sources}''')
+    add_body(doc, "There is no `request_id` in the LangGraph response at all — a direct, load-bearing consequence of the two pipelines' different feedback mechanisms. `app/api.py`'s `FeedbackRequest` requires a `request_id` because `mark_bad()` needs to know exactly which historical interaction a thumbs-down applies to; `app_workflow/api.py`'s `FeedbackRequest` has no `request_id` field at all, relying instead on an in-memory `mark_last_bad()` sidecar that assumes feedback always refers to the most recent query on that connection. A client written against one pipeline's response contract will silently break if pointed at the other without adjustment — this is a genuine integration hazard, not just a documentation gap.")
+
+    add_heading(doc, "41.5 Postman setup for parallel-pipeline testing")
+    add_callout(doc, "Common pitfall", "Assuming a documented testing workflow still has its artifacts", "This project's own development record mentions a hand-written `API_ENDPOINTS.txt` — full documentation of every endpoint across both APIs, including request/response JSON shapes and error codes — but neither that file nor any Postman collection or environment file exists anywhere in this repository's current tree. The workflow this section describes is general practice, not a reproduction of a specific project artifact.")
+    add_body(doc, "The general pattern worth knowing regardless: one Postman collection defining the shared route shapes (`POST /query`, `POST /feedback/bad`, `GET /stats`, `POST /learn`), paired with two environments — one pointed at `localhost:8000`, one at `localhost:8001` — lets the same request bodies be replayed against both pipelines by switching environments rather than duplicating every request. Given Section 41.4's real response-shape divergence, a shared collection's response-assertion scripts need to branch on which environment is active, or accept only the fields both pipelines' responses actually share.")
+
+    add_heading(doc, "41.6 Streaming responses to the client")
+    add_callout(doc, "Common pitfall", "Assuming this project streams tokens to the client", "Neither `app/api.py` nor `app_workflow/api.py` implements streaming — an exhaustive search for `StreamingResponse`, `EventSourceResponse`, or server-sent-events patterns across the entire codebase returns nothing. Both `/query` handlers run the full pipeline behind `await asyncio.to_thread(...)` and return one complete JSON response only once the entire agent loop, including every retry and every compression pass, has finished.")
+    add_body(doc, "This is a real, honest limitation worth naming directly: given Chapter 39.13's own measured latency data — individual compression calls running past twelve minutes in the long tail — a client waiting on this project's non-streaming `/query` endpoint can genuinely wait minutes with no intermediate feedback. FastAPI's `StreamingResponse`, paired with a pipeline redesigned to yield intermediate tokens or stage-completion events as they happen rather than only a final answer, is the standard fix for exactly this user-experience gap — a real architectural change this project never made, not a small addition.")
+
+    add_heading(doc, "41.7 Persistent vector stores in production")
+    add_body(doc, "This project's vector store has always been a self-hosted, embedded ChromaDB instance backed by a local `VECTOR_STORE_PATH` — no managed vector database (Pinecone, Weaviate, or similar) appears anywhere in its codebase or research ledger. `learned_qa_store.py`'s collection-factory design, covered in Chapter 32, includes a real live-migration case study worth knowing here too: 374 entries were successfully moved from an L2-distance collection to a cosine-distance collection without data loss, demonstrating that a self-hosted embedded store is not necessarily locked into its original distance metric forever, even without a managed provider's migration tooling.")
+    add_body(doc, "The managed-versus-self-hosted tradeoff itself is genuine production guidance rather than something this project's own history settled: a managed vector database trades operational simplicity (no local disk to manage, built-in replication, a support contract) for a recurring cost and a dependency on a third party's uptime; a self-hosted embedded store like this project's ChromaDB instance trades that simplicity for full control and zero per-query cost, at the price of the team owning backup, replication, and capacity planning themselves.")
+
+    add_heading(doc, "41.8 Stateless web frontends and session handling")
+    add_body(doc, "The response-shape divergence Section 41.4 covers has a direct session-handling consequence a frontend integrating with both pipelines has to design around: `app/api.py`'s `request_id`-based feedback model is naturally stateless from the frontend's perspective — the frontend simply stores the `request_id` it was handed and replays it later, with no server-side session required. `app_workflow/api.py`'s `mark_last_bad()` sidecar is implicitly stateful in a way that does not survive a load-balanced multi-instance deployment cleanly — \"the most recent query\" is only well-defined if every request from a given client session reliably lands on the same backend instance, which a naive round-robin load balancer does not guarantee. A frontend or infrastructure team adopting the LangGraph pipeline behind more than one instance needs either sticky sessions or a redesign of that feedback mechanism to be explicitly `request_id`-keyed the way the LangChain pipeline already is.")
+
+    add_heading(doc, "41.9 Containerization with Docker")
+    add_body(doc, "Neither `app/api.py` nor `app_workflow/api.py` has a Dockerfile or docker-compose configuration anywhere in this repository — both run as bare Python processes today. The one real containerization precedent this project does have lives outside the two main APIs entirely: Chapter 41B's Marker microservice, whose `Dockerfile` and `docker-compose.yml` are described in detail in ADR-073 and this project's architecture ledger, even though — as Chapter 41B is explicit about — the directory itself is not present in this repository's current tracked snapshot. Containerizing the main query APIs the same way Chapter 41B's microservice was containerized is a natural next step this project's own history points toward but has not yet taken.")
+
+    add_heading(doc, "41.10 Scaling — replicas, load balancing, shared index")
+    add_body(doc, "This project's ledgers never discuss horizontal scaling, replica counts, or load balancing — there is no scaling configuration or discussion to cite here, and this section is general production guidance rather than a description of anything this project built. The one scaling-relevant constraint worth carrying forward from earlier sections is Section 41.8's session-handling gap: any horizontal scaling plan for the LangGraph pipeline specifically has to resolve the `mark_last_bad()` statefulness problem before adding a second instance behind a load balancer, or feedback attribution will silently break for whichever fraction of requests lands on a different instance than the query that preceded it.")
+
+    add_heading(doc, "41.11 CI/CD for RAG systems")
+    add_body(doc, "There is no CI/CD configuration anywhere in this repository — no `.github/workflows/` directory, no other CI configuration of any kind. What this project does have, covered in Chapter 37.4, is a *manual* discipline that a CI pipeline would formalize: `test_output_fixes.py`'s 302-case regression suite over the JSON-repair tier, and Chapter 36C's A/B log-comparison methodology, both currently run by hand rather than gated automatically on every change. A RAG-specific CI pipeline built from this project's own tools would plausibly run the JSON-repair regression suite on every commit and require the A/B methodology's fixed query pair to pass before merging any change to a retrieval threshold — formalizing disciplines this project already practices manually into an automated gate it has not yet built.")
+
+    add_heading(doc, "41.12 From JSONL ledger to MongoDB")
+    add_body(doc, "ADR-046 is the deciding record, and its options-considered section is worth knowing because SQLite lost the comparison for a reason relevant to this project's own two-pipeline architecture: MongoDB was chosen over both an improved JSONL format and SQLite specifically because the feedback layer needed genuine concurrent-write safety across two independently running API processes — `app/api.py` and `app_workflow/api.py` writing to the same feedback store from separate processes is exactly the scenario SQLite's file-level locking handles poorly and MongoDB's client-server model handles natively. The ADR's impact statement states the cutover plainly: `interactions.jsonl`, `user_thumbdowns.json`, and `failed_variants.json` are no longer written at all; `MONGODB_URI` defaults to `mongodb://localhost:27017` and `MONGODB_DB_NAME` defaults to `rag_db`, matching literally in both `app/db.py` and `app_workflow/services/db.py`.")
+
+    add_heading(doc, "41.13 MongoDB replica sets and why multi-document transactions require them")
+    add_callout(doc, "Definition", "Replica set / oplog", "A MongoDB replica set is a group of `mongod` instances maintaining copies of the same data, coordinated through an operations log (the oplog) that records every write in order. Multi-document ACID transactions require this oplog to exist — a standalone, non-replicated `mongod` instance has no oplog at all, and therefore cannot support `session.start_transaction()` regardless of how the transaction itself is written.")
+    add_body(doc, "ADR-048 and this project's own research record the concrete reason a transaction was needed here at all: marking a thumbdown has to update the original interaction record (setting a `USER_THUMBSDOWN` flag) and insert a new entry into the thumbdowns collection (Chapter 31) as a single atomic unit — if the process crashed between the two writes, the feedback store would be left in an inconsistent state no read of it could recover from cleanly. Because this project runs MongoDB locally rather than against a managed cluster with replication already provided, it satisfies the replica-set requirement with a single-node replica set — `replSetName: \"rs0\"` in `mongod.cfg`, initiated with `rs.initiate()` using `directConnection=True` — giving the oplog transactions require without needing a second physical machine for local development.")
+    add_body(doc, "The actual code, `app_workflow/services/feedback_store.py`, wraps both writes in exactly the transaction the ADR describes:")
+    add_code(doc, '''with get_client().start_session() as session:
+    with session.start_transaction():
+        # update the original interaction (USER_THUMBSDOWN flag)
+        # insert the new thumbdown record
+        ...''')
+
+    add_heading(doc, "41.14 DuplicateKeyError as an idempotency guard for LangGraph node retries")
+    add_body(doc, "BUG-055 is this section's grounding case, and the fix it produced is worth understanding as a general pattern well beyond this one bug. A LangGraph node that writes to the feedback store can, under retry conditions covered elsewhere in this book, run more than once for what is logically the same request. A naive check-then-insert pattern — query for an existing record by `request_id`, insert only if none is found — has a race window: two near-simultaneous executions of the same retried node can both complete the check before either completes the insert, and both then insert, producing a duplicate. Figure 41.2 contrasts the two approaches directly.")
+    add_figure(doc, diagram_duplicatekey_idempotency_41(), "Figure 41.2 — A unique index converts a racy read-then-write into an insert that either succeeds once or fails loudly the second time; there is no window where both branches can win.")
+    add_body(doc, "The actual fix relies on a unique index on `request_id` rather than an application-level check at all — `insert_one()` is called directly, and MongoDB itself is the arbiter of uniqueness:")
+    add_code(doc, '''try:
+    self._interactions.insert_one(record)
+except DuplicateKeyError:
+    logger.warning(
+        "Duplicate interaction log skipped (node retry): request_id=%s",
+        request_id,
+    )
+    return''')
+    add_body(doc, "This is safer than the check-then-insert pattern precisely because there is no window between a check and a write for a second writer to slip through — the database's own unique-index constraint makes the two operations atomic from the perspective of any concurrent caller. A related bug, BUG-054, is worth knowing alongside this one: an `IndexKeySpecsConflict` arose because `app/db.py` and `app_workflow/services/db.py` created the same `request_id_1` index with mismatched `sparse` settings on each side — a reminder that an idempotency guard built on a unique index is only as reliable as every codepath that creates that index agreeing on its exact definition.")
+
+    add_heading(doc, "41.15 Migration path — copying the flat files into MongoDB")
+    add_body(doc, "ADR-046's context section names the three flat files this migration replaced and the collections they became: `interactions.jsonl` into `feedback_interactions`, `user_thumbdowns.json` into `user_thumbdowns`, and `failed_variants.json` into `failed_variants`. It is worth being precise about what this project actually built versus what a reader might assume: the ADR describes a cutover — the flat files stopped being written the moment MongoDB writes began — rather than a historical backfill tool. No dedicated migration script moving pre-existing flat-file history into the new collections exists anywhere in this codebase. A team performing this same migration on a project with feedback history worth preserving would need to write that backfill script themselves; this project's own transition simply drew a line and began writing to MongoDB going forward.")
+
+    add_heading(doc, "41.16 Per-request pipeline control")
+    add_body(doc, "Chapter 36B introduced the twenty `ENABLE_*` workflow flags as `config.py` defaults, and ADR-071 is what makes them overridable per request without a restart. `app_workflow/api.py`'s `QueryRequest` accepts an optional nested `switches` object, built from a `WorkflowSwitches` Pydantic model with all twenty flags declared as `Optional[bool] = None` — a field left unset simply means \"use the `config.py` default,\" never \"force off.\" `app_workflow/services/switches.py`'s `resolve_switches()` performs the actual merge:")
+    add_code(doc, '''def resolve_switches(overrides: dict | None) -> dict[str, bool]:
+    merged = dict(DEFAULT_SWITCHES)
+    if overrides:
+        for key, value in overrides.items():
+            if key in SWITCH_NAMES and isinstance(value, bool):
+                merged[key] = value
+    return merged''')
+    add_body(doc, "The API handler calls `switches.model_dump(exclude_none=True)` before passing overrides through, so an unset field never overwrites a default with `None` by accident — only fields the caller explicitly set participate in the merge at all. The resolved dictionary is stored directly on `GraphState` under the `switches` key at graph construction time, and `get_switches(state)` reads `state.get(\"switches\") or DEFAULT_SWITCHES` throughout the rest of the run, meaning every node in that specific request's graph execution sees the same resolved configuration without needing to re-read `config.py` or re-merge overrides itself. This is what lets one team run an A/B comparison — Chapter 36C's methodology, but live in production rather than against saved logs — by sending two requests with different `switches` payloads to the exact same running service, with no deployment or restart between them.")
+    add_body(doc, "It is worth closing this chapter on the same honest note ADR-071's own operational history includes: during the benchmark run that exercised this mechanism most heavily, the local MongoDB replica set became unavailable partway through, and the request-scoped `switches` override did nothing to isolate that failure — a per-request configuration knob changes what a request does, not whether the infrastructure it depends on stays up. Part VII closes with exactly this reminder in mind: everything this part of the book has covered — evaluation, observability, performance, deployment — makes a system legible and controllable, but none of it substitutes for the infrastructure underneath actually staying available.")
+
+    path = OUT_DIR / "Chapter_41_Deployment.docx"
+    doc.core_properties.title = f"Chapter 41 — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
+def diagram_dependency_conflict_41b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480">'
+        '<rect width="1200" height="480" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["A dependency floor conflict, isolated behind an HTTP boundary"], size=20, bold_first=True)
+        + svg_labeled_box(40, 90, 520, 150, "app_workflow/ — sentence-transformers", ["needs an older transformers/pillow", "floor to stay compatible on Python 3.14"], fill="#F2F2F2")
+        + svg_labeled_box(640, 90, 520, 150, "Marker's own stack", ["needs a newer transformers/pillow", "floor — genuinely incompatible, not just untested"], fill="#D9D9D9")
+        + svg_arrow(310, 240, 310, 276)
+        + svg_arrow(890, 240, 890, 276)
+        + svg_labeled_box(160, 278, 880, 130, "marker_service/ — a separate GPU microservice, its own container, its own dependency set", ["talks to app_workflow/ only over HTTP (POST /convert) — no shared Python process, no version conflict"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter41b_dependency_conflict", svg)
+
+
+def diagram_ingestion_matrix_41b() -> Path:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460">'
+        '<rect width="1200" height="460" fill="#FFFFFF"/>'
+        + svg_centered_text(600, 36, ["Two independent switches, resolved per call, both off by default"], size=20, bold_first=True)
+        + svg_labeled_box(40, 90, 540, 140, "ENABLE_MARKER_LOADER", ["False -> unstructure_loader.py", "True  -> marker_loader.py (PDF only)"], fill="#F2F2F2")
+        + svg_labeled_box(620, 90, 540, 140, "ENABLE_CUSTOM_SPLITTER", ["False -> recursive_splitter.py", "True  -> custom_splitter.py (Marker-aware)"], fill="#D9D9D9")
+        + svg_arrow(600, 240, 600, 276)
+        + svg_labeled_box(220, 278, 760, 130, "_resolve(override, default): return default if override is None else bool(override)", ["explicit per-call override wins; otherwise config.py's default applies"], fill="#2C3E6B", text_fill="#FFFFFF")
+        + "</svg>"
+    )
+    return svg_to_png("chapter41b_ingestion_matrix", svg)
+
+
+def build_chapter_41b() -> Path:
+    title = "Productionizing Document Conversion: The Marker Microservice and Switchable Ingestion"
+    doc = configure_document(title)
+    add_cover(doc, "41B", title, "PART VII — PRODUCTION, DEPLOYMENT, AND BEYOND", "An evaluation utility earns production status only once someone builds the boundary that lets it run safely next to everything that already depends on a different set of dependencies.")
+    add_chapter_heading(doc, "41B", title)
+    add_body(doc, "Chapter 5B evaluated Docling, Unstructured, and Marker-PDF as document-conversion engines and ended with a deliberate non-decision: ADR-072 kept all three as evaluation utilities rather than declaring any of them the authoritative ingestion path, explicitly deferring adoption pending a downstream retrieval-quality bake-off. This chapter picks that thread back up once the bake-off's answer arrived — Marker's conversion quality was worth production adoption — and covers the genuinely harder problem that decision created: Marker's own dependency stack cannot simply be installed into `app_workflow/` alongside everything else already running there.")
+    add_body(doc, "A note on sourcing before this chapter goes further: `marker_service/`, the GPU microservice this chapter describes, does not exist as tracked files in this repository's current snapshot — no `server.py`, `Dockerfile`, or `docker-compose.yml` are present to read directly, and git history confirms the directory has never been committed to this particular checkout. Everything this chapter states about its internals is sourced from three real, tracked artifacts instead: ADR-073's decision record, the 2026-07-24 entries in `docs/Status.md` and `docs/Architecture.md`, and the \"Marker PDF Service\" section of this project's own `README.md`. Where this chapter would normally quote source code directly, it quotes these ledger and README sources instead, and says so.")
+    add_body(doc, "By the end of this chapter you will be able to explain why an evaluation-only conversion engine required a separate microservice rather than a library upgrade to move into production, describe the five-module switchable ingestion package that replaced the older monolithic `ingest.py`, and know exactly which failure mode — a mixed corpus silently losing its non-PDF files — is the one real caveat that comes with turning Marker on.")
+
+    add_heading(doc, "41B.1 From evaluation to production")
+    add_body(doc, "Chapter 5B.9 closed with a specific, careful phrase this chapter is now explicitly revisiting: raw converter Markdown was \"kept as an evaluation utility, not the authoritative representation.\" That phrasing was deliberate rather than tentative — it left the door open for exactly the reversal this chapter documents, without pre-committing to it before real retrieval-quality evidence existed. ADR-072 is the record of that original caution, and ADR-073 and ADR-074 are the pair of decisions that walked through it once a Marker-backed loader was judged ready to wire into `app_workflow/` for real. The acceptance-gate checklist Chapter 5B.9 sketched — and the `assess_conversion()` function skeleton it left unimplemented — remain unbuilt as a formal automated gate; what changed is that a human judgment call, backed by the research this project's ledgers document, decided Marker had cleared that bar in practice.")
+
+    add_body(doc, "It is worth being precise about what \"a bake-off decided the question\" means here, because it is easy to over-credit this decision with more rigor than it actually had. No formal `assess_conversion()` scoring run produced a number that crossed a threshold; the decision was a human synthesis of the qualitative comparison Chapter 5B ran — Docling, Unstructured, and Marker-PDF evaluated on text-retention, structural fidelity, and downstream retrieval outcomes — combined with the practical reality that Marker's output was the one worth the engineering cost of a dedicated microservice to unlock. A reader building the same pipeline should treat this chapter's adoption as a case study in a real, defensible judgment call made without a fully automated gate, not as proof that a formal gate is unnecessary.")
+
+    add_heading(doc, "41B.2 Why Marker can't simply be pip-installed into app_workflow/")
+    add_body(doc, "Research topic 62's dependency-conflict analysis is the direct source for this section, and its finding is sharper than \"these libraries happen to be untested together\": Marker's own stack requires a newer floor version of `transformers` and `pillow` than `sentence-transformers` — the embedding backbone Chapter 8 covers and every retrieval call in this project depends on — can tolerate on Python 3.14. This is not a version-pinning inconvenience solvable by picking slightly different pinned versions; it is a genuine floor conflict, where the oldest version Marker will run on is newer than the newest version `sentence-transformers` will run on in the same interpreter.")
+    add_body(doc, "Figure 41B.1 draws the shape of the conflict and the boundary that resolves it. The resolution this project chose was not to pick a side and accept the other library's degraded compatibility — it was to refuse to run both in the same Python process at all.")
+    add_figure(doc, diagram_dependency_conflict_41b(), "Figure 41B.1 — Two genuinely incompatible dependency floors, resolved by removing the shared process rather than by choosing a compromise version.")
+
+    add_heading(doc, "41B.3 Isolating Marker as a GPU microservice")
+    add_body(doc, "Per ADR-073 and the Architecture ledger's description, `marker_service/` runs as a standalone FastAPI application exposing exactly two routes: `POST /convert` and `GET /health`. The project's own `README.md` documents the contract precisely — `GET /health` returns `{status, ready, cuda}`, and `POST /convert` returns `{markdown, source, chars}`. A single `PdfConverter` instance is built once at process boot, dispatched through `asyncio.to_thread` so the boot-time model load doesn't block the FastAPI event loop, and every subsequent conversion request is serialized behind a `threading.Lock` — Marker's underlying model is not safe for concurrent use from multiple requests at once, so the lock trades conversion throughput for correctness rather than risking two simultaneous conversions corrupting each other's state.")
+
+    add_heading(doc, "41B.4 What the container has to reproduce that the host got for free")
+    add_body(doc, "Research topic 62 and the 2026-07-24 architecture entry both stress that this microservice's Dockerfile is not a generic Python container — it has to rebuild several things a developer's host machine already had installed for unrelated reasons. A CUDA 13.0-provenance torch build has to be pinned explicitly rather than relying on whatever torch a base image happens to ship. `download_font()`, a Marker-internal call that normally runs lazily on first use, has to be pre-seeded at build time so a cold container doesn't stall its first real request fetching font assets over the network. The Triton JIT toolchain Marker's model-compilation path depends on needs `gcc` and `libc6-dev` present in the container image — both entirely invisible dependencies on a Windows development host, where neither package exists in any meaningful sense, and both easy to forget when writing a Dockerfile from a Windows-based development environment. Finally, a persistent model-cache volume has to be mounted so the (large) downloaded model weights survive a container restart rather than re-downloading on every boot.")
+
+    add_heading(doc, "41B.5 The pdftext multi-worker abort (BUG-077)")
+    add_callout(doc, "Definition", "BUG-077 — pdftext multi-worker abort", "Marker's underlying `pdftext` library defaults to a multi-worker extraction pool for PDF text extraction. On PDFs longer than roughly 40 pages, one worker process in that pool would occasionally die, and — because the pool had no fallback for a dead worker — the entire conversion aborted rather than degrading gracefully to the workers that were still alive.")
+    add_body(doc, "The bug ledger records this as closed, mitigated by configuration rather than by a code change to `pdftext` itself: forcing `pdftext_workers=1` in `marker_service/server.py`'s `_CONVERTER_CONFIG` eliminates the multi-worker pool entirely, trading extraction parallelism within a single conversion for reliability on long documents. This exact setting matches Marker's own CLI and server defaults for single-conversion-at-a-time deployments — this project's fix is not a workaround so much as an alignment with how Marker's own maintainers already recommend running it outside a high-throughput batch context. Worth noting for continuity: the bug ledger records that `server.py`'s own comments informally referred to this issue as \"BUG-025,\" a name collision with an unrelated, differently numbered bug elsewhere in the project — the canonical, correctly disambiguated reference is BUG-077.")
+
+    add_heading(doc, "41B.6 The five-module switchable ingestion package")
+    add_body(doc, "ADR-074 records the replacement of the older monolithic `ingest.py` with a five-module package under `app_workflow/ingestion/`: `ingestion_requests.py` (file discovery and the `run_ingestion()` coordinator), `marker_loader.py` (the HTTP client to `marker_service/`), `unstructure_loader.py` (the pre-existing Unstructured-based loader, kept as the default path), `custom_splitter.py` (a Marker-Markdown-aware structural splitter, including table re-serialization logic, at 1,409 lines the largest module in the package), and `recursive_splitter.py` (a smaller, generic recursive text splitter used when the custom splitter is off). Splitting a single large `ingest.py` into five focused modules is what makes Section 41B.7's independent-switch design practical — each axis of the loader × splitter matrix maps to swapping in one module for another, rather than branching deep inside one large function.")
+
+    add_heading(doc, "41B.7 The loader x splitter matrix")
+    add_body(doc, "`ENABLE_MARKER_LOADER` and `ENABLE_CUSTOM_SPLITTER` are two entirely independent boolean flags in `config.py`, both defaulting to `False`, and `ingestion_requests.py`'s `_resolve()` function is the small, precise piece of logic that governs how a per-call override interacts with each default:")
+    add_code(doc, '''def _resolve(override, default):
+    return default if override is None else bool(override)''')
+    add_body(doc, "`run_ingestion(enable_marker_loader=None, enable_custom_splitter=None)` calls `_resolve()` independently for each flag, meaning a caller can override either one, both, or neither, without the two interacting — turning on the Marker loader does not implicitly turn on the custom splitter, and vice versa. Figure 41B.2 lays the resulting matrix out explicitly.")
+    add_figure(doc, diagram_ingestion_matrix_41b(), "Figure 41B.2 — Two independent switches produce four real ingestion configurations; _resolve() is the same three-line logic applied twice, once per axis.")
+    add_body(doc, "Both flags defaulting to `False` is a deliberate conservatism, consistent with Chapter 36B's broader pattern of feature flags shipping off until evidence justifies flipping them: the Unstructured loader and the generic recursive splitter remain the safe, well-exercised default path, and a caller has to explicitly opt into the newer Marker-backed loader or the custom structural splitter rather than inheriting them by default the moment the code merges.")
+
+    add_heading(doc, "41B.8 In-memory loading end to end")
+    add_body(doc, "Before this switchable package existed, document conversion routinely persisted intermediate Markdown or JSON files to disk between the conversion step and the chunking step — a reasonable design when conversion was a slow, standalone script run ahead of ingestion. Once Marker runs over HTTP as a request/response service rather than a local script, and once tabular data converts directly to JSON in memory rather than through an intermediate file format, that persisted-intermediate-file step became unnecessary rather than merely inconvenient: `marker_loader.py`'s HTTP client receives Markdown text directly in the response body and hands it straight to the splitter, and the entire loader-to-splitter path for a document can run without ever touching disk for anything beyond the original source file and the final vector-store write.")
+
+    add_heading(doc, "41B.9 The POST /ingest endpoint")
+    add_body(doc, "`app_workflow/api.py` exposes ingestion itself as an HTTP endpoint, not just a standalone script. Its `IngestRequest` model is deliberately minimal — exactly two optional fields, `ENABLE_MARKER_LOADER: Optional[bool] = None` and `ENABLE_CUSTOM_SPLITTER: Optional[bool] = None` — mirroring Section 41B.7's per-call override pattern at the API boundary. The handler wraps the entire `run_ingestion()` call in `asyncio.to_thread(...)`, the same pattern Section 41.1 covered for keeping a long-running blocking call from stalling the FastAPI event loop, and returns the run-summary contract `run_ingestion()` itself produces: `files_discovered`, `documents_loaded`, `chunks_created`, and `documents_in_store` — four numbers that let a caller verify an ingestion run actually processed what it was expected to, without needing to separately query the vector store afterward.")
+
+    add_code(doc, '''{
+  "files_discovered": 42,
+  "documents_loaded": 42,
+  "chunks_created": 613,
+  "documents_in_store": 613,
+  "marker_loader": true,
+  "custom_splitter": true
+}''')
+    add_body(doc, "The response also echoes back the two resolved boolean flags themselves — `marker_loader` and `custom_splitter` — which matters for exactly the reason Section 41B.7's `_resolve()` logic exists: a caller who sent no override at all still needs a way to confirm which path `config.py`'s defaults actually routed the request through, rather than assuming its own request payload was the only source of truth for what ran.")
+
+    add_heading(doc, "41B.10 The PDF-only loader caveat")
+    add_callout(doc, "Common pitfall", "Turning on ENABLE_MARKER_LOADER against a mixed corpus", "`marker_loader.py` filters its input list to PDFs only, in code that is unambiguous about what happens to everything else: `_PDF_EXT = {\".pdf\"}`, followed by `pdf_paths = [Path(fp) for fp in file_paths if Path(fp).suffix.lower() in _PDF_EXT]`. Every non-PDF file in the batch is silently dropped from that ingestion run — not errored, not logged as skipped in a way that stands out, simply absent from what gets processed.")
+    add_body(doc, "This matters because a corpus mixing PDFs with `.docx`, `.md`, or `.txt` files — a realistic shape for many real document collections — will silently lose every non-PDF file the moment `ENABLE_MARKER_LOADER=True` is set, with the run-summary's `documents_loaded` count being the only signal something was dropped, and even that only if an operator is specifically comparing it against `files_discovered`. Two honest ways to handle a mixed corpus follow directly from this constraint: fall back to `unstructure_loader.py` (the default, non-PDF-restricted path) for the whole batch, accepting Marker's better PDF conversion quality is unavailable this run, or run a two-pass ingestion — one pass with the Marker loader for the PDF subset, a second pass with the Unstructured loader for everything else — accepting the added operational complexity of coordinating two separate ingestion calls against the same corpus.")
+
+    add_heading(doc, "41B.11 What stayed constant")
+    add_body(doc, "It is worth closing this chapter by naming what this entire subsystem did not touch, because the scope discipline itself is part of the lesson. `app/ingest.py` and the original LangChain pipeline it feeds are completely untouched by everything this chapter covers — no cross-imports exist between `app/` and the new `app_workflow/ingestion/` package, confirmed directly by grep across both trees. This entire microservice-and-switchable-loader subsystem is scoped exclusively to `app_workflow/`, the same LangGraph pipeline Chapter 41.2 covered running on port 8001. A reader working only in `app/` never needs any of this chapter's material to keep that pipeline running exactly as it always has.")
+    add_body(doc, "This closes Part VII. The book has now covered evaluation, observability, performance, deployment, and the last production-hardening subsystem this project built — a document-conversion engine that started as an evaluation-only comparison in Chapter 5B and ended, several chapters and one dependency-isolation microservice later, as a switchable, opt-in production path. Part VIII turns from a single agent's pipeline to a genuinely different problem: coordinating multiple coding-agent CLIs working together.")
+
+    path = OUT_DIR / "Chapter_41B_Productionizing_Document_Conversion.docx"
+    doc.core_properties.title = f"Chapter 41B — {title}"
+    doc.core_properties.subject = "Self-Learning Agentic RAG System"
+    doc.core_properties.author = ""
+    doc.save(path)
+    return path
+
+
 BUILDERS = {
+    "41B": build_chapter_41b,
+    41: build_chapter_41,
+    39: build_chapter_39,
+    38: build_chapter_38,
+    37: build_chapter_37,
+    "36C": build_chapter_36c,
+    "36B": build_chapter_36b,
+    36: build_chapter_36,
+    35: build_chapter_35,
+    34: build_chapter_34,
+    33: build_chapter_33,
+    32: build_chapter_32,
+    31: build_chapter_31,
+    30: build_chapter_30,
+    29: build_chapter_29,
     27: build_chapter_27,
     26: build_chapter_26,
     25: build_chapter_25,
